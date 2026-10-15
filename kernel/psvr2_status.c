@@ -27,8 +27,10 @@ struct psvr2_status {
 	u8			*buf;
 	size_t			buf_size;
 
+	struct dentry		*raw_dentry;
+
 	/* Snapshot of the most recent raw frame, for debugfs. */
-	struct mutex		raw_lock;
+	spinlock_t		raw_lock;	/* taken from URB completion */
 	u8			*raw_copy;
 	size_t			raw_len;
 };
@@ -78,6 +80,7 @@ static void psvr2_status_complete(struct urb *urb)
 {
 	struct psvr2_status *st = urb->context;
 	s64 now_ns = ktime_get_ns();
+	unsigned long flags;
 	int ret;
 
 	switch (urb->status) {
@@ -93,10 +96,10 @@ static void psvr2_status_complete(struct urb *urb)
 	}
 
 	if (urb->actual_length) {
-		mutex_lock(&st->raw_lock);
+		spin_lock_irqsave(&st->raw_lock, flags);
 		memcpy(st->raw_copy, st->buf, urb->actual_length);
 		st->raw_len = urb->actual_length;
-		mutex_unlock(&st->raw_lock);
+		spin_unlock_irqrestore(&st->raw_lock, flags);
 
 		psvr2_status_process(st, urb->actual_length, now_ns);
 	}
@@ -113,6 +116,7 @@ static ssize_t psvr2_raw_status_read(struct file *file, char __user *user_buf,
 {
 	struct psvr2_status *st = file->private_data;
 	ssize_t ret;
+	unsigned long flags;
 	void *snap;
 	size_t len;
 
@@ -120,10 +124,10 @@ static ssize_t psvr2_raw_status_read(struct file *file, char __user *user_buf,
 	if (!snap)
 		return -ENOMEM;
 
-	mutex_lock(&st->raw_lock);
+	spin_lock_irqsave(&st->raw_lock, flags);
 	len = st->raw_len;
 	memcpy(snap, st->raw_copy, len);
-	mutex_unlock(&st->raw_lock);
+	spin_unlock_irqrestore(&st->raw_lock, flags);
 
 	ret = simple_read_from_buffer(user_buf, count, ppos, snap, len);
 	kfree(snap);
@@ -151,7 +155,7 @@ int psvr2_status_start(struct psvr2_device *psvr2, struct usb_interface *intf)
 	st->psvr2 = psvr2;
 	st->udev = udev;
 	st->buf_size = PSVR2_STATUS_XFER_SIZE;
-	mutex_init(&st->raw_lock);
+	spin_lock_init(&st->raw_lock);
 
 	ret = usb_set_interface(udev, PSVR2_IF_STATUS, PSVR2_STATUS_ALT);
 	if (ret) {
@@ -193,8 +197,9 @@ int psvr2_status_start(struct psvr2_device *psvr2, struct usb_interface *intf)
 		goto err_buffers;
 	}
 
-	debugfs_create_file("raw_status", 0400, psvr2->debugfs_dir, st,
-			    &psvr2_raw_status_fops);
+	st->raw_dentry = debugfs_create_file("raw_status", 0400,
+					     psvr2->debugfs_dir, st,
+					     &psvr2_raw_status_fops);
 
 	psvr2->status = st;
 	return 0;
@@ -206,7 +211,6 @@ err_buffers:
 	usb_free_urb(st->urb);
 	kfree(st->raw_copy);
 err_free:
-	mutex_destroy(&st->raw_lock);
 	kfree(st);
 	return ret;
 }
@@ -223,7 +227,7 @@ void psvr2_status_stop(struct psvr2_device *psvr2)
 	usb_free_coherent(st->udev, st->buf_size, st->buf,
 			  st->urb->transfer_dma);
 	usb_free_urb(st->urb);
+	debugfs_remove(st->raw_dentry);
 	kfree(st->raw_copy);
-	mutex_destroy(&st->raw_lock);
 	kfree(st);
 }

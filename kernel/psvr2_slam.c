@@ -52,7 +52,7 @@ struct psvr2_slam {
 
 	/* Snapshot of the most recent raw record, for debugfs. */
 	struct dentry		*raw_dentry;
-	struct mutex		raw_lock;
+	spinlock_t		raw_lock;	/* taken from URB completion */
 	u8			*raw_copy;
 	size_t			raw_len;
 };
@@ -150,6 +150,7 @@ static ssize_t psvr2_raw_slam_read(struct file *file, char __user *ubuf,
 {
 	struct psvr2_slam *sl = file->private_data;
 	ssize_t ret;
+	unsigned long flags;
 	void *snap;
 	size_t len;
 
@@ -157,10 +158,10 @@ static ssize_t psvr2_raw_slam_read(struct file *file, char __user *ubuf,
 	if (!snap)
 		return -ENOMEM;
 
-	mutex_lock(&sl->raw_lock);
+	spin_lock_irqsave(&sl->raw_lock, flags);
 	len = sl->raw_len;
 	memcpy(snap, sl->raw_copy, len);
-	mutex_unlock(&sl->raw_lock);
+	spin_unlock_irqrestore(&sl->raw_lock, flags);
 
 	ret = simple_read_from_buffer(ubuf, count, ppos, snap, len);
 	kfree(snap);
@@ -191,10 +192,10 @@ static void psvr2_slam_process(struct psvr2_slam *sl, int len)
 	 * Monado driver likewise reads the fields by offset without checking it.
 	 * Field offsets are known-good (pos at +16, orient at +28).
 	 */
-	mutex_lock(&sl->raw_lock);
+	spin_lock_irqsave(&sl->raw_lock, flags);
 	memcpy(sl->raw_copy, sl->buf, PSVR2_SLAM_RECORD_SIZE);
 	sl->raw_len = PSVR2_SLAM_RECORD_SIZE;
-	mutex_unlock(&sl->raw_lock);
+	spin_unlock_irqrestore(&sl->raw_lock, flags);
 
 	memset(&sample, 0, sizeof(sample));
 	sample.timestamp_ns = ktime_get_ns();
@@ -256,7 +257,7 @@ int psvr2_slam_start(struct psvr2_device *psvr2, struct usb_interface *intf)
 	sl->udev = udev;
 	sl->buf_size = PSVR2_SLAM_XFER_SIZE;
 	spin_lock_init(&sl->fifo_lock);
-	mutex_init(&sl->raw_lock);
+	spin_lock_init(&sl->raw_lock);
 	init_waitqueue_head(&sl->readq);
 
 	ret = kfifo_alloc(&sl->fifo, PSVR2_POSE_FIFO_DEPTH, GFP_KERNEL);
@@ -330,7 +331,6 @@ err_urb:
 err_fifo:
 	kfifo_free(&sl->fifo);
 err_free:
-	mutex_destroy(&sl->raw_lock);
 	kfree(sl);
 	return ret;
 }
@@ -351,7 +351,6 @@ void psvr2_slam_stop(struct psvr2_device *psvr2)
 
 	debugfs_remove(sl->raw_dentry);
 	kfree(sl->raw_copy);
-	mutex_destroy(&sl->raw_lock);
 
 	/* No new opens; wake any blocked readers so they observe EOF. */
 	misc_deregister(&sl->miscdev);

@@ -51,7 +51,7 @@ struct psvr2_gaze {
 	bool			dead;
 
 	struct dentry		*raw_dentry;
-	struct mutex		raw_lock;
+	spinlock_t		raw_lock;	/* taken from URB completion */
 	u8			*raw_copy;
 	size_t			raw_len;
 };
@@ -162,6 +162,7 @@ static ssize_t psvr2_raw_gaze_read(struct file *file, char __user *ubuf,
 {
 	struct psvr2_gaze *gz = file->private_data;
 	ssize_t ret;
+	unsigned long flags;
 	void *snap;
 	size_t len;
 
@@ -169,10 +170,10 @@ static ssize_t psvr2_raw_gaze_read(struct file *file, char __user *ubuf,
 	if (!snap)
 		return -ENOMEM;
 
-	mutex_lock(&gz->raw_lock);
+	spin_lock_irqsave(&gz->raw_lock, flags);
 	len = gz->raw_len;
 	memcpy(snap, gz->raw_copy, len);
-	mutex_unlock(&gz->raw_lock);
+	spin_unlock_irqrestore(&gz->raw_lock, flags);
 
 	ret = simple_read_from_buffer(ubuf, count, ppos, snap, len);
 	kfree(snap);
@@ -215,10 +216,10 @@ static void psvr2_gaze_process(struct psvr2_gaze *gz, int len)
 	    memcmp(st->header, PSVR2_GAZE_HDR_MAGIC, 2) != 0)
 		return;
 
-	mutex_lock(&gz->raw_lock);
+	spin_lock_irqsave(&gz->raw_lock, flags);
 	memcpy(gz->raw_copy, gz->buf, sizeof(*st));
 	gz->raw_len = sizeof(*st);
-	mutex_unlock(&gz->raw_lock);
+	spin_unlock_irqrestore(&gz->raw_lock, flags);
 
 	memset(&sample, 0, sizeof(sample));
 	sample.timestamp_ns = ktime_get_ns();
@@ -290,7 +291,7 @@ int psvr2_gaze_start(struct psvr2_device *psvr2, struct usb_interface *intf)
 	gz->udev = udev;
 	gz->buf_size = PSVR2_GAZE_XFER_SIZE;
 	spin_lock_init(&gz->fifo_lock);
-	mutex_init(&gz->raw_lock);
+	spin_lock_init(&gz->raw_lock);
 	init_waitqueue_head(&gz->readq);
 	INIT_DELAYED_WORK(&gz->keepalive, psvr2_gaze_keepalive);
 
@@ -373,7 +374,6 @@ err_urb:
 err_fifo:
 	kfifo_free(&gz->fifo);
 err_free:
-	mutex_destroy(&gz->raw_lock);
 	kfree(gz);
 	return ret;
 }
@@ -399,7 +399,6 @@ void psvr2_gaze_stop(struct psvr2_device *psvr2)
 
 	debugfs_remove(gz->raw_dentry);
 	kfree(gz->raw_copy);
-	mutex_destroy(&gz->raw_lock);
 
 	misc_deregister(&gz->miscdev);
 	gz->dead = true;

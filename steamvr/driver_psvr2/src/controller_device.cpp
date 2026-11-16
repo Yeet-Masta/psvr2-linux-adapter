@@ -16,25 +16,18 @@ using Clock = std::chrono::steady_clock;
 constexpr double kDeg = 3.14159265358979323846 / 180.0;
 constexpr auto kOutputPeriod = std::chrono::microseconds( 10667 );  // 32 PCM samples at 3 kHz
 constexpr auto kRecenterHold = std::chrono::milliseconds( 1000 );
+constexpr auto kCalibrateHold = std::chrono::milliseconds( 3000 );
 
 vr::HmdQuaternion_t RotX( double deg )
 {
 	return vrmath::AxisAngle( 1, 0, 0, deg * kDeg );
 }
 
-// Grip pose in the IMU frame. Chain and constants from Monado's pssense
-// driver (pssense_led_model.h, pssense_get_tracked_pose): IMU-in-LED frame,
-// the SteamVR model root in the LED frame, and the grip in the model root.
-vrmath::Pose ImuToGrip( bool left )
-{
-	const double sx = left ? 1.0 : -1.0;
-	const vrmath::Pose imu_in_led{ RotX( -50.2703 ),
-		                           { left ? 0.0093727 : -0.0200727, -0.0122481, -0.0060039 } };
-	const vrmath::Pose model_in_root{ RotX( -39.0 ), { -sx * 0.01432, 0.007713, 0.10399 } };
-	const vrmath::Pose grip_in_root{ RotX( 20.6 ), { sx * 0.007, -0.00182941, 0.1019482 } };
-	return vrmath::Compose( vrmath::Compose( vrmath::Invert( imu_in_led ), vrmath::Invert( model_in_root ) ),
-	                        grip_in_root );
-}
+// Grip orientation in the IMU frame. The IMU is mounted tilted; Monado's
+// pssense driver rotates the fused orientation up 60 degrees about X when it
+// runs IMU-only, and so do we. The per-controller calibration (hold the menu
+// button for three seconds) corrects whatever is left.
+const vr::HmdQuaternion_t kImuToGrip = RotX( 60.0 );
 
 // Arm model, headset-yaw frame: shoulder below/beside the head, elbow hangs
 // below the shoulder, forearm follows the controller orientation.
@@ -61,6 +54,7 @@ Psvr2ControllerDriver::Psvr2ControllerDriver( bool left, Psvr2HmdDriver *hmd )
 	vr::EVRSettingsError err = vr::VRSettingsError_None;
 	const bool enhanced = vr::VRSettings()->GetBool( "driver_psvr2", "enhanced_haptics", &err );
 	enhanced_haptics_ = err == vr::VRSettingsError_None ? enhanced : true;
+	LoadCalibration();
 
 	pose_.qWorldFromDriverRotation.w = 1.0;
 	pose_.qDriverFromHeadRotation.w = 1.0;
@@ -219,6 +213,43 @@ void Psvr2ControllerDriver::Recenter()
 	recenter_requested_ = true;
 }
 
+void Psvr2ControllerDriver::Pulse( double seconds )
+{
+	std::lock_guard<std::mutex> lock( out_mutex_ );
+	haptic_amplitude_ = 0.6f;
+	haptic_frequency_ = 160.0f;
+	haptic_end_ = Clock::now() + std::chrono::duration_cast<Clock::duration>( std::chrono::duration<double>( seconds ) );
+}
+
+std::string Psvr2ControllerDriver::CalibrationKey( char axis ) const
+{
+	return std::string( left_ ? "left" : "right" ) + "_calibration_" + axis;
+}
+
+void Psvr2ControllerDriver::LoadCalibration()
+{
+	double q[4];
+	const char axes[4] = { 'w', 'x', 'y', 'z' };
+	for ( int i = 0; i < 4; i++ )
+	{
+		vr::EVRSettingsError err = vr::VRSettingsError_None;
+		q[i] = vr::VRSettings()->GetFloat( "driver_psvr2", CalibrationKey( axes[i] ).c_str(), &err );
+		if ( err != vr::VRSettingsError_None )
+			return;
+	}
+	const vr::HmdQuaternion_t c{ q[0], q[1], q[2], q[3] };
+	if ( c.w * c.w + c.x * c.x + c.y * c.y + c.z * c.z > 0.5 )
+		calibration_ = vrmath::Normalize( c );
+}
+
+void Psvr2ControllerDriver::SaveCalibration()
+{
+	const double q[4] = { calibration_.w, calibration_.x, calibration_.y, calibration_.z };
+	const char axes[4] = { 'w', 'x', 'y', 'z' };
+	for ( int i = 0; i < 4; i++ )
+		vr::VRSettings()->SetFloat( "driver_psvr2", CalibrationKey( axes[i] ).c_str(), float( q[i] ) );
+}
+
 void Psvr2ControllerDriver::FillOutput( SenseOutput &out )
 {
 	std::lock_guard<std::mutex> lock( out_mutex_ );
@@ -283,14 +314,29 @@ void Psvr2ControllerDriver::HandleState( const SenseState &s )
 	SetBool( stick_click_, s.stick_click );
 	SetBool( stick_touch_, s.stick_touch || s.stick_click );
 
-	// Hold create/options for a second to recenter this controller.
+	// Hold create/options: after one second recenter the heading, after three
+	// calibrate the full orientation. A short buzz confirms each step.
 	const auto now = Clock::now();
 	if ( s.menu_click && !menu_was_down_ )
-		menu_down_since_ = now;
-	if ( s.menu_click && menu_was_down_ && now - menu_down_since_ >= kRecenterHold )
 	{
-		recenter_requested_ = true;
-		menu_down_since_ = now + std::chrono::hours( 1 );  // once per hold
+		menu_down_since_ = now;
+		menu_stage_ = 0;
+	}
+	if ( s.menu_click && menu_was_down_ )
+	{
+		const auto held = now - menu_down_since_;
+		if ( menu_stage_ == 0 && held >= kRecenterHold )
+		{
+			recenter_requested_ = true;
+			Pulse( 0.06 );
+			menu_stage_ = 1;
+		}
+		else if ( menu_stage_ == 1 && held >= kCalibrateHold )
+		{
+			calibrate_requested_ = true;
+			Pulse( 0.3 );
+			menu_stage_ = 2;
+		}
 	}
 	menu_was_down_ = s.menu_click;
 
@@ -302,7 +348,7 @@ void Psvr2ControllerDriver::HandleState( const SenseState &s )
 		vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DeviceIsCharging_Bool, charging_ );
 	}
 
-	gyro_world_ = vrmath::Rotate( fusion_.Orientation(), s.gyro );
+	gyro_world_ = vrmath::Rotate( fusion_.Orientation(), fusion_.Unbiased( s.gyro ) );
 }
 
 vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
@@ -320,11 +366,21 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 		return p;
 	}
 
-	static const vrmath::Pose kImuToGrip[2] = { ImuToGrip( false ), ImuToGrip( true ) };
-	const vrmath::Pose &imu_to_grip = kImuToGrip[left_ ? 1 : 0];
-
 	const double head_yaw = vrmath::Yaw( head.qRotation );
-	const vr::HmdQuaternion_t raw_grip = vrmath::Mul( fusion_.Orientation(), imu_to_grip.rot );
+	const vr::HmdQuaternion_t mounted = vrmath::Mul( fusion_.Orientation(), kImuToGrip );
+
+	// Calibration: the user points the controller straight ahead and level.
+	// Store the rotation that takes the current grip to a level, heading-only
+	// orientation; it is a fixed offset in the controller frame.
+	if ( calibrate_requested_.exchange( false ) )
+	{
+		calibration_ = vrmath::Normalize(
+			vrmath::Mul( vrmath::Conj( mounted ), vrmath::AxisAngle( 0, 1, 0, vrmath::Yaw( mounted ) ) ) );
+		SaveCalibration();
+		recenter_requested_ = true;
+		DriverLog( "psvr2: %s controller calibrated", left_ ? "left" : "right" );
+	}
+	const vr::HmdQuaternion_t raw_grip = vrmath::Mul( mounted, calibration_ );
 
 	// The IMU has no heading reference: line it up with the headset on the
 	// first pose and whenever recentering is requested.

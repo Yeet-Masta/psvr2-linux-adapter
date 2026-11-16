@@ -22,8 +22,12 @@ driver is pure userspace and consumes the kernel module's device nodes through
   finger proximity, battery, PCM haptics or classic rumble, and adaptive
   triggers. **Orientation is 3DoF from the controller IMU; position is an arm
   model** (see [Known limitations](#known-limitations)). Hold Create (left) or
-  Options (right) for a second to point that controller's forward along your
-  view again.
+  Options (right) while pointing the controller straight ahead and level:
+  - after 1 s (short buzz) its heading is lined up with your view again;
+  - keep holding to 3 s (long buzz) to also calibrate its tilt. The
+    calibration is saved per controller in the `driver_psvr2` settings
+    section (`left_calibration_*` / `right_calibration_*`); delete those keys
+    to reset it.
 - **PSVR2 Toolkit IPC** — a compatible server on `127.0.0.1:3364`, so software
   written for PSVR2 Toolkit (VRCFT modules, game mods) gets gaze, eye openness
   and adaptive trigger effects. `scripts/toolkit-ipc-test.py` exercises it.

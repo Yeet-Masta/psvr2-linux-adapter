@@ -51,6 +51,7 @@ public:
 	void SetTriggerEffect( const TriggerEffect &fx );
 
 	// Point the controller's forward along the headset's forward.
+	// Holding the menu button does the same (1 s), or calibrates (3 s).
 	void Recenter();
 
 private:
@@ -58,6 +59,10 @@ private:
 	void HandleState( const SenseState &s );
 	void FillOutput( SenseOutput &out );
 	vr::DriverPose_t BuildPose();
+	void Pulse( double seconds );
+	std::string CalibrationKey( char axis ) const;
+	void LoadCalibration();
+	void SaveCalibration();
 	void Disconnected();
 
 	const bool left_;
@@ -90,7 +95,12 @@ private:
 	bool yaw_anchored_ = false;
 	std::chrono::steady_clock::time_point menu_down_since_{};
 	bool menu_was_down_ = false;
+	int menu_stage_ = 0;
 	std::atomic<bool> recenter_requested_{ false };
+	std::atomic<bool> calibrate_requested_{ false };
+	// Orientation fix in the controller frame, from the hold-to-calibrate
+	// gesture; persisted in the driver_psvr2 settings section.
+	vr::HmdQuaternion_t calibration_ = vrmath::Identity();
 
 	std::mutex pose_mutex_;
 	vr::DriverPose_t pose_{};

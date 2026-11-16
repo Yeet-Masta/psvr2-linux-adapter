@@ -2,7 +2,8 @@
 // 3DoF orientation from gyro + accelerometer (Mahony complementary filter).
 //
 // The filter frame has +Y opposite to gravity; yaw is relative to the
-// orientation at the first sample and drifts slowly, so callers re-anchor yaw
+// orientation at the first sample and drifts slowly, so callers re-anchor yaw. Gyro bias is learned whenever the
+// sensor is still
 // (see controller_device.cpp).
 #pragma once
 
@@ -19,8 +20,17 @@ public:
 		if ( dt <= 0.0 || dt > 0.1 )
 			dt = 0.0;
 
-		vrmath::Vec3 w = gyro;
 		const double an = std::sqrt( accel.x * accel.x + accel.y * accel.y + accel.z * accel.z );
+
+		// Learn the gyro bias while the controller is held still: the rate is
+		// small and the accelerometer reads only gravity.
+		const vrmath::Vec3 db{ gyro.x - bias_.x, gyro.y - bias_.y, gyro.z - bias_.z };
+		if ( std::fabs( an - 9.81 ) < 0.5 && db.x * db.x + db.y * db.y + db.z * db.z < kStillRate * kStillRate )
+		{
+			const double k = bias_samples_ < 200 ? 1.0 / ++bias_samples_ : kBiasRate;
+			bias_ = vrmath::Add( bias_, vrmath::Scale( db, k ) );
+		}
+		vrmath::Vec3 w{ gyro.x - bias_.x, gyro.y - bias_.y, gyro.z - bias_.z };
 
 		if ( !initialized_ )
 		{
@@ -49,6 +59,7 @@ public:
 	}
 
 	bool Initialized() const { return initialized_; }
+	vrmath::Vec3 Unbiased( const vrmath::Vec3 &gyro ) const { return { gyro.x - bias_.x, gyro.y - bias_.y, gyro.z - bias_.z }; }
 	const vr::HmdQuaternion_t &Orientation() const { return q_; }
 
 private:
@@ -61,7 +72,12 @@ private:
 		return vrmath::Normalize( { 1.0 + d, c.x, c.y, c.z } );
 	}
 
-	static constexpr double kGain = 1.0;  // rad/s per unit tilt error
+	static constexpr double kGain = 1.0;         // rad/s per unit tilt error
+	static constexpr double kStillRate = 0.08;   // rad/s, below this counts as still
+	static constexpr double kBiasRate = 0.002;   // per-sample bias update once settled
+
+	vrmath::Vec3 bias_;
+	int bias_samples_ = 0;
 
 	vr::HmdQuaternion_t q_ = vrmath::Identity();
 	bool initialized_ = false;

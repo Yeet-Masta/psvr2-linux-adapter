@@ -139,28 +139,16 @@ bool SenseHid::ReadCalibration()
 		}
 	}
 
-	// Scale/bias derivation as in Monado's parse_pssense_calibration.
-	double ref = ( double( cal.gyro_speed_ref1 ) + double( cal.gyro_speed_ref2 ) ) * 0.5 * kPi / 180.0;
-	if ( !( ref > 0.0 ) )
-		ref = kPi * 3.0;
-
-	gyro_bias_ = { double( cal.gyro_bias_x ), double( cal.gyro_bias_y ), double( cal.gyro_bias_z ) };
-	auto span = []( int16_t plus, int16_t minus, double bias ) {
-		const double s = ( std::fabs( plus - bias ) + std::fabs( minus - bias ) ) * 0.5;
-		return s > 0.0 ? s : 1.0;
-	};
-	gyro_scale_ = { ref / span( cal.gyro_plus_x, cal.gyro_minus_x, gyro_bias_.x ),
-	                ref / span( cal.gyro_plus_y, cal.gyro_minus_y, gyro_bias_.y ),
-	                ref / span( cal.gyro_plus_z, cal.gyro_minus_z, gyro_bias_.z ) };
-
-	accel_bias_ = { ( cal.accel_plus_x + cal.accel_minus_x ) * 0.5, ( cal.accel_plus_y + cal.accel_minus_y ) * 0.5,
-	                ( cal.accel_plus_z + cal.accel_minus_z ) * 0.5 };
-	auto ascale = []( int16_t plus, double bias ) {
-		const double d = plus - bias;
-		return d != 0.0 ? kGravity / d : 1.0;
-	};
-	accel_scale_ = { ascale( cal.accel_plus_x, accel_bias_.x ), ascale( cal.accel_plus_y, accel_bias_.y ),
-	                 ascale( cal.accel_plus_z, accel_bias_.z ) };
+	// Reading the report is what switches the controller to full mode. Its
+	// layout is not known (Monado does not parse it either), so use the fixed
+	// sensor scales Monado's pssense driver uses; ImuFusion learns gyro bias.
+	(void)cal;
+	gyro_bias_ = {};
+	accel_bias_ = {};
+	const double g = 180.0 / 1024.0 * kPi / 180.0;  // rad/s per LSB
+	const double a = kGravity / 4096.0;             // m/s^2 per LSB
+	gyro_scale_ = { g, g, g };
+	accel_scale_ = { a, a, a };
 	return true;
 }
 

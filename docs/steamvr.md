@@ -12,10 +12,25 @@ driver is pure userspace and consumes the kernel module's device nodes through
   running on your other monitors.
 - **Head tracking** — 6DoF pose from the headset's onboard tracker, delivered in
   the correct OpenVR frame.
-- **In progress** — accurate per-eye FOV and a lens **distortion mesh** are
-  placeholders today (the image is visible and tracks, but without lens
-  correction); in-headset spatial calibration and eye-tracking/controller
-  exposure are not done yet. See [Known limitations](#known-limitations).
+- **Lenses** — Sony's lens model (ported from Monado) with this headset's own
+  calibration block, read through the `lens_calibration` sysfs attribute, plus
+  the asymmetric per-eye FOV. The IPD comes from the headset's dial.
+- **Eye tracking** — combined gaze on the HMD's `/eyetracking` component, so
+  OpenXR apps get `XR_EXT_eye_gaze_interaction` through SteamVR.
+- **Sense controllers** — paired over Bluetooth (or on USB), found
+  automatically, reconnect at any time: every button, capacitive touch and
+  finger proximity, battery, PCM haptics or classic rumble, and adaptive
+  triggers. **Orientation is 3DoF from the controller IMU; position is an arm
+  model** (see [Known limitations](#known-limitations)). Hold Create (left) or
+  Options (right) for a second to point that controller's forward along your
+  view again.
+- **PSVR2 Toolkit IPC** — a compatible server on `127.0.0.1:3364`, so software
+  written for PSVR2 Toolkit (VRCFT modules, game mods) gets gaze, eye openness
+  and adaptive trigger effects. `scripts/toolkit-ipc-test.py` exercises it.
+- **Headset rumble** — the HMD's `/output/haptic`; works only on a jailbroken
+  headset (see below).
+- **Proximity sensor** — taking the headset off / putting it on sends SteamVR's
+  user-interaction events.
 
 ## Build & install
 
@@ -95,10 +110,29 @@ driver_psvr2/
     device_provider.{h,cpp}  IServerTrackedDeviceProvider (lifecycle, events)
     hmd_device_driver.{h,cpp}ITrackedDeviceServerDriver + IVRDisplayComponent
     pose_source.{h,cpp}      libpsvr2 wrapper + device→OpenVR pose remap
+    controller_device.{h,cpp}Sense controller: inputs, haptics, 3DoF + arm model
+    sense_hid.{h,cpp}        Sense hidraw transport, calibration, output report
+    sense_protocol.h         Sense report layouts (from Monado, BSL-1.0)
+    trigger_effect.{h,cpp}   adaptive trigger effects -> output report bytes
+    imu_fusion.h             gyro + accelerometer orientation filter
+    toolkit_ipc.{h,cpp}      PSVR2 Toolkit legacy IPC server
   resources/
     driver.vrdrivermanifest
     settings/default.vrsettings
+    input/                   Sense + HMD input profiles, Touch remapping,
+                             legacy bindings
+    rendermodels/            Sense-style controller models (boucymatt fork)
 ```
+
+Controllers need read/write access to their `hidraw` node; `install.sh` puts
+the udev rule in place. Pair them with your desktop's Bluetooth settings (hold
+PS + Create/Options until the light blinks). The driver reads the IMU
+calibration feature report on connect, which also switches the controller from
+its compatibility reports to full reports, and sets the lower PC polling rate.
+
+`enhanced_haptics` (default true) plays SteamVR haptic pulses as PCM on the
+voice-coil actuators; set it false for classic rumble. `toolkit_ipc` (default
+true) turns the IPC server off when real PSVR2 Toolkit owns the port.
 
 At runtime the device provider opens `libpsvr2` and registers the HMD; a pose
 thread reads 6DoF samples, remaps them into the OpenVR frame, and submits them via
@@ -115,8 +149,20 @@ thread reads 6DoF samples, remaps them into the OpenVR frame, and submits them v
 - **Session type.** Direct mode is validated on both **X11** and **Wayland**
   (KDE Plasma 6 / KWin). Wayland needs both settings in
   [Running on Wayland](#running-on-wayland); X11 needs only the GPU force.
-- **FOV / distortion.** These are placeholders, so the image is geometrically
-  approximate and has no lens correction yet.
+- **Controller position (6DoF).** Sony's PC driver finds the controllers by
+  their LED constellation in the headset cameras; that camera mode, the LED
+  sync handshake and the tracker are not implemented here yet (see
+  [roadmap.md](roadmap.md)). Until then the controllers rotate correctly and
+  sit at an arm-model position relative to your head; yaw can drift slowly,
+  which the Create/Options hold corrects.
+- **Ignition / PSVR2 Toolkit.** They run Sony's Windows driver, which drives the
+  headset over libusb; it cannot share the headset with this kernel module.
+  Use one or the other: unregister the other driver in SteamVR (`vrpathreg
+  removedriver <path>` or disable it under SteamVR Settings > Startup /
+  Shutdown > Manage Add-Ons), and turn `toolkit_ipc` off while Toolkit runs.
+- **Headset rumble** needs a headset jailbroken with
+  [vr2jb](https://github.com/BnuuySolutions/vr2jb) (firmware 6.0, redone after
+  every power cycle; see its warnings). Stock firmware ignores the command.
 - **Spatial calibration.** Floor height and forward direction come from SteamVR's
   usual calibration (Reset Seated Position / Room Setup). Driver-side
   auto-recenter and a default standing height are planned so this works out of the

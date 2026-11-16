@@ -92,6 +92,16 @@ int psvr2_read_gaze(psvr2_t *p, struct psvr2_gaze *out, int block);
 /* Read the latest IMU sample (scaled). Returns 0 on success, -1 on error. */
 int psvr2_read_imu(psvr2_t *p, struct psvr2_imu *out);
 
+/* Headset controls snapshot from the module's input device. */
+struct psvr2_controls {
+	int ipd_mm;		/* IPD dial, 59..72 */
+	int worn;		/* proximity sensor: 1 = on a head */
+	int function_button;	/* 1 = pressed */
+};
+
+/* Read the current controls. Returns 0 on success, -1 if unavailable. */
+int psvr2_read_controls(psvr2_t *p, struct psvr2_controls *out);
+
 /* Set panel brightness, 0..31. Returns 0 on success, -1 on error. */
 int psvr2_set_brightness(psvr2_t *p, int level);
 

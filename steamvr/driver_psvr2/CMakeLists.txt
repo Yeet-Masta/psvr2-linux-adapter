@@ -18,6 +18,10 @@ add_library(driver_psvr2 MODULE
     src/device_provider.cpp
     src/hmd_device_driver.cpp
     src/pose_source.cpp
+    src/controller_device.cpp
+    src/sense_hid.cpp
+    src/trigger_effect.cpp
+    src/toolkit_ipc.cpp
     "${OPENVR_DIR}/driverlog.cpp"
 )
 
@@ -42,7 +46,7 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
-target_link_libraries(driver_psvr2 PRIVATE Threads::Threads)
+target_link_libraries(driver_psvr2 PRIVATE Threads::Threads m)
 
 # SteamVR expects the driver as <driver>/bin/linux64/driver_<name>.so with no
 # "lib" prefix. Lay the whole package out under the build dir so it can be

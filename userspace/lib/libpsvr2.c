@@ -13,7 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
+#include <linux/input.h>
 
 #include "libpsvr2.h"
 #include "psvr2_uapi.h"		/* kernel wire structs (-I kernel/) */
@@ -23,6 +25,7 @@
 #define IIO_DIR  "/sys/bus/iio/devices"
 #define V4L_DIR  "/sys/class/video4linux"
 #define DRV_DIR  "/sys/bus/usb/drivers/psvr2"
+#define INPUT_NAME "PlayStation VR2 Headset Controls"
 
 struct psvr2 {
 	int	pose_fd;
@@ -31,6 +34,7 @@ struct psvr2 {
 	double	accel_scale;
 	double	gyro_scale;
 	char	cam_path[300];		/* "/dev/videoN", "" if none */
+	int	controls_fd;
 	char	sysfs_dir[300];		/* a bound interface dir, "" if none */
 };
 
@@ -160,6 +164,34 @@ static int write_attr_int(const struct psvr2 *p, const char *attr, int value)
 	return n;
 }
 
+static void find_controls(struct psvr2 *p)
+{
+	DIR *d = opendir("/dev/input");
+	struct dirent *e;
+
+	p->controls_fd = -1;
+	if (!d)
+		return;
+	while ((e = readdir(d))) {
+		char path[300], name[128] = "";
+		int fd;
+
+		if (strncmp(e->d_name, "event", 5))
+			continue;
+		snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
+		fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+		if (fd < 0)
+			continue;
+		if (ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name) >= 0 &&
+		    !strcmp(name, INPUT_NAME)) {
+			p->controls_fd = fd;
+			break;
+		}
+		close(fd);
+	}
+	closedir(d);
+}
+
 /* ---- lifecycle ---------------------------------------------------------- */
 
 psvr2_t *psvr2_open(void)
@@ -174,6 +206,7 @@ psvr2_t *psvr2_open(void)
 	find_imu(p);
 	find_camera(p);
 	find_sysfs(p);
+	find_controls(p);
 	return p;
 }
 
@@ -185,6 +218,8 @@ void psvr2_close(psvr2_t *p)
 		close(p->pose_fd);
 	if (p->gaze_fd >= 0)
 		close(p->gaze_fd);
+	if (p->controls_fd >= 0)
+		close(p->controls_fd);
 	free(p);
 }
 
@@ -313,6 +348,25 @@ int psvr2_read_imu(psvr2_t *p, struct psvr2_imu *out)
 			return -1;
 		out->gyro_rad_s[i] = strtol(val, NULL, 10) * p->gyro_scale;
 	}
+	return 0;
+}
+
+int psvr2_read_controls(psvr2_t *p, struct psvr2_controls *out)
+{
+	struct input_absinfo abs;
+	unsigned long sw[(SW_MAX + 1 + 8 * sizeof(long) - 1) / (8 * sizeof(long))] = {0};
+	unsigned long key[(KEY_MAX + 1 + 8 * sizeof(long) - 1) / (8 * sizeof(long))] = {0};
+	const size_t bits = 8 * sizeof(long);
+
+	if (!p || p->controls_fd < 0)
+		return -1;
+	if (ioctl(p->controls_fd, EVIOCGABS(ABS_MISC), &abs) < 0 ||
+	    ioctl(p->controls_fd, EVIOCGSW(sizeof(sw)), sw) < 0 ||
+	    ioctl(p->controls_fd, EVIOCGKEY(sizeof(key)), key) < 0)
+		return -1;
+	out->ipd_mm = abs.value;
+	out->worn = !!(sw[SW_FRONT_PROXIMITY / bits] & (1UL << (SW_FRONT_PROXIMITY % bits)));
+	out->function_button = !!(key[BTN_MODE / bits] & (1UL << (BTN_MODE % bits)));
 	return 0;
 }
 

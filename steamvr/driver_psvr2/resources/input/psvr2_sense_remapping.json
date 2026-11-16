@@ -1,0 +1,12 @@
+{
+  "to_controller_type": "psvr2_sense",
+  "layouts": [
+    {
+      "priority": 1,
+      "from_controller_type": "oculus_touch",
+      "simulate_controller_type": true,
+      "simulate_render_model": true,
+      "simulate_HMD": false
+    }
+  ]
+}

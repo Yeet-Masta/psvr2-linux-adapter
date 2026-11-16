@@ -1,0 +1,135 @@
+{
+  "jsonid": "input_profile",
+  "controller_type": "psvr2_sense",
+  "device_class": "TrackedDeviceClass_Controller",
+  "resource_root": "psvr2",
+  "driver_name": "psvr2",
+  "input_bindingui_mode": "controller_handed",
+  "should_show_binding_errors": true,
+  "remapping": "{psvr2}/input/psvr2_sense_remapping.json",
+  "legacy_binding": "{psvr2}/input/psvr2_sense_bindings_legacy.json",
+  "input_source": {
+    "/input/system": {
+      "type": "button",
+      "click": true,
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 1
+    },
+    "/input/application_menu": {
+      "type": "button",
+      "click": true,
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 2
+    },
+    "/input/a": {
+      "type": "button",
+      "click": true,
+      "touch": true,
+      "side": "right",
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 3
+    },
+    "/input/b": {
+      "type": "button",
+      "click": true,
+      "touch": true,
+      "side": "right",
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 4
+    },
+    "/input/x": {
+      "type": "button",
+      "click": true,
+      "touch": true,
+      "side": "left",
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 3
+    },
+    "/input/y": {
+      "type": "button",
+      "click": true,
+      "touch": true,
+      "side": "left",
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 4
+    },
+    "/input/trigger": {
+      "type": "trigger",
+      "click": true,
+      "value": true,
+      "touch": true,
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 5
+    },
+    "/input/grip": {
+      "type": "trigger",
+      "click": true,
+      "value": true,
+      "touch": true,
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 6
+    },
+    "/input/joystick": {
+      "type": "joystick",
+      "click": true,
+      "touch": true,
+      "binding_image_point": [
+        0,
+        0
+      ],
+      "order": 7
+    },
+    "/output/haptic": {
+      "type": "vibration",
+      "binding_image_point": [
+        0,
+        0
+      ]
+    },
+    "/pose/raw": {
+      "type": "pose",
+      "binding_image_point": [
+        0,
+        0
+      ]
+    },
+    "/pose/grip": {
+      "type": "pose",
+      "binding_image_point": [
+        0,
+        0
+      ]
+    },
+    "/pose/tip": {
+      "type": "pose",
+      "binding_image_point": [
+        0,
+        0
+      ]
+    }
+  }
+}

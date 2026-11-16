@@ -1,0 +1,35 @@
+{
+  "name": "PS VR2 Sense legacy bindings",
+  "controller_type": "psvr2_sense",
+  "description": "Legacy (non-SteamVR Input) mapping in the Oculus Touch style.",
+  "action_manifest_version": 0,
+  "category": "legacy",
+  "bindings": {
+    "/actions/legacy": {
+      "haptics": [
+        { "output": "/actions/legacy/out/Left_Haptic", "path": "/user/hand/left/output/haptic" },
+        { "output": "/actions/legacy/out/Right_Haptic", "path": "/user/hand/right/output/haptic" }
+      ],
+      "poses": [
+        { "output": "/actions/legacy/in/Left_Pose", "path": "/user/hand/left/pose/raw" },
+        { "output": "/actions/legacy/in/Right_Pose", "path": "/user/hand/right/pose/raw" }
+      ],
+      "sources": [
+        { "mode": "button", "path": "/user/hand/left/input/system", "inputs": { "click": { "output": "/actions/legacy/in/left_system_press" } } },
+        { "mode": "button", "path": "/user/hand/right/input/system", "inputs": { "click": { "output": "/actions/legacy/in/right_system_press" } } },
+        { "mode": "button", "path": "/user/hand/left/input/application_menu", "inputs": { "click": { "output": "/actions/legacy/in/left_applicationmenu_press" } } },
+        { "mode": "button", "path": "/user/hand/right/input/application_menu", "inputs": { "click": { "output": "/actions/legacy/in/right_applicationmenu_press" } } },
+        { "mode": "button", "path": "/user/hand/left/input/x", "inputs": { "click": { "output": "/actions/legacy/in/left_a_press" }, "touch": { "output": "/actions/legacy/in/left_a_touch" } } },
+        { "mode": "button", "path": "/user/hand/left/input/y", "inputs": { "click": { "output": "/actions/legacy/in/left_applicationmenu_press" } } },
+        { "mode": "button", "path": "/user/hand/right/input/a", "inputs": { "click": { "output": "/actions/legacy/in/right_a_press" }, "touch": { "output": "/actions/legacy/in/right_a_touch" } } },
+        { "mode": "button", "path": "/user/hand/right/input/b", "inputs": { "click": { "output": "/actions/legacy/in/right_applicationmenu_press" } } },
+        { "mode": "trigger", "path": "/user/hand/left/input/trigger", "inputs": { "pull": { "output": "/actions/legacy/in/left_axis1_value" }, "click": { "output": "/actions/legacy/in/left_trigger_press" }, "touch": { "output": "/actions/legacy/in/left_trigger_touch" } } },
+        { "mode": "trigger", "path": "/user/hand/right/input/trigger", "inputs": { "pull": { "output": "/actions/legacy/in/right_axis1_value" }, "click": { "output": "/actions/legacy/in/right_trigger_press" }, "touch": { "output": "/actions/legacy/in/right_trigger_touch" } } },
+        { "mode": "trigger", "path": "/user/hand/left/input/grip", "inputs": { "pull": { "output": "/actions/legacy/in/left_axis2_value" }, "click": { "output": "/actions/legacy/in/left_grip_press" }, "touch": { "output": "/actions/legacy/in/left_grip_touch" } } },
+        { "mode": "trigger", "path": "/user/hand/right/input/grip", "inputs": { "pull": { "output": "/actions/legacy/in/right_axis2_value" }, "click": { "output": "/actions/legacy/in/right_grip_press" }, "touch": { "output": "/actions/legacy/in/right_grip_touch" } } },
+        { "mode": "joystick", "path": "/user/hand/left/input/joystick", "inputs": { "position": { "output": "/actions/legacy/in/left_axis0_value" }, "click": { "output": "/actions/legacy/in/left_steamvr_touchpad_press" }, "touch": { "output": "/actions/legacy/in/left_steamvr_touchpad_touch" } } },
+        { "mode": "joystick", "path": "/user/hand/right/input/joystick", "inputs": { "position": { "output": "/actions/legacy/in/right_axis0_value" }, "click": { "output": "/actions/legacy/in/right_steamvr_touchpad_press" }, "touch": { "output": "/actions/legacy/in/right_steamvr_touchpad_touch" } } }
+      ]
+    }
+  }
+}

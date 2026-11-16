@@ -35,8 +35,12 @@ On top of that:
   streams, scaled IMU, camera-node path, brightness) for building VR-runtime
   integrations.
 - **SteamVR driver** (`steamvr/driver_psvr2`) — presents the PSVR2 as a native
-  SteamVR HMD with direct-mode display (via DRM leasing) and 6DoF head tracking.
-  See [docs/steamvr.md](docs/steamvr.md).
+  SteamVR HMD with direct-mode display (via DRM leasing), 6DoF head tracking,
+  Sony's lens model, OpenXR eye gaze and headset rumble (jailbreak), and drives
+  the **Sense controllers** over Bluetooth: all inputs, PCM haptics and
+  adaptive triggers, with 3DoF orientation and an arm-model position (6DoF
+  controller tracking is not done yet). A PSVR2 Toolkit-compatible IPC server
+  serves Toolkit-aware apps. See [docs/steamvr.md](docs/steamvr.md).
 
 Audio is handled by the in-tree `snd-usb-audio` driver and left untouched. The
 display is a standard DisplayPort sink driven by the GPU's DRM stack (see

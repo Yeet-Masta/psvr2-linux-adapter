@@ -18,6 +18,14 @@
 		"window_x": 0,
 		"window_y": 0,
 		"window_width": 4000,
-		"window_height": 2040
+		"window_height": 2040,
+
+		"//haptics": "true: play SteamVR haptics as PCM on the Sense voice-coil actuators",
+		"//haptics2": "(richer, like PSVR2 Toolkit's enhanced haptics). false: classic rumble.",
+		"enhanced_haptics": true,
+
+		"//ipc": "Serve PSVR2 Toolkit's IPC (127.0.0.1:3364) so Toolkit-aware apps get",
+		"//ipc2": "eye tracking and adaptive triggers. Turn off if you run PSVR2 Toolkit itself.",
+		"toolkit_ipc": true
 	}
 }

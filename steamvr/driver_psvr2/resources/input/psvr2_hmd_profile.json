@@ -1,0 +1,11 @@
+{
+  "jsonid": "input_profile",
+  "controller_type": "psvr2_hmd",
+  "device_class": "TrackedDeviceClass_HMD",
+  "resource_root": "psvr2",
+  "driver_name": "psvr2",
+  "input_source": {
+    "/eyetracking": { "type": "eyetracking", "binding_image_point": [0, 0] },
+    "/output/haptic": { "type": "vibration", "binding_image_point": [0, 0] }
+  }
+}

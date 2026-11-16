@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "hmd_device_driver.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
+#include <poll.h>
 
 #include "driverlog.h"
+#include "libpsvr2.h"
 
 static const char *kSettingsSection = "driver_psvr2";
 
@@ -49,6 +53,12 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 	cfg.direct_mode = ( dm_err == vr::VRSettingsError_None ) ? direct_mode : true;
 	direct_mode_ = cfg.direct_mode;
 
+	dev_ = psvr2_open();
+	if ( psvr2_get_lens_distortion( dev_, cfg.lens ) == 0 )
+		DriverLog( "psvr2: using the headset's lens calibration" );
+	else
+		DriverLog( "psvr2: no lens calibration from the headset; using default lens centres" );
+
 	display_ = std::make_unique<Psvr2DisplayComponent>( cfg );
 	pose_source_ = std::make_unique<PoseSource>();
 
@@ -56,16 +66,39 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 		DriverLog( "psvr2: /dev/psvr2-pose not found — HMD will not track (is the module loaded?)" );
 }
 
+Psvr2HmdDriver::~Psvr2HmdDriver()
+{
+	Deactivate();
+	psvr2_close( dev_ );
+}
+
 vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 {
 	device_index_ = unObjectId;
 
 	vr::PropertyContainerHandle_t c = vr::VRProperties()->TrackedDeviceToPropertyContainer( unObjectId );
+	container_ = c;
 	vr::VRProperties()->SetStringProperty( c, vr::Prop_ModelNumber_String, model_number_.c_str() );
 	vr::VRProperties()->SetStringProperty( c, vr::Prop_ManufacturerName_String, "Sony" );
 
-	const float ipd = vr::VRSettings()->GetFloat( vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IPD_Float );
+	// IPD: the headset's dial when the controls are readable, else SteamVR's.
+	float ipd = vr::VRSettings()->GetFloat( vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IPD_Float );
+	struct psvr2_controls controls{};
+	if ( psvr2_read_controls( dev_, &controls ) == 0 && controls.ipd_mm > 0 )
+	{
+		ipd_mm_ = controls.ipd_mm;
+		ipd = ipd_mm_ / 1000.0f;
+	}
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserIpdMeters_Float, ipd );
+	vr::VRProperties()->SetStringProperty( c, vr::Prop_InputProfilePath_String, "{psvr2}/input/psvr2_hmd_profile.json" );
+
+	// Eye tracking (OpenXR XR_EXT_eye_gaze_interaction through SteamVR).
+	if ( psvr2_has_gaze( dev_ ) )
+	{
+		vr::VRProperties()->SetBoolProperty( c, vr::Prop_SupportsXrEyeGazeInteraction_Bool, true );
+		vr::VRDriverInput()->CreateEyeTrackingComponent( c, "/eyetracking", &eye_tracking_ );
+	}
+	vr::VRDriverInput()->CreateHapticComponent( c, "/output/haptic", &haptic_ );
 
 	// Required for the compositor to start.
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_DisplayFrequency_Float, display_frequency_ );
@@ -87,13 +120,20 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 
 	active_ = true;
 	pose_thread_ = std::thread( &Psvr2HmdDriver::PoseThread, this );
+	gaze_thread_ = std::thread( &Psvr2HmdDriver::GazeThread, this );
 	return vr::VRInitError_None;
 }
 
 void Psvr2HmdDriver::Deactivate()
 {
-	if ( active_.exchange( false ) && pose_thread_.joinable() )
-		pose_thread_.join();
+	if ( active_.exchange( false ) )
+	{
+		if ( pose_thread_.joinable() )
+			pose_thread_.join();
+		if ( gaze_thread_.joinable() )
+			gaze_thread_.join();
+	}
+	SetRumble( 0 );
 	device_index_ = vr::k_unTrackedDeviceIndexInvalid;
 }
 
@@ -114,7 +154,139 @@ void Psvr2HmdDriver::DebugRequest( const char *, char *pchResponseBuffer, uint32
 
 vr::DriverPose_t Psvr2HmdDriver::GetPose()
 {
+	std::lock_guard<std::mutex> lock( pose_mutex_ );
 	return last_pose_;
+}
+
+Psvr2GazeData Psvr2HmdDriver::GetGaze()
+{
+	std::lock_guard<std::mutex> lock( gaze_mutex_ );
+	return gaze_;
+}
+
+void Psvr2HmdDriver::SetRumble( int hz )
+{
+	hz = std::clamp( hz, 0, 25 );
+	if ( hz == rumble_hz_ )
+		return;
+	if ( psvr2_set_rumble( dev_, hz ) == 0 )
+		rumble_hz_ = hz;
+}
+
+void Psvr2HmdDriver::OnHaptic( const vr::VREvent_HapticVibration_t &h )
+{
+	// The motor takes a frequency only; map amplitude onto it (stronger =
+	// faster) since games set amplitude far more often than frequency.
+	const float amp = std::clamp( h.fAmplitude, 0.0f, 1.0f );
+	SetRumble( amp > 0.0f ? std::max( 1, int( std::lround( amp * 25.0f ) ) ) : 0 );
+	const double secs = std::max( 0.05, double( h.fDurationSeconds ) );
+	rumble_end_ = std::chrono::steady_clock::now() +
+	              std::chrono::duration_cast<std::chrono::steady_clock::duration>( std::chrono::duration<double>( secs ) );
+}
+
+void Psvr2HmdDriver::RunFrame()
+{
+	if ( rumble_hz_ && std::chrono::steady_clock::now() >= rumble_end_ )
+		SetRumble( 0 );
+}
+
+void Psvr2HmdDriver::PollControls()
+{
+	struct psvr2_controls c{};
+	if ( psvr2_read_controls( dev_, &c ) != 0 )
+		return;
+
+	if ( c.ipd_mm > 0 && c.ipd_mm != ipd_mm_ )
+	{
+		ipd_mm_ = c.ipd_mm;
+		vr::VRProperties()->SetFloatProperty( container_, vr::Prop_UserIpdMeters_Float, ipd_mm_ / 1000.0f );
+		DriverLog( "psvr2: IPD dial %d mm", ipd_mm_ );
+	}
+	if ( c.worn != worn_ )
+	{
+		if ( worn_ != -1 && device_index_ != vr::k_unTrackedDeviceIndexInvalid )
+			vr::VRServerDriverHost()->VendorSpecificEvent(
+				device_index_,
+				c.worn ? vr::VREvent_TrackedDeviceUserInteractionStarted : vr::VREvent_TrackedDeviceUserInteractionEnded,
+				{}, 0 );
+		worn_ = c.worn;
+	}
+}
+
+// Headset gaze frame -> OpenVR head frame (Monado negates x and z).
+static vr::HmdVector3_t GazeToHead( const float v[3], float scale )
+{
+	return { -v[0] * scale, v[1] * scale, -v[2] * scale };
+}
+
+static void CopyEye( const struct psvr2_eye &in, Psvr2EyeData &out )
+{
+	out.origin_valid = in.gaze_point_valid;
+	out.dir_valid = in.gaze_direction_valid;
+	out.pupil_valid = in.pupil_diameter_valid;
+	out.blink_valid = in.blink_valid;
+	std::copy( in.gaze_point_mm, in.gaze_point_mm + 3, out.origin_mm );
+	const float n = std::sqrt( in.gaze_direction[0] * in.gaze_direction[0] + in.gaze_direction[1] * in.gaze_direction[1] +
+	                           in.gaze_direction[2] * in.gaze_direction[2] );
+	for ( int i = 0; i < 3; i++ )
+		out.dir[i] = n > 0.0f ? in.gaze_direction[i] / n : 0.0f;
+	out.pupil_mm = in.pupil_diameter_mm;
+	out.blink = in.blink;
+	out.valid = true;
+}
+
+void Psvr2HmdDriver::GazeThread()
+{
+	auto next_controls = std::chrono::steady_clock::now();
+
+	while ( active_ )
+	{
+		const auto now = std::chrono::steady_clock::now();
+		if ( now >= next_controls )
+		{
+			PollControls();
+			next_controls = now + std::chrono::milliseconds( 100 );
+		}
+
+		const int fd = psvr2_gaze_fd( dev_ );
+		if ( fd < 0 )
+		{
+			std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+			continue;
+		}
+		pollfd pfd{ fd, POLLIN, 0 };
+		if ( poll( &pfd, 1, 100 ) <= 0 )
+			continue;
+
+		struct psvr2_gaze g{};
+		bool got = false;
+		while ( psvr2_read_gaze( dev_, &g, 0 ) == 1 )
+			got = true;
+		if ( !got || !g.valid )
+			continue;
+
+		Psvr2GazeData d;
+		CopyEye( g.left, d.left );
+		CopyEye( g.right, d.right );
+		d.combined_valid = g.combined.gaze_direction_valid;
+		d.origin = g.combined.gaze_point_valid ? GazeToHead( g.combined.gaze_point_mm, 0.001f ) : vr::HmdVector3_t{};
+		d.dir = GazeToHead( g.combined.gaze_direction, 1.0f );
+		{
+			std::lock_guard<std::mutex> lock( gaze_mutex_ );
+			gaze_ = d;
+		}
+
+		if ( eye_tracking_ )
+		{
+			vr::VREyeTrackingData_t et{};
+			et.bActive = true;
+			et.bValid = d.combined_valid;
+			et.bTracked = d.combined_valid;
+			et.vGazeOrigin = d.origin;
+			et.vGazeTarget = { d.origin.v[0] + d.dir.v[0], d.origin.v[1] + d.dir.v[1], d.origin.v[2] + d.dir.v[2] };
+			vr::VRDriverInput()->UpdateEyeTrackingComponent( eye_tracking_, &et, 0.0 );
+		}
+	}
 }
 
 void Psvr2HmdDriver::PoseThread()
@@ -124,7 +296,10 @@ void Psvr2HmdDriver::PoseThread()
 		vr::DriverPose_t pose{};
 		if ( pose_source_->ReadPose( pose ) )
 		{
-			last_pose_ = pose;
+			{
+				std::lock_guard<std::mutex> lock( pose_mutex_ );
+				last_pose_ = pose;
+			}
 			if ( device_index_ != vr::k_unTrackedDeviceIndexInvalid )
 				vr::VRServerDriverHost()->TrackedDevicePoseUpdated(
 					device_index_, pose, sizeof( pose ) );
@@ -175,21 +350,29 @@ void Psvr2DisplayComponent::GetEyeOutputViewport( vr::EVREye eEye, uint32_t *pnX
 
 void Psvr2DisplayComponent::GetProjectionRaw( vr::EVREye eEye, float *pfLeft, float *pfRight, float *pfTop, float *pfBottom )
 {
-	// Symmetric FOV placeholder. TODO: per-eye asymmetric values from the
-	// headset FOV params in the PSVR2 reverse-engineering notes (docs/references.md).
-	*pfLeft = -config_.fov_tan;
-	*pfRight = config_.fov_tan;
-	*pfTop = -config_.fov_tan;
-	*pfBottom = config_.fov_tan;
+	// Asymmetric per-eye FOV: wider towards the temple than the nose.
+	constexpr float kDeg = 3.14159265f / 180.0f;
+	const float outer = std::tan( config_.fov_outer_deg * kDeg );
+	const float inner = std::tan( config_.fov_inner_deg * kDeg );
+	const float vert = std::tan( config_.fov_vertical_deg * kDeg );
+	*pfLeft = ( eEye == vr::Eye_Left ) ? -outer : -inner;
+	*pfRight = ( eEye == vr::Eye_Left ) ? inner : outer;
+	*pfTop = -vert;
+	*pfBottom = vert;
 }
 
 vr::DistortionCoordinates_t Psvr2DisplayComponent::ComputeDistortion( vr::EVREye eEye, float fU, float fV )
 {
-	// Identity (no distortion mesh yet). The PSVR2 lenses need a real mesh; until
-	// then SteamVR renders undistorted. TODO: import a distortion model.
+	// Sony's lens model with this headset's calibration (libpsvr2).
+	float uv[6];
+	psvr2_distort( config_.lens, eEye == vr::Eye_Left ? 0 : 1, fU, fV, uv );
 	vr::DistortionCoordinates_t c{};
-	c.rfRed[0] = c.rfGreen[0] = c.rfBlue[0] = fU;
-	c.rfRed[1] = c.rfGreen[1] = c.rfBlue[1] = fV;
+	c.rfRed[0] = uv[0];
+	c.rfRed[1] = uv[1];
+	c.rfGreen[0] = uv[2];
+	c.rfGreen[1] = uv[3];
+	c.rfBlue[0] = uv[4];
+	c.rfBlue[1] = uv[5];
 	return c;
 }
 

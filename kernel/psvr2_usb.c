@@ -273,6 +273,16 @@ static int psvr2_probe(struct usb_interface *intf,
 
 	usb_set_intfdata(intf, psvr2);
 
+	/*
+	 * A bad link makes the headset fall back to full/high speed, where the
+	 * status interface has no endpoints (no IMU or controls) and the
+	 * cameras cannot stream. Say so once instead of failing obscurely.
+	 */
+	if (ifnum == PSVR2_IF_STATUS && udev->speed < USB_SPEED_SUPER)
+		dev_warn(&intf->dev,
+			 "headset enumerated at %s, not SuperSpeed: replug the PC adapter's USB cable into a USB 3 port\n",
+			 usb_speed_string(udev->speed));
+
 	switch (ifnum) {
 	case PSVR2_IF_STATUS:
 		ret = psvr2_probe_status(psvr2, intf);

@@ -37,6 +37,10 @@ and `usbhid` keep their interfaces.
   tracking** in the correct OpenVR frame. Per-eye FOV, lens distortion, and
   in-headset spatial calibration are still being refined — see
   [steamvr.md](steamvr.md).
+- **Sense controllers, eye tracking, haptics** — see steamvr.md: Bluetooth Sense
+  controllers with every input, PCM haptics and adaptive triggers (3DoF +
+  arm-model position for now), OpenXR eye gaze, Sony's lens model, the IPD
+  dial, headset rumble (jailbreak), and a PSVR2 Toolkit-compatible IPC server.
 
 ## Roadmap
 
@@ -47,19 +51,25 @@ Contributions in any of these areas are welcome.
 - **More camera modes** — the interleaved multi-view (controller-tracking /
   fisheye) modes and the SLAM tracking-camera frames, with a V4L2 control to
   select between them.
-- **Haptics** — the headset rumble report is not yet reverse-engineered.
+- **Controller tracking camera mode** — the camera mode Sony's driver uses to
+  see the Sense controller LEDs, and the LED sync it negotiates with each
+  controller (Monado's `pssense` driver has the controller side of the sync).
 - **Multi-headset support** — per-device node naming (the `/dev/psvr2-*` nodes
   currently assume a single headset).
 - **Wider gaze ABI** — several gaze packet fields are still undecoded.
 
 ### SteamVR driver
 
-- **Lens distortion mesh** and accurate **per-eye FOV** (currently placeholders).
+- **6DoF controller tracking** — feed the controller-tracking camera frames to
+  a constellation tracker (Monado's `t_constellation` tracks Sense controllers
+  with Rift CV1 sensors and ships the Sense LED models) and fuse with the
+  controller IMU, replacing the arm model.
 - **Driver-side recenter / default standing height** so a usable pose comes up
   without running SteamVR Room Setup.
 - **Confirm Wayland** direct-mode display acquisition (DRM leasing via
   `wp_drm_lease_device_v1`; not yet validated, see steamvr.md).
-- **Eye-tracking** exposure and **controller** support.
+- **Eye-camera feeds** for Baballonia (jailbreak only) and per-user gaze
+  calibration.
 
 ### Other runtimes
 

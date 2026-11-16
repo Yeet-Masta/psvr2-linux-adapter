@@ -2,7 +2,9 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -20,7 +22,14 @@ struct Psvr2DisplayConfig
 	int32_t window_height = 2040;
 	int32_t render_width = 2000;   // per-eye render target
 	int32_t render_height = 2040;
-	float   fov_tan = 1.30f;       // tan(half-FOV); ~104deg total — refine from the PSVR2 RE notes
+	// Left-eye field of view in degrees (Sony's values, via Monado's PSVR2
+	// driver); the right eye mirrors it horizontally.
+	float   fov_outer_deg = 61.5f;
+	float   fov_inner_deg = 43.5f;
+	float   fov_vertical_deg = 53.0f;
+
+	// Per-unit lens parameters for psvr2_distort() (libpsvr2).
+	float   lens[8] = { -0.09919293f, 0.0f, 0.09919293f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f };
 
 	// Direct mode (default): report the panel as a real, NON-desktop display so
 	// SteamVR's compositor acquires it directly via DRM leasing (no TTY, desktop
@@ -50,11 +59,31 @@ private:
 	Psvr2DisplayConfig config_;
 };
 
+// One eye's tracking sample, in the headset's native gaze frame.
+struct Psvr2EyeData
+{
+	bool valid = false;
+	bool origin_valid = false, dir_valid = false, pupil_valid = false, blink_valid = false;
+	float origin_mm[3]{};  // device frame, as PSVR2 Toolkit reports it
+	float dir[3]{};        // device frame, normalised
+	float pupil_mm = 0.0f;
+	bool blink = false;
+};
+
+struct Psvr2GazeData
+{
+	Psvr2EyeData left, right;
+	bool combined_valid = false;
+	vr::HmdVector3_t origin{};  // head frame, metres
+	vr::HmdVector3_t dir{};     // head frame, normalised
+};
+
 // The HMD itself.
 class Psvr2HmdDriver : public vr::ITrackedDeviceServerDriver
 {
 public:
 	Psvr2HmdDriver();
+	~Psvr2HmdDriver();
 
 	vr::EVRInitError Activate( uint32_t unObjectId ) override;
 	void Deactivate() override;
@@ -65,8 +94,21 @@ public:
 
 	const std::string &GetSerialNumber() const { return serial_number_; }
 
+	// Latest eye-tracking data (for the PSVR2 Toolkit IPC server).
+	Psvr2GazeData GetGaze();
+
+	// Headset rumble motor, 0..25 Hz (needs a jailbroken headset).
+	void SetRumble( int hz );
+	vr::VRInputComponentHandle_t HapticHandle() const { return haptic_; }
+	void OnHaptic( const vr::VREvent_HapticVibration_t &h );
+
+	// Called from the provider's frame loop.
+	void RunFrame();
+
 private:
 	void PoseThread();
+	void GazeThread();
+	void PollControls();
 
 	std::unique_ptr<Psvr2DisplayComponent> display_;
 	std::unique_ptr<PoseSource> pose_source_;
@@ -78,6 +120,22 @@ private:
 
 	std::atomic<bool> active_{ false };
 	std::atomic<uint32_t> device_index_{ vr::k_unTrackedDeviceIndexInvalid };
+	vr::PropertyContainerHandle_t container_ = vr::k_ulInvalidPropertyContainer;
+
+	std::mutex pose_mutex_;
 	vr::DriverPose_t last_pose_{};
 	std::thread pose_thread_;
+
+	// Gaze, controls and rumble go through a second libpsvr2 handle.
+	struct psvr2 *dev_ = nullptr;
+	std::thread gaze_thread_;
+	std::mutex gaze_mutex_;
+	Psvr2GazeData gaze_{};
+	vr::VRInputComponentHandle_t eye_tracking_ = 0;
+	vr::VRInputComponentHandle_t haptic_ = 0;
+
+	int ipd_mm_ = 0;
+	int worn_ = -1;
+	int rumble_hz_ = 0;
+	std::chrono::steady_clock::time_point rumble_end_{};
 };

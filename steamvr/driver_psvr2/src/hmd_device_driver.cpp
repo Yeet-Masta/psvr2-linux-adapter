@@ -33,9 +33,16 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 	vr::VRSettings()->GetString( kSettingsSection, "serial_number", buf, sizeof( buf ), &err );
 	serial_number_ = ( err == vr::VRSettingsError_None && buf[0] ) ? buf : "PSVR2-0001";
 
-	const float hz = vr::VRSettings()->GetFloat( kSettingsSection, "display_frequency" );
+	// The panel runs at 89.91 or 119.88 Hz (its EDID modes). SteamVR's own
+	// refresh-rate choice (steamvr/preferredRefreshRate, the Video settings
+	// slider) picks the mode it leases, so report that same rate: pacing and
+	// pose prediction at 90 Hz on a 120 Hz scanout tears and smears.
+	// driver_psvr2/display_frequency is the fallback when SteamVR has none.
+	float hz = vr::VRSettings()->GetFloat( vr::k_pch_SteamVR_Section, "preferredRefreshRate" );
+	if ( !( hz > 0.0f ) )
+		hz = vr::VRSettings()->GetFloat( kSettingsSection, "display_frequency" );
 	if ( hz > 0.0f )
-		display_frequency_ = hz;
+		display_frequency_ = hz > 105.0f ? 119.88f : 89.91f;
 	// The tracker's origin is where it started; without a SteamVR room setup
 	// this lifts the view to standing height. 0 (default) leaves it alone.
 	standing_height_ = std::clamp( vr::VRSettings()->GetFloat( kSettingsSection, "standing_height_m" ), 0.0f, 2.5f );
@@ -114,6 +121,9 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 
 	// Required for the compositor to start.
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_DisplayFrequency_Float, display_frequency_ );
+	// Let SteamVR offer the panel's modes (it reads them from the EDID).
+	vr::VRProperties()->SetBoolProperty( c, vr::Prop_DisplaySupportsMultipleFramerates_Bool, true );
+	DriverLog( "psvr2: display refresh %.2f Hz", display_frequency_ );
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserHeadToEyeDepthMeters_Float, 0.0f );
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromVsyncToPhotons_Float, 0.011f );
 

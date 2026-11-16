@@ -4,6 +4,8 @@
 		"model_number": "PSVR2",
 		"serial_number": "PSVR2-0001",
 
+		"//hz": "Panel refresh when SteamVR has no preferred rate of its own. SteamVR's",
+		"//hz2": "Video > Refresh Rate setting wins; 90 or 120 (restart SteamVR after changing).",
 		"display_frequency": 90.0,
 
 		"//direct": "true (default): report the panel as a real, non-desktop display",

@@ -137,7 +137,7 @@ static int open_amdgpu(void)
 		if (fd < 0)
 			continue;
 		v = drmGetVersion(fd);
-		ok = v && v->name && !strcmp(v->name, "amdgpu");
+		ok = v && v->name && (!strcmp(v->name, "amdgpu") || !strcmp(v->name, "nvidia-drm"));
 		if (v)
 			drmFreeVersion(v);
 		if (ok)
@@ -165,7 +165,7 @@ int main(void)
 	int crtc_idx = -1, posefd, i;
 	FILE *log;
 
-	if (fd < 0) { fprintf(stderr, "no amdgpu DRM device\n"); return 1; }
+	if (fd < 0) { fprintf(stderr, "no amdgpu or nvidia-drm DRM device\n"); return 1; }
 	if (drmSetMaster(fd)) {
 		fprintf(stderr, "drmSetMaster failed: %s (run from a TTY)\n",
 			strerror(errno));

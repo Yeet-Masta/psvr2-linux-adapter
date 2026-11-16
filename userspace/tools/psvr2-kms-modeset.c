@@ -70,7 +70,7 @@ static void add(int fd, drmModeAtomicReq *req, uint32_t obj, uint32_t type,
 	drmModeAtomicAddProperty(req, obj, pid, val);
 }
 
-/* Open the amdgpu DRM primary node. */
+/* Open the amdgpu or nvidia-drm DRM primary node. */
 static int open_amdgpu(void)
 {
 	for (int i = 0; i < 16; i++) {
@@ -84,13 +84,13 @@ static int open_amdgpu(void)
 		if (fd < 0)
 			continue;
 		v = drmGetVersion(fd);
-		match = v && v->name && !strcmp(v->name, "amdgpu");
+		match = v && v->name && (!strcmp(v->name, "amdgpu") || !strcmp(v->name, "nvidia-drm"));
+		if (match)
+			fprintf(stderr, "using %s (%s)\n", path, v->name);
 		if (v)
 			drmFreeVersion(v);
-		if (match) {
-			fprintf(stderr, "using %s (amdgpu)\n", path);
+		if (match)
 			return fd;
-		}
 		close(fd);
 	}
 	return -1;
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
 
 	fd = open_amdgpu();
 	if (fd < 0) {
-		fprintf(stderr, "no amdgpu DRM device\n");
+		fprintf(stderr, "no amdgpu or nvidia-drm DRM device\n");
 		return 1;
 	}
 

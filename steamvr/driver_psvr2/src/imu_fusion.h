@@ -27,7 +27,7 @@ public:
 		const vrmath::Vec3 db{ gyro.x - bias_.x, gyro.y - bias_.y, gyro.z - bias_.z };
 		if ( std::fabs( an - 9.81 ) < 0.5 && db.x * db.x + db.y * db.y + db.z * db.z < kStillRate * kStillRate )
 		{
-			const double k = bias_samples_ < 200 ? 1.0 / ++bias_samples_ : kBiasRate;
+			const double k = bias_samples_ < kSettledSamples ? 1.0 / ++bias_samples_ : kBiasRate;
 			bias_ = vrmath::Add( bias_, vrmath::Scale( db, k ) );
 		}
 		vrmath::Vec3 w{ gyro.x - bias_.x, gyro.y - bias_.y, gyro.z - bias_.z };
@@ -59,6 +59,15 @@ public:
 	}
 
 	bool Initialized() const { return initialized_; }
+	// Gyro bias, in rad/s: restore a saved estimate so drift stays low from
+	// the first second; Settled() once enough still samples went into it.
+	const vrmath::Vec3 &Bias() const { return bias_; }
+	void SetBias( const vrmath::Vec3 &b )
+	{
+		bias_ = b;
+		bias_samples_ = kSettledSamples;
+	}
+	bool Settled() const { return bias_samples_ >= kSettledSamples; }
 	vrmath::Vec3 Unbiased( const vrmath::Vec3 &gyro ) const { return { gyro.x - bias_.x, gyro.y - bias_.y, gyro.z - bias_.z }; }
 	const vr::HmdQuaternion_t &Orientation() const { return q_; }
 
@@ -75,6 +84,7 @@ private:
 	static constexpr double kGain = 1.0;         // rad/s per unit tilt error
 	static constexpr double kStillRate = 0.08;   // rad/s, below this counts as still
 	static constexpr double kBiasRate = 0.002;   // per-sample bias update once settled
+	static constexpr int kSettledSamples = 200;
 
 	vrmath::Vec3 bias_;
 	int bias_samples_ = 0;

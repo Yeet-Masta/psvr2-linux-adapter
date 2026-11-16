@@ -26,6 +26,28 @@
 
 		"//ipc": "Serve PSVR2 Toolkit's IPC (127.0.0.1:3364) so Toolkit-aware apps get",
 		"//ipc2": "eye tracking and adaptive triggers. Turn off if you run PSVR2 Toolkit itself.",
-		"toolkit_ipc": true
+		"toolkit_ipc": true,
+
+		"//trigger": "Adaptive trigger feel when no Toolkit-aware app is driving it:",
+		"//trigger2": "off | light | medium | heavy (resistance) | click (two-stage) | rigid.",
+		"default_trigger_effect": "light",
+
+		"//predict": "How far ahead (ms) SteamVR extrapolates controller motion to hide",
+		"//predict2": "Bluetooth latency. 0 disables; above ~20 overshoots on fast flicks.",
+		"controller_prediction_ms": 12.0,
+
+		"//wear": "Recenter controller heading when you put the headset on and next",
+		"//wear2": "hold the controllers level and still in front of you.",
+		"recenter_on_wear": true,
+
+		"//alerts": "Controller buzz at 15 % / 5 % battery, headset rumble on disconnect.",
+		"controller_alerts": true,
+
+		"//height": "Metres added to the headset height. Leave 0 if you ran SteamVR room",
+		"//height2": "setup; set ~your eye height if the view starts at floor level.",
+		"standing_height_m": 0.0,
+
+		"//camera": "Expose the tracking cameras to SteamVR (Room View / passthrough).",
+		"passthrough_camera": true
 	}
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #pragma once
 
+#include "camera_component.h"
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -105,6 +106,11 @@ public:
 	// Called from the provider's frame loop.
 	void RunFrame();
 
+	// Bumped each time the headset is put on (proximity sensor).
+	uint32_t PutOnCount() const { return put_on_count_; }
+	// Short headset rumble to flag an event (e.g. a controller dropped out).
+	void RequestAlert() { alert_requested_ = true; }
+
 private:
 	void PoseThread();
 	void GazeThread();
@@ -112,6 +118,7 @@ private:
 
 	std::unique_ptr<Psvr2DisplayComponent> display_;
 	std::unique_ptr<PoseSource> pose_source_;
+	std::unique_ptr<Psvr2CameraComponent> camera_;  // null when passthrough_camera is off
 
 	std::string model_number_;
 	std::string serial_number_;
@@ -137,6 +144,9 @@ private:
 
 	int ipd_mm_ = 0;
 	int worn_ = -1;
+	std::atomic<uint32_t> put_on_count_{ 0 };
+	std::atomic<bool> alert_requested_{ false };
+	float standing_height_ = 0.0f;  // metres added to the tracker's height
 	int rumble_hz_ = 0;
 	std::chrono::steady_clock::time_point rumble_end_{};
 };

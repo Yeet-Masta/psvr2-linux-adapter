@@ -22,6 +22,8 @@ add_library(driver_psvr2 MODULE
     src/sense_hid.cpp
     src/trigger_effect.cpp
     src/toolkit_ipc.cpp
+    src/camera_component.cpp
+    "${OPENVR_DIR}/hand_simulation.cpp"
     "${OPENVR_DIR}/driverlog.cpp"
 )
 

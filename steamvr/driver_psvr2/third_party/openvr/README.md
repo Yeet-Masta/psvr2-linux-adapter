@@ -9,6 +9,8 @@ from a clean checkout without the full SDK.
 |------|-------------------|----------|
 | `openvr_driver.h` | `headers/openvr_driver.h` | the OpenVR driver API the driver targets |
 | `driverlog.h` / `driverlog.cpp` | `samples/drivers/utils/driverlog/` | the sample logging helper (`DriverLog`) |
+| `hand_simulation.h` / `hand_simulation.cpp` | `samples/drivers/drivers/handskeletonsimulation/src/` (master, 2026-11) | hand bone transforms from finger curls |
+| `vrmath.h` | `samples/drivers/utils/vrmath/` (master, 2026-11) | maths helpers used by `hand_simulation.cpp` |
 
 To update: copy the same files from a newer SDK checkout and bump the version
 above. Only these files are needed — `openvr_driver.h` is self-contained (C++

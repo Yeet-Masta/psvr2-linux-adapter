@@ -27,7 +27,7 @@ public:
 private:
 	// Look for Sense controllers that appeared since the last scan.
 	void ScanControllers();
-	void SetTriggerEffect( int hand, const TriggerEffect &fx );
+	void SetTriggerEffect( int hand, const TriggerEffect *fx );
 
 	std::unique_ptr<Psvr2HmdDriver> hmd_;
 	std::unique_ptr<Psvr2ControllerDriver> controllers_[2];  // [0] left, [1] right

@@ -64,8 +64,10 @@ Contributions in any of these areas are welcome.
   a constellation tracker (Monado's `t_constellation` tracks Sense controllers
   with Rift CV1 sensors and ships the Sense LED models) and fuse with the
   controller IMU, replacing the arm model.
-- **Driver-side recenter / default standing height** so a usable pose comes up
-  without running SteamVR Room Setup.
+- **Passthrough camera calibration** — real intrinsics/extrinsics for the
+  bottom cameras, so Room View's 3D mode lines up (the camera is exposed today
+  with estimated geometry).
+- **Hand tracking** from the headset cameras.
 - **Confirm Wayland** direct-mode display acquisition (DRM leasing via
   `wp_drm_lease_device_v1`; not yet validated, see steamvr.md).
 - **Eye-camera feeds** for Baballonia (jailbreak only) and per-user gaze

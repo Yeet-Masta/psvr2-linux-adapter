@@ -20,7 +20,8 @@ class ToolkitIpcServer
 {
 public:
 	// hand: 0 left, 1 right, 2 both.
-	using TriggerSink = std::function<void( int hand, const TriggerEffect &fx )>;
+	// fx == nullptr: the client is gone, hand the triggers back to the default.
+	using TriggerSink = std::function<void( int hand, const TriggerEffect *fx )>;
 
 	ToolkitIpcServer( Psvr2HmdDriver *hmd, TriggerSink triggers );
 	~ToolkitIpcServer();

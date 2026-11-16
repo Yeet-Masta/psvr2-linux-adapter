@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "imu_fusion.h"
 #include "openvr_driver.h"
@@ -47,8 +48,9 @@ public:
 	void OnHaptic( const vr::VREvent_HapticVibration_t &h );
 	vr::VRInputComponentHandle_t HapticHandle() const { return haptic_; }
 
-	// Adaptive trigger effect (from the PSVR2 Toolkit IPC server).
-	void SetTriggerEffect( const TriggerEffect &fx );
+	// Adaptive trigger effect from the PSVR2 Toolkit IPC server; nullptr
+	// hands the trigger back to the default_trigger_effect setting.
+	void SetTriggerEffect( const TriggerEffect *fx );
 
 	// Point the controller's forward along the headset's forward.
 	// Holding the menu button does the same (1 s), or calibrates (3 s).
@@ -59,10 +61,16 @@ private:
 	void HandleState( const SenseState &s );
 	void FillOutput( SenseOutput &out );
 	vr::DriverPose_t BuildPose();
-	void Pulse( double seconds );
+	// Queue an alert buzz: alternating on/off durations in seconds.
+	void Buzz( std::initializer_list<double> pattern );
+	void UpdateSkeleton( const SenseState &s );
+	void UpdateBattery( const SenseState &s );
+	void SaveGyroBias();
+	void LoadSettings();
 	std::string CalibrationKey( char axis ) const;
 	void LoadCalibration();
 	void SaveCalibration();
+	std::string SettingKey( const char *name ) const;
 	void Disconnected();
 
 	const bool left_;
@@ -80,6 +88,7 @@ private:
 	vr::VRInputComponentHandle_t grip_value_ = 0, grip_click_ = 0, grip_touch_ = 0;
 	vr::VRInputComponentHandle_t stick_x_ = 0, stick_y_ = 0, stick_click_ = 0, stick_touch_ = 0;
 	vr::VRInputComponentHandle_t haptic_ = 0;
+	vr::VRInputComponentHandle_t skeleton_ = 0;
 
 	std::mutex hid_mutex_;  // guards hid_ / info swaps
 	std::unique_ptr<SenseHid> hid_;
@@ -98,6 +107,24 @@ private:
 	int menu_stage_ = 0;
 	std::atomic<bool> recenter_requested_{ false };
 	std::atomic<bool> calibrate_requested_{ false };
+	bool bias_saved_ = false;
+
+	// Prediction / smoothing (IO thread).
+	double prediction_s_ = 0.012;
+	vrmath::Vec3 smoothed_gyro_world_;
+	vrmath::Vec3 last_hand_, hand_velocity_;
+	double last_pose_time_ = -1.0;
+
+	// Recenter when the headset is put on, once the controller is held level.
+	bool recenter_on_wear_ = true;
+	uint32_t seen_put_on_ = 0;
+	std::chrono::steady_clock::time_point wear_recenter_until_{};
+
+	// Finger curls for the skeleton (thumb, index, middle, ring, pinky).
+	float curls_[5]{};
+	std::chrono::steady_clock::time_point next_skeleton_{};
+
+	bool battery_alerts_ = true;
 	// Orientation fix in the controller frame, from the hold-to-calibrate
 	// gesture; persisted in the driver_psvr2 settings section.
 	vr::HmdQuaternion_t calibration_ = vrmath::Identity();
@@ -111,9 +138,17 @@ private:
 	float haptic_frequency_ = 0.0f;
 	std::chrono::steady_clock::time_point haptic_end_{};
 	double pcm_phase_ = 0.0;
-	TriggerEffect trigger_;
+	TriggerEffect trigger_;         // what is on the trigger now
+	TriggerEffect default_trigger_; // default_trigger_effect setting
+	bool app_trigger_ = false;      // a Toolkit client owns the trigger
 	bool trigger_dirty_ = false;
+	struct BuzzSegment
+	{
+		std::chrono::steady_clock::time_point start, end;
+	};
+	std::vector<BuzzSegment> buzz_;
 
 	float battery_ = -1.0f;
+	float alerted_battery_ = 1.0f;  // lowest alert threshold already buzzed
 	bool charging_ = false;
 };

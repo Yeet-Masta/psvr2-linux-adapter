@@ -8,6 +8,7 @@
 #include <poll.h>
 
 #include "driverlog.h"
+#include "hand_simulation.h"
 #include "hmd_device_driver.h"
 
 namespace
@@ -17,6 +18,56 @@ constexpr double kDeg = 3.14159265358979323846 / 180.0;
 constexpr auto kOutputPeriod = std::chrono::microseconds( 10667 );  // 32 PCM samples at 3 kHz
 constexpr auto kRecenterHold = std::chrono::milliseconds( 1000 );
 constexpr auto kCalibrateHold = std::chrono::milliseconds( 3000 );
+constexpr auto kSkeletonPeriod = std::chrono::milliseconds( 10 );
+constexpr auto kWearRecenterWindow = std::chrono::seconds( 8 );
+constexpr const char *kSection = "driver_psvr2";
+
+float GetFloatSetting( const char *key, float fallback )
+{
+	vr::EVRSettingsError err = vr::VRSettingsError_None;
+	const float v = vr::VRSettings()->GetFloat( kSection, key, &err );
+	return err == vr::VRSettingsError_None ? v : fallback;
+}
+
+bool GetBoolSetting( const char *key, bool fallback )
+{
+	vr::EVRSettingsError err = vr::VRSettingsError_None;
+	const bool v = vr::VRSettings()->GetBool( kSection, key, &err );
+	return err == vr::VRSettingsError_None ? v : fallback;
+}
+
+// default_trigger_effect: off | light | medium | heavy | click | rigid.
+TriggerEffect DefaultTriggerEffect()
+{
+	char name[32] = "off";
+	vr::EVRSettingsError err = vr::VRSettingsError_None;
+	vr::VRSettings()->GetString( kSection, "default_trigger_effect", name, sizeof( name ), &err );
+	TriggerEffect fx;
+	const std::string n = err == vr::VRSettingsError_None ? name : "off";
+	if ( n == "light" || n == "medium" || n == "heavy" )
+	{
+		fx.kind = TriggerEffectKind::Feedback;
+		fx.start = 1;
+		fx.strength = n == "light" ? 2 : n == "medium" ? 4 : 6;
+	}
+	else if ( n == "click" )
+	{
+		// A soft wall partway down that gives way, like a two-stage trigger.
+		fx.kind = TriggerEffectKind::Weapon;
+		fx.start = 4;
+		fx.end = 6;
+		fx.strength = 5;
+	}
+	else if ( n == "rigid" )
+	{
+		fx.kind = TriggerEffectKind::Feedback;
+		fx.start = 0;
+		fx.strength = 8;
+	}
+	else if ( n != "off" )
+		DriverLog( "psvr2: unknown default_trigger_effect \"%s\", using off", n.c_str() );
+	return fx;
+}
 
 vr::HmdQuaternion_t RotX( double deg )
 {
@@ -51,9 +102,7 @@ void SetScalar( vr::VRInputComponentHandle_t h, float v )
 Psvr2ControllerDriver::Psvr2ControllerDriver( bool left, Psvr2HmdDriver *hmd )
 	: left_( left ), hmd_( hmd ), serial_( left ? "PSVR2-SENSE-L" : "PSVR2-SENSE-R" )
 {
-	vr::EVRSettingsError err = vr::VRSettingsError_None;
-	const bool enhanced = vr::VRSettings()->GetBool( "driver_psvr2", "enhanced_haptics", &err );
-	enhanced_haptics_ = err == vr::VRSettingsError_None ? enhanced : true;
+	LoadSettings();
 	LoadCalibration();
 
 	pose_.qWorldFromDriverRotation.w = 1.0;
@@ -111,6 +160,11 @@ vr::EVRInitError Psvr2ControllerDriver::Activate( uint32_t unObjectId )
 	in->CreateBooleanComponent( c, "/input/joystick/click", &stick_click_ );
 	in->CreateBooleanComponent( c, "/input/joystick/touch", &stick_touch_ );
 	in->CreateHapticComponent( c, "/output/haptic", &haptic_ );
+	// Finger poses from the capacitive sensors. Partial: curls are inferred
+	// from touch and proximity, not measured per joint.
+	in->CreateSkeletonComponent( c, left_ ? "/input/skeleton/left" : "/input/skeleton/right",
+	                             left_ ? "/skeleton/hand/left" : "/skeleton/hand/right", "/pose/raw",
+	                             vr::VRSkeletalTracking_Partial, nullptr, 0, &skeleton_ );
 
 	running_ = true;
 	io_thread_ = std::thread( &Psvr2ControllerDriver::IoThread, this );
@@ -121,7 +175,10 @@ vr::EVRInitError Psvr2ControllerDriver::Activate( uint32_t unObjectId )
 void Psvr2ControllerDriver::Deactivate()
 {
 	if ( running_.exchange( false ) && io_thread_.joinable() )
+	{
 		io_thread_.join();
+		SaveGyroBias();
+	}
 	device_index_ = vr::k_unTrackedDeviceIndexInvalid;
 }
 
@@ -156,7 +213,21 @@ void Psvr2ControllerDriver::Attach( const SenseHidInfo &info )
 		hid_ = std::move( hid );
 		fusion_ = ImuFusion();
 		last_imu_time_ = -1.0;
+		last_pose_time_ = -1.0;
 		yaw_anchored_ = false;
+		bias_saved_ = false;
+		vrmath::Vec3 b;
+		const char axes[3] = { 'x', 'y', 'z' };
+		double *v[3] = { &b.x, &b.y, &b.z };
+		bool have = true;
+		for ( int i = 0; i < 3 && have; i++ )
+		{
+			vr::EVRSettingsError err = vr::VRSettingsError_None;
+			*v[i] = vr::VRSettings()->GetFloat( kSection, SettingKey( ( std::string( "gyro_bias_" ) + axes[i] ).c_str() ).c_str(), &err );
+			have = err == vr::VRSettingsError_None;
+		}
+		if ( have )
+			fusion_.SetBias( b );
 	}
 	{
 		std::lock_guard<std::mutex> lock( out_mutex_ );
@@ -169,6 +240,9 @@ void Psvr2ControllerDriver::Attach( const SenseHidInfo &info )
 
 void Psvr2ControllerDriver::Disconnected()
 {
+	SaveGyroBias();
+	if ( battery_alerts_ && hmd_ )
+		hmd_->RequestAlert();
 	{
 		std::lock_guard<std::mutex> lock( hid_mutex_ );
 		hid_.reset();
@@ -198,12 +272,14 @@ void Psvr2ControllerDriver::OnHaptic( const vr::VREvent_HapticVibration_t &h )
 	haptic_end_ = Clock::now() + std::chrono::duration_cast<Clock::duration>( std::chrono::duration<double>( secs ) );
 }
 
-void Psvr2ControllerDriver::SetTriggerEffect( const TriggerEffect &fx )
+void Psvr2ControllerDriver::SetTriggerEffect( const TriggerEffect *fx )
 {
 	std::lock_guard<std::mutex> lock( out_mutex_ );
-	if ( fx != trigger_ )
+	app_trigger_ = fx != nullptr;
+	const TriggerEffect &want = fx ? *fx : default_trigger_;
+	if ( want != trigger_ )
 	{
-		trigger_ = fx;
+		trigger_ = want;
 		trigger_dirty_ = true;
 	}
 }
@@ -213,17 +289,52 @@ void Psvr2ControllerDriver::Recenter()
 	recenter_requested_ = true;
 }
 
-void Psvr2ControllerDriver::Pulse( double seconds )
+void Psvr2ControllerDriver::Buzz( std::initializer_list<double> pattern )
 {
 	std::lock_guard<std::mutex> lock( out_mutex_ );
-	haptic_amplitude_ = 0.6f;
-	haptic_frequency_ = 160.0f;
-	haptic_end_ = Clock::now() + std::chrono::duration_cast<Clock::duration>( std::chrono::duration<double>( seconds ) );
+	auto t = Clock::now();
+	bool on = true;
+	for ( double secs : pattern )
+	{
+		const auto end = t + std::chrono::duration_cast<Clock::duration>( std::chrono::duration<double>( secs ) );
+		if ( on )
+			buzz_.push_back( { t, end } );
+		t = end;
+		on = !on;
+	}
+}
+
+std::string Psvr2ControllerDriver::SettingKey( const char *name ) const
+{
+	return std::string( left_ ? "left_" : "right_" ) + name;
+}
+
+void Psvr2ControllerDriver::LoadSettings()
+{
+	enhanced_haptics_ = GetBoolSetting( "enhanced_haptics", true );
+	prediction_s_ = std::clamp( GetFloatSetting( "controller_prediction_ms", 12.0f ), 0.0f, 50.0f ) / 1000.0;
+	recenter_on_wear_ = GetBoolSetting( "recenter_on_wear", true );
+	battery_alerts_ = GetBoolSetting( "controller_alerts", true );
+	default_trigger_ = DefaultTriggerEffect();
+	trigger_ = default_trigger_;
+	trigger_dirty_ = true;
+}
+
+void Psvr2ControllerDriver::SaveGyroBias()
+{
+	if ( !fusion_.Settled() )
+		return;
+	const vrmath::Vec3 &b = fusion_.Bias();
+	const double v[3] = { b.x, b.y, b.z };
+	const char axes[3] = { 'x', 'y', 'z' };
+	for ( int i = 0; i < 3; i++ )
+		vr::VRSettings()->SetFloat( kSection, SettingKey( ( std::string( "gyro_bias_" ) + axes[i] ).c_str() ).c_str(),
+		                            float( v[i] ) );
 }
 
 std::string Psvr2ControllerDriver::CalibrationKey( char axis ) const
 {
-	return std::string( left_ ? "left" : "right" ) + "_calibration_" + axis;
+	return SettingKey( "calibration_" ) + axis;
 }
 
 void Psvr2ControllerDriver::LoadCalibration()
@@ -233,7 +344,7 @@ void Psvr2ControllerDriver::LoadCalibration()
 	for ( int i = 0; i < 4; i++ )
 	{
 		vr::EVRSettingsError err = vr::VRSettingsError_None;
-		q[i] = vr::VRSettings()->GetFloat( "driver_psvr2", CalibrationKey( axes[i] ).c_str(), &err );
+		q[i] = vr::VRSettings()->GetFloat( kSection, CalibrationKey( axes[i] ).c_str(), &err );
 		if ( err != vr::VRSettingsError_None )
 			return;
 	}
@@ -247,7 +358,76 @@ void Psvr2ControllerDriver::SaveCalibration()
 	const double q[4] = { calibration_.w, calibration_.x, calibration_.y, calibration_.z };
 	const char axes[4] = { 'w', 'x', 'y', 'z' };
 	for ( int i = 0; i < 4; i++ )
-		vr::VRSettings()->SetFloat( "driver_psvr2", CalibrationKey( axes[i] ).c_str(), float( q[i] ) );
+		vr::VRSettings()->SetFloat( kSection, CalibrationKey( axes[i] ).c_str(), float( q[i] ) );
+}
+
+void Psvr2ControllerDriver::UpdateBattery( const SenseState &s )
+{
+	if ( !s.battery_valid )
+		return;
+	if ( std::fabs( s.battery - battery_ ) > 0.01f || s.charging != charging_ )
+	{
+		battery_ = s.battery;
+		charging_ = s.charging;
+		vr::VRProperties()->SetFloatProperty( container_, vr::Prop_DeviceBatteryPercentage_Float, battery_ );
+		vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DeviceIsCharging_Bool, charging_ );
+	}
+	// Three short buzzes below 15 %, five below 5 %; re-arm once charged.
+	if ( charging_ || battery_ > 0.2f )
+		alerted_battery_ = 1.0f;
+	else if ( battery_alerts_ && battery_ < 0.05f && alerted_battery_ > 0.05f )
+	{
+		alerted_battery_ = 0.05f;
+		Buzz( { 0.12, 0.1, 0.12, 0.1, 0.12, 0.1, 0.12, 0.1, 0.12 } );
+		DriverLog( "psvr2: %s controller battery critical", left_ ? "left" : "right" );
+	}
+	else if ( battery_alerts_ && battery_ < 0.15f && alerted_battery_ > 0.15f )
+	{
+		alerted_battery_ = 0.15f;
+		Buzz( { 0.15, 0.12, 0.15, 0.12, 0.15 } );
+		DriverLog( "psvr2: %s controller battery low", left_ ? "left" : "right" );
+	}
+}
+
+void Psvr2ControllerDriver::UpdateSkeleton( const SenseState &s )
+{
+	if ( !skeleton_ )
+		return;
+	// Curl targets from the capacitive sensors: a resting finger curls
+	// partway, a pressed one fully, a lifted one opens up.
+	const bool thumb_down = s.face_lower_touch || s.face_upper_touch || s.stick_touch || s.face_lower_click ||
+	                        s.face_upper_click || s.stick_click;
+	const bool thumb_press = s.face_lower_click || s.face_upper_click || s.stick_click;
+	const float target[5] = {
+		thumb_press ? 1.0f : thumb_down ? 0.7f : 0.0f,
+		s.trigger_touch || s.trigger > 0.0f ? 0.45f + 0.55f * s.trigger : 0.3f * s.trigger_proximity,
+		s.grip_click ? 1.0f : s.grip_touch ? 0.85f : 0.8f * s.grip_proximity,
+		0.0f,
+		0.0f,
+	};
+	for ( int i = 0; i < 3; i++ )
+		curls_[i] += 0.35f * ( target[i] - curls_[i] );
+	// One grip sensor covers the last three fingers.
+	curls_[3] = curls_[4] = curls_[2];
+
+	const auto now = Clock::now();
+	if ( now < next_skeleton_ )
+		return;
+	next_skeleton_ = now + kSkeletonPeriod;
+
+	static MyHandSimulation sim;
+	vr::VRBoneTransform_t bones[eBone_Count];
+	const vr::ETrackedControllerRole role = left_ ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
+	sim.ComputeSkeletonTransforms( role, { curls_[0], curls_[1], curls_[2], curls_[3], curls_[4] }, {}, bones );
+	vr::VRDriverInput()->UpdateSkeletonComponent( skeleton_, vr::VRSkeletalMotionRange_WithController, bones, eBone_Count );
+	// Without the controller in the way the hand can close all the way.
+	sim.ComputeSkeletonTransforms( role,
+	                               { std::min( 1.0f, curls_[0] * 1.2f ), std::min( 1.0f, curls_[1] * 1.2f ),
+	                                 std::min( 1.0f, curls_[2] * 1.2f ), std::min( 1.0f, curls_[3] * 1.2f ),
+	                                 std::min( 1.0f, curls_[4] * 1.2f ) },
+	                               {}, bones );
+	vr::VRDriverInput()->UpdateSkeletonComponent( skeleton_, vr::VRSkeletalMotionRange_WithoutController, bones,
+	                                              eBone_Count );
 }
 
 void Psvr2ControllerDriver::FillOutput( SenseOutput &out )
@@ -257,7 +437,12 @@ void Psvr2ControllerDriver::FillOutput( SenseOutput &out )
 	out.trigger_dirty = trigger_dirty_;
 	trigger_dirty_ = false;
 
-	const bool active = haptic_amplitude_ > 0.0f && Clock::now() < haptic_end_;
+	const auto now = Clock::now();
+	buzz_.erase( std::remove_if( buzz_.begin(), buzz_.end(), [&]( const BuzzSegment &b ) { return b.end <= now; } ),
+	             buzz_.end() );
+	const bool buzzing =
+		std::any_of( buzz_.begin(), buzz_.end(), [&]( const BuzzSegment &b ) { return b.start <= now; } );
+	const bool active = buzzing || ( haptic_amplitude_ > 0.0f && now < haptic_end_ );
 	out.rumble_amplitude = 0;
 	out.has_pcm = false;
 	if ( !active )
@@ -265,24 +450,27 @@ void Psvr2ControllerDriver::FillOutput( SenseOutput &out )
 		pcm_phase_ = 0.0;
 		return;
 	}
+	// Driver alerts win over game haptics.
+	const float amplitude = buzzing ? 0.7f : haptic_amplitude_;
+	const float frequency = buzzing ? 160.0f : haptic_frequency_;
 
 	if ( enhanced_haptics_ )
 	{
 		// Synthesize the requested tone as PCM for the voice-coil actuator.
-		const double hz = std::clamp( haptic_frequency_ > 0.0f ? double( haptic_frequency_ ) : 160.0, 20.0, 1000.0 );
+		const double hz = std::clamp( frequency > 0.0f ? double( frequency ) : 160.0, 20.0, 1000.0 );
 		const double step = 2.0 * 3.14159265358979323846 * hz / sense::kPcmSampleRate;
 		for ( int i = 0; i < sense::kPcmSamplesPerReport; i++ )
 		{
-			out.pcm[i] = int8_t( std::lround( 127.0 * haptic_amplitude_ * std::sin( pcm_phase_ ) ) );
+			out.pcm[i] = int8_t( std::lround( 127.0 * amplitude * std::sin( pcm_phase_ ) ) );
 			pcm_phase_ = std::fmod( pcm_phase_ + step, 2.0 * 3.14159265358979323846 );
 		}
 		out.has_pcm = true;
 	}
 	else
 	{
-		out.rumble_amplitude = uint8_t( std::lround( haptic_amplitude_ * 255.0f ) );
-		out.rumble_mode = haptic_frequency_ > 0.0f && haptic_frequency_ <= 70.0f ? sense::kFlag1VibrationLow60Hz
-		                  : haptic_frequency_ >= 110.0f                          ? sense::kFlag1VibrationHigh120Hz
+		out.rumble_amplitude = uint8_t( std::lround( amplitude * 255.0f ) );
+		out.rumble_mode = frequency > 0.0f && frequency <= 70.0f ? sense::kFlag1VibrationLow60Hz
+		                  : frequency >= 110.0f                          ? sense::kFlag1VibrationHigh120Hz
 		                                                                         : sense::kFlag1VibrationClassic;
 	}
 }
@@ -328,24 +516,24 @@ void Psvr2ControllerDriver::HandleState( const SenseState &s )
 		if ( menu_stage_ == 0 && held >= kRecenterHold )
 		{
 			recenter_requested_ = true;
-			Pulse( 0.06 );
+			Buzz( { 0.06 } );
 			menu_stage_ = 1;
 		}
 		else if ( menu_stage_ == 1 && held >= kCalibrateHold )
 		{
 			calibrate_requested_ = true;
-			Pulse( 0.3 );
+			Buzz( { 0.3 } );
 			menu_stage_ = 2;
 		}
 	}
 	menu_was_down_ = s.menu_click;
 
-	if ( s.battery_valid && ( std::fabs( s.battery - battery_ ) > 0.01f || s.charging != charging_ ) )
+	UpdateBattery( s );
+	UpdateSkeleton( s );
+	if ( !bias_saved_ && fusion_.Settled() )
 	{
-		battery_ = s.battery;
-		charging_ = s.charging;
-		vr::VRProperties()->SetFloatProperty( container_, vr::Prop_DeviceBatteryPercentage_Float, battery_ );
-		vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DeviceIsCharging_Bool, charging_ );
+		SaveGyroBias();
+		bias_saved_ = true;
 	}
 
 	gyro_world_ = vrmath::Rotate( fusion_.Orientation(), fusion_.Unbiased( s.gyro ) );
@@ -384,6 +572,25 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 
 	// The IMU has no heading reference: line it up with the headset on the
 	// first pose and whenever recentering is requested.
+	// After the headset goes on, recenter the first time the controller is
+	// held level and steady in front (within a few seconds).
+	const auto now = Clock::now();
+	if ( recenter_on_wear_ && hmd_ && hmd_->PutOnCount() != seen_put_on_ )
+	{
+		seen_put_on_ = hmd_->PutOnCount();
+		wear_recenter_until_ = now + kWearRecenterWindow;
+	}
+	if ( now < wear_recenter_until_ )
+	{
+		const vrmath::Vec3 fwd = vrmath::Rotate( raw_grip, { 0.0, 0.0, -1.0 } );
+		const vrmath::Vec3 &w = smoothed_gyro_world_;
+		if ( std::fabs( fwd.y ) < 0.4 && w.x * w.x + w.y * w.y + w.z * w.z < 0.25 )
+		{
+			recenter_requested_ = true;
+			wear_recenter_until_ = {};
+		}
+	}
+
 	if ( !yaw_anchored_ || recenter_requested_.exchange( false ) )
 	{
 		yaw_offset_ = head_yaw - vrmath::Yaw( raw_grip );
@@ -403,14 +610,31 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	hand = vrmath::Add( hand, vrmath::Rotate( elbow_yaw, kUpperArm ) );
 	hand = vrmath::Add( hand, vrmath::Rotate( grip, kForearm ) );
 
+	// Velocities let SteamVR extrapolate over the Bluetooth latency
+	// (poseTimeOffset below); smoothed so the prediction does not amplify
+	// sensor noise into jitter.
+	const vrmath::Vec3 w = vrmath::Rotate( yaw_fix, gyro_world_ );
+	smoothed_gyro_world_ = vrmath::Add( vrmath::Scale( smoothed_gyro_world_, 0.6 ), vrmath::Scale( w, 0.4 ) );
+	if ( last_pose_time_ >= 0.0 && last_imu_time_ > last_pose_time_ )
+	{
+		const double dt = last_imu_time_ - last_pose_time_;
+		const vrmath::Vec3 v = vrmath::Scale( vrmath::Add( hand, vrmath::Scale( last_hand_, -1.0 ) ), 1.0 / dt );
+		hand_velocity_ = vrmath::Add( vrmath::Scale( hand_velocity_, 0.7 ), vrmath::Scale( v, 0.3 ) );
+	}
+	last_hand_ = hand;
+	last_pose_time_ = last_imu_time_;
+
 	p.qRotation = grip;
 	p.vecPosition[0] = hand.x;
 	p.vecPosition[1] = hand.y;
 	p.vecPosition[2] = hand.z;
-	const vrmath::Vec3 w = vrmath::Rotate( yaw_fix, gyro_world_ );
-	p.vecAngularVelocity[0] = w.x;
-	p.vecAngularVelocity[1] = w.y;
-	p.vecAngularVelocity[2] = w.z;
+	p.vecVelocity[0] = hand_velocity_.x;
+	p.vecVelocity[1] = hand_velocity_.y;
+	p.vecVelocity[2] = hand_velocity_.z;
+	p.vecAngularVelocity[0] = smoothed_gyro_world_.x;
+	p.vecAngularVelocity[1] = smoothed_gyro_world_.y;
+	p.vecAngularVelocity[2] = smoothed_gyro_world_.z;
+	p.poseTimeOffset = -prediction_s_;
 	p.poseIsValid = true;
 	p.result = vr::TrackingResult_Running_OK;
 	return p;

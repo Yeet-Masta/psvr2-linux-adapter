@@ -333,7 +333,7 @@ void ToolkitIpcServer::ClientLoop( int fd )
 
 	// Don't leave a crashed game's trigger resistance behind.
 	if ( set_triggers )
-		triggers_( 2, TriggerEffect{} );
+		triggers_( 2, nullptr );
 
 	std::lock_guard<std::mutex> lock( clients_mutex_ );
 	client_fds_.erase( std::remove( client_fds_.begin(), client_fds_.end(), fd ), client_fds_.end() );
@@ -379,7 +379,7 @@ void ToolkitIpcServer::Handle( int fd, uint16_t type, const uint8_t *data, int32
 		int hand = 2;
 		TriggerEffect fx;
 		if ( version && ParseTrigger( type, data, len, hand, fx ) && hand >= 0 && hand <= 2 )
-			triggers_( hand, fx );
+			triggers_( hand, &fx );
 		return;
 	}
 	}

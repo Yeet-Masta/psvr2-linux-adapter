@@ -130,6 +130,16 @@
         0,
         0
       ]
+    },
+    "/input/skeleton/left": {
+      "type": "skeleton",
+      "skeleton": "/skeleton/hand/left",
+      "side": "left"
+    },
+    "/input/skeleton/right": {
+      "type": "skeleton",
+      "skeleton": "/skeleton/hand/right",
+      "side": "right"
     }
   }
 }

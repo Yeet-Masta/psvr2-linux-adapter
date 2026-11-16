@@ -36,6 +36,9 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 	const float hz = vr::VRSettings()->GetFloat( kSettingsSection, "display_frequency" );
 	if ( hz > 0.0f )
 		display_frequency_ = hz;
+	// The tracker's origin is where it started; without a SteamVR room setup
+	// this lifts the view to standing height. 0 (default) leaves it alone.
+	standing_height_ = std::clamp( vr::VRSettings()->GetFloat( kSettingsSection, "standing_height_m" ), 0.0f, 2.5f );
 
 	Psvr2DisplayConfig cfg{};
 	// Each field falls back to the struct default when the setting is absent (0).
@@ -101,6 +104,14 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 	vr::VRDriverInput()->CreateHapticComponent( c, "/output/haptic", &haptic_ );
 	vr::VRDriverInput()->CreateBooleanComponent( c, "/proximity", &proximity_ );
 
+	vr::EVRSettingsError cam_err = vr::VRSettingsError_None;
+	const bool camera = vr::VRSettings()->GetBool( kSettingsSection, "passthrough_camera", &cam_err );
+	if ( cam_err != vr::VRSettingsError_None || camera )
+	{
+		camera_ = std::make_unique<Psvr2CameraComponent>( [this] { return GetPose(); } );
+		Psvr2CameraComponent::SetProperties( c );
+	}
+
 	// Required for the compositor to start.
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_DisplayFrequency_Float, display_frequency_ );
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserHeadToEyeDepthMeters_Float, 0.0f );
@@ -134,6 +145,8 @@ void Psvr2HmdDriver::Deactivate()
 		if ( gaze_thread_.joinable() )
 			gaze_thread_.join();
 	}
+	if ( camera_ )
+		camera_->StopVideoStream();
 	SetRumble( 0 );
 	device_index_ = vr::k_unTrackedDeviceIndexInvalid;
 }
@@ -144,6 +157,8 @@ void *Psvr2HmdDriver::GetComponent( const char *pchComponentNameAndVersion )
 {
 	if ( std::strcmp( pchComponentNameAndVersion, vr::IVRDisplayComponent_Version ) == 0 )
 		return display_.get();
+	if ( camera_ && std::strcmp( pchComponentNameAndVersion, vr::IVRCameraComponent_Version ) == 0 )
+		return static_cast<vr::IVRCameraComponent *>( camera_.get() );
 	return nullptr;
 }
 
@@ -187,6 +202,11 @@ void Psvr2HmdDriver::OnHaptic( const vr::VREvent_HapticVibration_t &h )
 
 void Psvr2HmdDriver::RunFrame()
 {
+	if ( alert_requested_.exchange( false ) )
+	{
+		SetRumble( 20 );
+		rumble_end_ = std::chrono::steady_clock::now() + std::chrono::milliseconds( 400 );
+	}
 	if ( rumble_hz_ && std::chrono::steady_clock::now() >= rumble_end_ )
 		SetRumble( 0 );
 }
@@ -205,6 +225,8 @@ void Psvr2HmdDriver::PollControls()
 	}
 	if ( c.worn != worn_ )
 	{
+		if ( worn_ == 0 && c.worn )
+			put_on_count_++;
 		// SteamVR derives user presence (and its standby) from /proximity.
 		if ( proximity_ )
 			vr::VRDriverInput()->UpdateBooleanComponent( proximity_, c.worn != 0, 0 );
@@ -295,6 +317,7 @@ void Psvr2HmdDriver::PoseThread()
 		vr::DriverPose_t pose{};
 		if ( pose_source_->ReadPose( pose ) )
 		{
+			pose.vecPosition[1] += standing_height_;
 			{
 				std::lock_guard<std::mutex> lock( pose_mutex_ );
 				last_pose_ = pose;

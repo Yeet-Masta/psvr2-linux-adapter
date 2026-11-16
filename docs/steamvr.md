@@ -33,8 +33,30 @@ driver is pure userspace and consumes the kernel module's device nodes through
   and adaptive trigger effects. `scripts/toolkit-ipc-test.py` exercises it.
 - **Headset rumble** — the HMD's `/output/haptic`; works only on a jailbroken
   headset (see below).
-- **Proximity sensor** — taking the headset off / putting it on sends SteamVR's
-  user-interaction events.
+- **Proximity sensor** — reported on the HMD's `/proximity` input, so SteamVR
+  knows when the headset is worn. Putting it on also recenters the controllers
+  the next time you hold them level and still in front of you
+  (`recenter_on_wear`).
+- **Finger tracking** — each controller has a hand skeleton
+  (`/input/skeleton/left|right`, partial tracking). Thumb, index and the last
+  three fingers curl from the touch and proximity sensors, so hands open,
+  point and make a fist in skeletal-input games. The bone model is Valve's
+  OpenVR hand-simulation sample (BSD-3, vendored in `third_party/openvr`).
+- **Motion prediction** — controller poses carry smoothed linear and angular
+  velocity and a `controller_prediction_ms` (default 12) look-ahead, which
+  hides most of the Bluetooth latency.
+- **Default trigger feel** — `default_trigger_effect` (`off`, `light`,
+  `medium`, `heavy`, `click`, `rigid`; default `light`) applies whenever no
+  Toolkit-aware app is driving the adaptive triggers.
+- **Alerts** — the controller buzzes three times below 15 % battery and five
+  times below 5 %. The headset rumbles when a controller drops out
+  (`controller_alerts`).
+- **Gyro-bias memory** — the learned gyro bias is saved per controller
+  (`left_gyro_bias_*` / `right_gyro_bias_*`), so drift is low from the start.
+- **Passthrough camera (experimental)** — the bottom tracking cameras are
+  offered to SteamVR as a stereo camera (Room View). The camera geometry is
+  estimated, not calibrated, so the 3D view is approximate. Turn it off with
+  `passthrough_camera: false`.
 
 ## Build & install
 
@@ -168,6 +190,6 @@ thread reads 6DoF samples, remaps them into the OpenVR frame, and submits them v
   [vr2jb](https://github.com/BnuuySolutions/vr2jb) (firmware 6.0, redone after
   every power cycle; see its warnings). Stock firmware ignores the command.
 - **Spatial calibration.** Floor height and forward direction come from SteamVR's
-  usual calibration (Reset Seated Position / Room Setup). Driver-side
-  auto-recenter and a default standing height are planned so this works out of the
-  box.
+  usual calibration (Reset Seated Position / Room Setup). Without a room setup,
+  set `standing_height_m` to about your eye height to lift the view off the
+  floor.

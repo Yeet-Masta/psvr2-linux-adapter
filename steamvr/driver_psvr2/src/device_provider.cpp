@@ -30,7 +30,7 @@ vr::EVRInitError Psvr2DeviceProvider::Init( vr::IVRDriverContext *pDriverContext
 	if ( err != vr::VRSettingsError_None || ipc )
 	{
 		ipc_ = std::make_unique<ToolkitIpcServer>(
-			hmd_.get(), [this]( int hand, const TriggerEffect &fx ) { SetTriggerEffect( hand, fx ); } );
+			hmd_.get(), [this]( int hand, const TriggerEffect *fx ) { SetTriggerEffect( hand, fx ); } );
 		ipc_->Start();
 	}
 
@@ -45,7 +45,7 @@ void Psvr2DeviceProvider::Cleanup()
 	hmd_ = nullptr;
 }
 
-void Psvr2DeviceProvider::SetTriggerEffect( int hand, const TriggerEffect &fx )
+void Psvr2DeviceProvider::SetTriggerEffect( int hand, const TriggerEffect *fx )
 {
 	for ( int i = 0; i < 2; i++ )
 		if ( hand == 2 || hand == i )

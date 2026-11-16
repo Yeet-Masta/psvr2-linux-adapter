@@ -97,13 +97,17 @@ static int psvr2_control(struct psvr2_device *psvr2, bool in, u16 report_id,
 
 	mutex_lock(&psvr2->ctrl_lock);
 	if (in) {
-		ret = usb_control_msg_recv(psvr2->udev, 0, 0x01,
-					   USB_DIR_IN | USB_TYPE_VENDOR |
-						   USB_RECIP_ENDPOINT,
-					   report_id, 0, pkt, len + 8, 100,
-					   GFP_KERNEL);
-		if (!ret && len)
-			memcpy(data, pkt->data, len);
+		/* Replies may be shorter than asked; the rest stays zero. */
+		ret = usb_control_msg(psvr2->udev,
+				      usb_rcvctrlpipe(psvr2->udev, 0), 0x01,
+				      USB_DIR_IN | USB_TYPE_VENDOR |
+					      USB_RECIP_ENDPOINT,
+				      report_id, 0, pkt, len + 8, 100);
+		if (ret >= 0) {
+			if (len)
+				memcpy(data, pkt->data, len);
+			ret = 0;
+		}
 	} else {
 		if (len)
 			memcpy(pkt->data, data, len);

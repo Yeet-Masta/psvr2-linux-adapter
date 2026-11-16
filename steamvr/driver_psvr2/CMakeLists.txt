@@ -61,9 +61,13 @@ set_target_properties(driver_psvr2 PROPERTIES
 # ALL target (not a POST_BUILD on the .so) so resource-only edits — e.g. the
 # manifest or default.vrsettings — re-stage every build even when the shared
 # object itself does not relink.
+# SteamVR wants the manifest at the package root and everything else under
+# resources/: "{psvr2}/input/..." resolves to <package>/resources/input/...
 add_custom_target(stage_resources ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/resources" "${PKG_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources" "${PKG_DIR}/resources"
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/driver.vrdrivermanifest" "${PKG_DIR}"
     COMMENT "Staging SteamVR driver resources at ${PKG_DIR}"
     VERBATIM
 )

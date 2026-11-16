@@ -99,6 +99,7 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 		vr::VRDriverInput()->CreateEyeTrackingComponent( c, "/eyetracking", &eye_tracking_ );
 	}
 	vr::VRDriverInput()->CreateHapticComponent( c, "/output/haptic", &haptic_ );
+	vr::VRDriverInput()->CreateBooleanComponent( c, "/proximity", &proximity_ );
 
 	// Required for the compositor to start.
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_DisplayFrequency_Float, display_frequency_ );
@@ -204,11 +205,9 @@ void Psvr2HmdDriver::PollControls()
 	}
 	if ( c.worn != worn_ )
 	{
-		if ( worn_ != -1 && device_index_ != vr::k_unTrackedDeviceIndexInvalid )
-			vr::VRServerDriverHost()->VendorSpecificEvent(
-				device_index_,
-				c.worn ? vr::VREvent_TrackedDeviceUserInteractionStarted : vr::VREvent_TrackedDeviceUserInteractionEnded,
-				{}, 0 );
+		// SteamVR derives user presence (and its standby) from /proximity.
+		if ( proximity_ )
+			vr::VRDriverInput()->UpdateBooleanComponent( proximity_, c.worn != 0, 0 );
 		worn_ = c.worn;
 	}
 }

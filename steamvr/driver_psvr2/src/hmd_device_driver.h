@@ -133,6 +133,7 @@ private:
 	Psvr2GazeData gaze_{};
 	vr::VRInputComponentHandle_t eye_tracking_ = 0;
 	vr::VRInputComponentHandle_t haptic_ = 0;
+	vr::VRInputComponentHandle_t proximity_ = 0;
 
 	int ipd_mm_ = 0;
 	int worn_ = -1;

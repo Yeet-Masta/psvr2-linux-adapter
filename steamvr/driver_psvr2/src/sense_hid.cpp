@@ -12,6 +12,8 @@
 #include <fcntl.h>
 #include <fstream>
 #include <linux/hidraw.h>
+#include <mutex>
+#include <set>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -79,7 +81,13 @@ bool SenseHid::Open()
 	fd_ = open( info_.path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC );
 	if ( fd_ < 0 )
 	{
-		DriverLog( "psvr2: cannot open %s: %s (udev rule installed?)", info_.path.c_str(), strerror( errno ) );
+		// The provider retries every few seconds; say it once per node.
+		static std::mutex logged_mutex;
+		static std::set<std::string> logged;
+		std::lock_guard<std::mutex> lock( logged_mutex );
+		if ( logged.insert( info_.path ).second )
+			DriverLog( "psvr2: cannot open %s: %s (udev rule installed? see docs/install.md)", info_.path.c_str(),
+			           strerror( errno ) );
 		return false;
 	}
 	if ( !ReadCalibration() )

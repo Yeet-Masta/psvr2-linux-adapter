@@ -3,6 +3,10 @@
 
 #include "libpsvr2.h"
 
+#include <algorithm>
+#include <cmath>
+#include <ctime>
+
 // ---------------------------------------------------------------------------
 // Device -> OpenVR frame remap.
 //
@@ -66,6 +70,51 @@ bool PoseSource::HasPose() const
 	return dev_ && psvr2_has_pose( dev_ );
 }
 
+// SteamVR extrapolates each pose to photon time with these velocities; with
+// zero velocity every head turn judders (90 Hz) or doubles (120 Hz). Finite
+// differences over a ~10 ms window on the device clock keep noise down.
+void PoseSource::EstimateVelocity( const Sample &now, vr::DriverPose_t &out )
+{
+	constexpr double kWindow = 0.010, kMaxAge = 0.1, kSmooth = 0.5;
+	history_.push_back( now );
+	while ( history_.size() > 2 && now.t - history_[1].t >= kWindow )
+		history_.pop_front();
+	const Sample &old = history_.front();
+	const double dt = now.t - old.t;
+	if ( dt > 1e-4 && dt < kMaxAge )
+	{
+		// Rotation from old to now in the world frame: dq = now * conj(old).
+		const vr::HmdQuaternion_t a = now.rot;
+		const vr::HmdQuaternion_t b{ old.rot.w, -old.rot.x, -old.rot.y, -old.rot.z };
+		vr::HmdQuaternion_t dq = QuatMul( a, b );
+		if ( dq.w < 0 )
+			dq = { -dq.w, -dq.x, -dq.y, -dq.z };
+		const double s = std::sqrt( dq.x * dq.x + dq.y * dq.y + dq.z * dq.z );
+		const double angle = 2.0 * std::atan2( s, dq.w );
+		const double k = s > 1e-9 ? angle / ( s * dt ) : 2.0 / dt;
+		const double w[3] = { dq.x * k, dq.y * k, dq.z * k };
+		for ( int i = 0; i < 3; i++ )
+		{
+			const double v = ( now.pos[i] - old.pos[i] ) / dt;
+			vel_[i] += kSmooth * ( v - vel_[i] );
+			ang_vel_[i] += kSmooth * ( w[i] - ang_vel_[i] );
+		}
+	}
+	else if ( dt >= kMaxAge )
+	{
+		// A gap in the stream: start over rather than extrapolate stale motion.
+		history_.clear();
+		history_.push_back( now );
+		for ( int i = 0; i < 3; i++ )
+			vel_[i] = ang_vel_[i] = 0.0;
+	}
+	for ( int i = 0; i < 3; i++ )
+	{
+		out.vecVelocity[i] = vel_[i];
+		out.vecAngularVelocity[i] = ang_vel_[i];
+	}
+}
+
 bool PoseSource::ReadPose( vr::DriverPose_t &out )
 {
 	struct psvr2_pose sample{};
@@ -79,6 +128,19 @@ bool PoseSource::ReadPose( vr::DriverPose_t &out )
 	out.qDriverFromHeadRotation.w = 1.0;
 
 	RemapPose( sample, out );
+
+	// Device clock (wraps every ~71 min) for velocity, host clock for age.
+	if ( history_.empty() )
+		last_vts_ = sample.device_vts_us;
+	device_time_ += double( uint32_t( sample.device_vts_us - last_vts_ ) ) * 1e-6;
+	last_vts_ = sample.device_vts_us;
+	EstimateVelocity( { device_time_, { out.vecPosition[0], out.vecPosition[1], out.vecPosition[2] }, out.qRotation },
+	                  out );
+	timespec ts{};
+	clock_gettime( CLOCK_MONOTONIC, &ts );
+	const double age = ( double( ts.tv_sec ) * 1e9 + double( ts.tv_nsec ) - double( sample.timestamp_ns ) ) * 1e-9;
+	// The sample is this old already; SteamVR predicts forward from here.
+	out.poseTimeOffset = -std::clamp( age, 0.0, 0.05 );
 
 	out.poseIsValid = sample.valid != 0;
 	out.deviceIsConnected = true;

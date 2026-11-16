@@ -124,6 +124,7 @@ struct psvr2_device {
 	struct usb_device	*udev;		/* for ep0 control transfers */
 	struct mutex		ctrl_lock;	/* serialises ep0 control    */
 	u8			brightness;	/* last value written (0..31) */
+	u8			rumble;		/* last rumble Hz written (0..25) */
 
 	struct psvr2_status	*status;	/* IF7 stream context        */
 	struct psvr2_imu	*imu;		/* IIO device                */

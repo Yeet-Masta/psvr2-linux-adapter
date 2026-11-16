@@ -95,6 +95,29 @@ int psvr2_read_imu(psvr2_t *p, struct psvr2_imu *out);
 /* Set panel brightness, 0..31. Returns 0 on success, -1 on error. */
 int psvr2_set_brightness(psvr2_t *p, int level);
 
+/*
+ * Run the headset rumble motor at 0..25 Hz (0 = off). Only a jailbroken
+ * headset (vr2jb) acts on it. Returns 0 on success, -1 on error.
+ */
+int psvr2_set_rumble(psvr2_t *p, int hz);
+
+/*
+ * Per-unit lens distortion parameters for psvr2_distort(): per-eye centre
+ * offsets (left x, y, right x, y) and rotations (left cos, sin, right cos,
+ * sin). Fills defaults when the block is missing. Returns 0 when read from
+ * the headset, 1 for an old-format block (defaults), -1 on error (defaults).
+ */
+int psvr2_get_lens_distortion(psvr2_t *p, float out[8]);
+
+/*
+ * Sony's lens model (ported from Monado, BSL-1.0): maps the output-panel
+ * coordinate (u, v) in [0, 1] of eye 0 (left) or 1 (right) to the render
+ * coordinate to sample, per colour channel: out[0..1] red, [2..3] green,
+ * [4..5] blue.
+ */
+void psvr2_distort(const float params[8], int eye, float u, float v,
+		   float out[6]);
+
 #ifdef __cplusplus
 }
 #endif

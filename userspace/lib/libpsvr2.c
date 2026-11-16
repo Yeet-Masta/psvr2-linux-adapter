@@ -8,6 +8,7 @@
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +31,7 @@ struct psvr2 {
 	double	accel_scale;
 	double	gyro_scale;
 	char	cam_path[300];		/* "/dev/videoN", "" if none */
-	char	bright_path[400];	/* brightness sysfs attr, "" if none */
+	char	sysfs_dir[300];		/* a bound interface dir, "" if none */
 };
 
 /* ---- small sysfs helpers ------------------------------------------------ */
@@ -118,7 +119,8 @@ static void find_camera(struct psvr2 *p)
 	closedir(d);
 }
 
-static void find_brightness(struct psvr2 *p)
+/* Every bound interface carries the same device attributes; pick the first. */
+static void find_sysfs(struct psvr2 *p)
 {
 	DIR *d = opendir(DRV_DIR);
 	struct dirent *e;
@@ -132,14 +134,30 @@ static void find_brightness(struct psvr2 *p)
 			continue;
 		snprintf(path, sizeof(path), "%s/%s/brightness", DRV_DIR,
 			 e->d_name);
-		if (access(path, W_OK | R_OK) == 0 ||
-		    access(path, F_OK) == 0) {
-			snprintf(p->bright_path, sizeof(p->bright_path), "%s",
-				 path);
+		if (access(path, F_OK) == 0) {
+			snprintf(p->sysfs_dir, sizeof(p->sysfs_dir), "%s/%s",
+				 DRV_DIR, e->d_name);
 			break;
 		}
 	}
 	closedir(d);
+}
+
+static int write_attr_int(const struct psvr2 *p, const char *attr, int value)
+{
+	char path[400], buf[16];
+	int fd, n;
+
+	if (!p || !p->sysfs_dir[0])
+		return -1;
+	snprintf(path, sizeof(path), "%s/%s", p->sysfs_dir, attr);
+	fd = open(path, O_WRONLY);
+	if (fd < 0)
+		return -1;
+	n = snprintf(buf, sizeof(buf), "%d\n", value);
+	n = (write(fd, buf, n) == n) ? 0 : -1;
+	close(fd);
+	return n;
 }
 
 /* ---- lifecycle ---------------------------------------------------------- */
@@ -155,7 +173,7 @@ psvr2_t *psvr2_open(void)
 	p->gaze_fd = open(GAZE_DEV, O_RDONLY | O_NONBLOCK);
 	find_imu(p);
 	find_camera(p);
-	find_brightness(p);
+	find_sysfs(p);
 	return p;
 }
 
@@ -300,21 +318,70 @@ int psvr2_read_imu(psvr2_t *p, struct psvr2_imu *out)
 
 int psvr2_set_brightness(psvr2_t *p, int level)
 {
-	char buf[8];
-	int fd, n;
-
-	if (!p || !p->bright_path[0])
-		return -1;
 	if (level < 0)
 		level = 0;
 	if (level > 31)
 		level = 31;
+	return write_attr_int(p, "brightness", level);
+}
 
-	fd = open(p->bright_path, O_WRONLY);
-	if (fd < 0)
+int psvr2_set_rumble(psvr2_t *p, int hz)
+{
+	if (hz < 0)
+		hz = 0;
+	if (hz > 25)
+		hz = 25;
+	return write_attr_int(p, "rumble", hz);
+}
+
+/*
+ * Lens calibration -> distortion parameters. The block layout and the
+ * conversion are from Monado's psvr2_setup_distortion_and_fovs (BSL-1.0):
+ * u8 version, 7 unknown bytes, then 32 float32 parameters.
+ */
+#define LENS_CAL_LEN 136
+
+int psvr2_get_lens_distortion(psvr2_t *p, float out[8])
+{
+	char path[400], hex[2 * LENS_CAL_LEN + 8];
+	uint8_t raw[LENS_CAL_LEN];
+	float prm[32];
+	int i;
+
+	memset(out, 0, 8 * sizeof(float));
+	out[0] = -0.09919293f;	/* firmware without a calibration block */
+	out[2] = 0.09919293f;
+	out[4] = out[6] = 1.0f;
+
+	if (!p || !p->sysfs_dir[0])
 		return -1;
-	n = snprintf(buf, sizeof(buf), "%d\n", level);
-	n = (write(fd, buf, n) == n) ? 0 : -1;
-	close(fd);
-	return n;
+	snprintf(path, sizeof(path), "%s/lens_calibration", p->sysfs_dir);
+	if (read_file_str(path, hex, sizeof(hex)) ||
+	    strlen(hex) != 2 * LENS_CAL_LEN)
+		return -1;
+	for (i = 0; i < LENS_CAL_LEN; i++) {
+		unsigned int b;
+
+		if (sscanf(hex + 2 * i, "%2x", &b) != 1)
+			return -1;
+		raw[i] = (uint8_t)b;
+	}
+	if (raw[0] < 4)
+		return 1;
+
+	for (i = 0; i < 32; i++) {
+		uint32_t le;
+
+		memcpy(&le, raw + 8 + 4 * i, 4);
+		prm[i] = f_from_le(le);
+	}
+	out[0] = (((-prm[0] - prm[6]) * 29.9f + 14.95f) / 1000.0f - 3.22f) / 32.46199f;
+	out[1] = (((-prm[1] * 29.9f) + 14.95f) / 1000.0f) / 32.46199f;
+	out[2] = (((prm[6] - prm[2]) * 29.9f + 14.95f) / 1000.0f + 3.22f) / 32.46199f;
+	out[3] = (((-prm[3] * 29.9f) + 14.95f) / 1000.0f) / 32.46199f;
+	out[4] = cosf(-prm[4] * (float)M_PI / 180.0f);
+	out[5] = sinf(-prm[4] * (float)M_PI / 180.0f);
+	out[6] = cosf(-prm[5] * (float)M_PI / 180.0f);
+	out[7] = sinf(-prm[5] * (float)M_PI / 180.0f);
+	return 0;
 }

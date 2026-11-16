@@ -163,8 +163,77 @@ static ssize_t brightness_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(brightness);
 
+/*
+ * sysfs: headset rumble motor, a single byte 0..25 (vibration frequency in Hz,
+ * 0 = off) on report 0x08 subcmd 1, as PSVR2 Toolkit sends it. Stock firmware
+ * ignores it on PC; the headset must be jailbroken (vr2jb) for the motor to run.
+ */
+static ssize_t rumble_show(struct device *dev, struct device_attribute *attr,
+			   char *buf)
+{
+	struct psvr2_device *psvr2 = usb_get_intfdata(to_usb_interface(dev));
+
+	return sysfs_emit(buf, "%u\n", psvr2->rumble);
+}
+
+static ssize_t rumble_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct psvr2_device *psvr2 = usb_get_intfdata(to_usb_interface(dev));
+	u8 value;
+	int ret;
+
+	ret = kstrtou8(buf, 0, &value);
+	if (ret)
+		return ret;
+	value = min_t(u8, value, PSVR2_RUMBLE_MAX_HZ);
+
+	ret = psvr2_control_set(psvr2, PSVR2_REPORT_SET_PERIPHERAL,
+				PSVR2_SET_PERIPHERAL_SUBCMD_MOTOR, &value,
+				sizeof(value));
+	if (ret)
+		return ret;
+
+	psvr2->rumble = value;
+	return count;
+}
+static DEVICE_ATTR_RW(rumble);
+
+/*
+ * sysfs: the per-unit lens calibration block (report 0x8f subcmd 1) as hex.
+ * Layout (Monado psvr2_setup_distortion_and_fovs): u8 version, 7 bytes
+ * unknown, then 32 little-endian float32 parameters. Userspace (libpsvr2)
+ * turns it into the distortion model's per-eye offsets and rotation.
+ */
+static ssize_t lens_calibration_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct psvr2_device *psvr2 = usb_get_intfdata(to_usb_interface(dev));
+	int i, ret;
+	u8 *cal;
+
+	cal = kzalloc(PSVR2_LENS_CAL_LEN, GFP_KERNEL);
+	if (!cal)
+		return -ENOMEM;
+	ret = psvr2_control_get(psvr2, PSVR2_REPORT_GET_LENS_CAL, 1, cal,
+				PSVR2_LENS_CAL_LEN);
+	if (!ret) {
+		/* %*ph prints at most 64 bytes per conversion. */
+		for (i = 0; i < PSVR2_LENS_CAL_LEN; i += 64)
+			ret += sysfs_emit_at(buf, ret, "%*phN",
+					     min(64, PSVR2_LENS_CAL_LEN - i),
+					     cal + i);
+		ret += sysfs_emit_at(buf, ret, "\n");
+	}
+	kfree(cal);
+	return ret;
+}
+static DEVICE_ATTR_RO(lens_calibration);
+
 static struct attribute *psvr2_attrs[] = {
 	&dev_attr_brightness.attr,
+	&dev_attr_rumble.attr,
+	&dev_attr_lens_calibration.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(psvr2);

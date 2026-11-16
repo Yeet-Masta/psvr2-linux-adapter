@@ -8,18 +8,20 @@ PCDIR    ?= $(LIBDIR)/pkgconfig
 
 all: libpsvr2.a libpsvr2.so psvr2-monitor
 
-libpsvr2.o: libpsvr2.c libpsvr2.h
+OBJS = libpsvr2.o psvr2_distortion.o
+
+%.o: %.c libpsvr2.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c -o $@ $<
 
-libpsvr2.a: libpsvr2.o
+libpsvr2.a: $(OBJS)
 	$(AR) rcs $@ $^
 
-libpsvr2.so: libpsvr2.o
-	$(CC) -shared -Wl,-soname,libpsvr2.so -o $@ $^
+libpsvr2.so: $(OBJS)
+	$(CC) -shared -Wl,-soname,libpsvr2.so -o $@ $^ -lm
 
 # The example only needs the public header, not the kernel uapi.
 psvr2-monitor: psvr2-monitor.c libpsvr2.a
-	$(CC) -I. $(CFLAGS) -o $@ psvr2-monitor.c libpsvr2.a
+	$(CC) -I. $(CFLAGS) -o $@ psvr2-monitor.c libpsvr2.a -lm
 
 install: all
 	install -Dm644 libpsvr2.h $(DESTDIR)$(INCDIR)/libpsvr2.h
@@ -28,6 +30,6 @@ install: all
 	install -Dm644 libpsvr2.pc $(DESTDIR)$(PCDIR)/libpsvr2.pc
 
 clean:
-	$(RM) libpsvr2.o libpsvr2.a libpsvr2.so psvr2-monitor
+	$(RM) $(OBJS) libpsvr2.a libpsvr2.so psvr2-monitor
 
 .PHONY: all install clean

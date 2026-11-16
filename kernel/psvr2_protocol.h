@@ -21,9 +21,14 @@ enum psvr2_report_id {
 	PSVR2_REPORT_SET_GAZE_STREAM	= 0x0c,
 	PSVR2_REPORT_SET_GAZE_USER_CAL	= 0x0d,
 	PSVR2_REPORT_SET_BRIGHTNESS	= 0x12,
+	PSVR2_REPORT_GET_LENS_CAL	= 0x8f,	/* per-unit lens distortion block */
 };
 
 #define PSVR2_SET_PERIPHERAL_SUBCMD_MOTOR	0x01
+#define PSVR2_RUMBLE_MAX_HZ			25
+
+/* Lens calibration: u8 version + 7 unknown + 32 x float32. */
+#define PSVR2_LENS_CAL_LEN			136
 
 /*
  * Camera modes (report 0x0b). Many modes interleave several views in exotic

@@ -14,7 +14,9 @@
 
 #include <linux/kref.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/usb.h>
+#include <linux/workqueue.h>
 
 #define PSVR2_VENDOR_ID		0x054c
 #define PSVR2_PRODUCT_ID	0x0cde
@@ -34,6 +36,7 @@
 #define PSVR2_IF_LD		8	/* LED detector                       */
 #define PSVR2_IF_RP		9	/* relocalizer                        */
 #define PSVR2_IF_VD		10	/* vendor data                        */
+#define PSVR2_IF_LOG		12	/* firmware console log (EP 0x8d)     */
 
 /* Status/IMU interface: alt setting 1 exposes the interrupt IN endpoint. */
 #define PSVR2_STATUS_ALT	1
@@ -56,7 +59,7 @@
 
 /*
  * Auxiliary inside-out tracking interfaces (LED detector, relocalizer, vendor
- * data). The headset's tracker appears to require these bulk IN endpoints to be
+ * data) and the firmware log interface. The headset's tracker appears to require these bulk IN endpoints to be
  * continuously drained, like the host-side reference drivers do, before it will
  * enter a tracking camera mode and emit SLAM poses. We read and discard them.
  * A single generously-sized buffer covers all three (relocalizer is the largest
@@ -108,9 +111,47 @@ struct psvr2_slam;
 struct psvr2_camera;
 struct psvr2_gaze;
 struct psvr2_aux;
+struct psvr2_ctrl;
 
-/* Number of auxiliary drain interfaces (LED detector, relocalizer, VD). */
-#define PSVR2_AUX_COUNT		3
+/*
+ * Headset clock map (psvr2_ctrl.c), fitted from Get 0xde every 500 ms as
+ * Sony's driver does (docs/sony-re/headset.md section 5.1). Samples are
+ * offsets host_ns - device_us * 1000 taken at the round-trip midpoint; the
+ * map is their mean plus a least-squares drift over the last
+ * PSVR2_CLOCK_RING samples.
+ */
+#define PSVR2_CLOCK_RING	100
+
+struct psvr2_clock {
+	spinlock_t	lock;		/* taken from URB completions */
+	bool		supported;	/* 0xde returned a non-zero time */
+	bool		valid;
+	u64		ref_dev;	/* extended device us of the fit */
+	u64		last_ext;	/* extended device us of the last sample */
+	s64		offset_ns;	/* at ref_dev */
+	s32		drift_ppb;
+	u32		rtt_us;
+	unsigned int	count, head;
+	u64		ring_dev[PSVR2_CLOCK_RING];
+	s64		ring_off[PSVR2_CLOCK_RING];
+};
+
+/*
+ * Factory calibration blobs from the IF10 "VD" stream (types 10..13), as
+ * Sony's GenData thread collects them (docs/sony-driver-re.md, calibration
+ * stream). Exposed read-only in sysfs.
+ */
+enum psvr2_calib_slot {
+	PSVR2_CALIB_CAMERA0,		/* type 10, <= 0x800 bytes */
+	PSVR2_CALIB_CAMERA1,		/* type 11, <= 0x800 bytes */
+	PSVR2_CALIB_IMU,		/* type 12, 0x78 bytes     */
+	PSVR2_CALIB_IMU_SET,		/* type 13, 0x34 bytes     */
+	PSVR2_CALIB_COUNT,
+};
+#define PSVR2_CALIB_MAX_LEN	0x800
+
+/* Number of auxiliary drain interfaces (LED detector, relocalizer, VD, log). */
+#define PSVR2_AUX_COUNT		4
 
 /*
  * One psvr2_device exists per physical headset and is shared across the USB
@@ -132,7 +173,42 @@ struct psvr2_device {
 	struct psvr2_slam	*slam;		/* IF3 stream context        */
 	struct psvr2_camera	*camera;	/* IF6 V4L2 device           */
 	struct psvr2_gaze	*gaze;		/* IF5 stream context        */
-	struct psvr2_aux	*aux[PSVR2_AUX_COUNT];	/* IF8/9/10 drains   */
+	struct psvr2_aux	*aux[PSVR2_AUX_COUNT];	/* IF8/9/10/12 drains */
+
+	/*
+	 * Headset init sequence, run once per IF7 bind (psvr2_usb.c). The
+	 * values are 0 until it has read them.
+	 */
+	struct delayed_work	init_work;
+	u32			fw_version;	/* Get 0x81 +0x00 */
+	u32			board_stage;	/* Get 0x81 +0x34 */
+	u32			min_driver;	/* Get 0xa1       */
+	bool			see_through;	/* last value set */
+
+	/*
+	 * Steady-state housekeeping (psvr2_ctrl.c), Sony's IF7 loop: clock
+	 * sync, Get 0x97 once a second, see-through on the function button,
+	 * brightness follow-up and the camera-mode keepalive.
+	 */
+	struct delayed_work	tick_work;
+	struct work_struct	event_work;	/* kicked from the status URB */
+	unsigned long		events;		/* PSVR2_EV_* bits */
+	unsigned long		see_through_at;	/* jiffies of the last 0x17/0x97 */
+	unsigned long		camera_mode_at;	/* jiffies of the last 0x0b */
+	unsigned long		brightness_at;	/* jiffies of the last 0x12 */
+	u8			prev_button;
+	u8			panel_brightness; /* status byte 10 */
+	bool			worn;
+	bool			ready;		/* init done on SuperSpeed */
+	u32			camera_mode;	/* mode kept outside V4L2 */
+	bool			camera_v4l2;	/* V4L2 owns the camera mode */
+	struct psvr2_clock	clock;
+	struct psvr2_ctrl	*ctrl;		/* /dev/psvr2-ctrl */
+
+	spinlock_t		calib_lock;
+	unsigned long		calib_seen;	/* bit per psvr2_calib_slot */
+	u16			calib_len[PSVR2_CALIB_COUNT];
+	u8			*calib[PSVR2_CALIB_COUNT];
 
 	struct dentry		*debugfs_dir;	/* created with the device   */
 };
@@ -145,6 +221,21 @@ int psvr2_control_set(struct psvr2_device *psvr2, u16 report_id, u16 subcmd,
 		      const void *data, u32 len);
 int psvr2_control_get(struct psvr2_device *psvr2, u16 report_id, u16 subcmd,
 		      void *data, u32 len);
+
+/* psvr2_ctrl.c — control chardev, clock sync, see-through, keepalives. */
+#define PSVR2_EV_SEE_THROUGH_TOGGLE	0
+#define PSVR2_EV_SEE_THROUGH_OFF	1
+#define PSVR2_EV_BRIGHTNESS		2
+
+int psvr2_ctrl_start(struct psvr2_device *psvr2, struct device *parent);
+void psvr2_ctrl_stop(struct psvr2_device *psvr2);
+void psvr2_ctrl_init(struct psvr2_device *psvr2);
+void psvr2_ctrl_ready(struct psvr2_device *psvr2);
+void psvr2_ctrl_status(struct psvr2_device *psvr2, const u8 *hdr);
+int psvr2_set_see_through(struct psvr2_device *psvr2, bool on);
+int psvr2_set_camera_mode(struct psvr2_device *psvr2, u32 mode);
+/* Map a device us timestamp to CLOCK_MONOTONIC ns; false if no clock map. */
+bool psvr2_clock_to_host(struct psvr2_device *psvr2, u32 dev_us, s64 *host_ns);
 
 /* psvr2_status.c — IF7 interrupt stream. */
 int psvr2_status_start(struct psvr2_device *psvr2, struct usb_interface *intf);
@@ -162,7 +253,10 @@ void psvr2_camera_stop(struct psvr2_device *psvr2);
 int psvr2_gaze_start(struct psvr2_device *psvr2, struct usb_interface *intf);
 void psvr2_gaze_stop(struct psvr2_device *psvr2);
 
-/* psvr2_aux.c — drain the LED detector / relocalizer / VD tracking interfaces. */
+/*
+ * psvr2_aux.c — drain the LED detector / relocalizer / VD tracking interfaces,
+ * and print the firmware log (IF12) through dynamic debug.
+ */
 int psvr2_aux_start(struct psvr2_device *psvr2, struct usb_interface *intf);
 void psvr2_aux_stop(struct psvr2_device *psvr2, struct usb_interface *intf);
 

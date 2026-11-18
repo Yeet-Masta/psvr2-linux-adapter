@@ -5,7 +5,7 @@
 
 obj-m := psvr2.o
 psvr2-y := psvr2_usb.o psvr2_status.o psvr2_imu.o psvr2_input.o psvr2_slam.o \
-	   psvr2_camera.o psvr2_gaze.o psvr2_aux.o
+	   psvr2_camera.o psvr2_gaze.o psvr2_aux.o psvr2_ctrl.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD  := $(shell pwd)

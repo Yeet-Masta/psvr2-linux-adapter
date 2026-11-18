@@ -46,6 +46,7 @@ static void psvr2_status_process(struct psvr2_status *st, int len, s64 now_ns)
 		return;
 
 	hdr = (struct psvr2_status_record_hdr *)st->buf;
+	psvr2_ctrl_status(psvr2, st->buf);
 	psvr2_input_report(psvr2, hdr->function_button, hdr->prox_sensor_flag,
 			   hdr->ipd_dial_mm);
 
@@ -70,8 +71,13 @@ static void psvr2_status_process(struct psvr2_status *st, int len, s64 now_ns)
 		if (accel[0] == PSVR2_IMU_INVALID || gyro[0] == PSVR2_IMU_INVALID)
 			continue;
 
-		/* Back-date earlier samples in the batch from the rx time. */
-		ts = now_ns - (s64)(num_imu - 1 - i) * PSVR2_IMU_PERIOD_NS;
+		/*
+		 * Capture time from the record's device timestamp through the
+		 * 0xde clock map; without a map, back-date earlier samples in
+		 * the batch from the receive time.
+		 */
+		if (!psvr2_clock_to_host(psvr2, le32_to_cpu(rec->vts_us), &ts))
+			ts = now_ns - (s64)(num_imu - 1 - i) * PSVR2_IMU_PERIOD_NS;
 		psvr2_imu_push(psvr2, accel, gyro, ts);
 	}
 }

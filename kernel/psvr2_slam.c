@@ -21,6 +21,7 @@
 #include <linux/ktime.h>
 #include <linux/miscdevice.h>
 #include <linux/poll.h>
+#include <linux/unaligned.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
@@ -201,9 +202,24 @@ static void psvr2_slam_process(struct psvr2_slam *sl, int len)
 	sample.timestamp_ns = ktime_get_ns();
 	sample.device_vts_us = le32_to_cpu(rec->vts_ts_us);
 	sample.flags = PSVR2_POSE_FLAG_VALID;
+	if (psvr2_clock_to_host(sl->psvr2, sample.device_vts_us,
+				(s64 *)&sample.timestamp_ns))
+		sample.flags |= PSVR2_POSE_FLAG_DEVICE_TIME;
 	/* Carry the float bit patterns through untouched (no FPU in kernel). */
 	memcpy(sample.position, rec->pos, sizeof(sample.position));
 	memcpy(sample.orientation, rec->orient, sizeof(sample.orientation));
+	sample.state = sl->buf[0x0c];
+	sample.substate = sl->buf[0x0d];
+	sample.valid_flag = sl->buf[0x0e];
+	sample.reset_count = sl->buf[0x1e0];
+	memcpy(sample.velocity, sl->buf + 0x48, sizeof(sample.velocity));
+	memcpy(sample.gyro_bias, sl->buf + 0x54, sizeof(sample.gyro_bias));
+	memcpy(sample.accel_bias, sl->buf + 0x60, sizeof(sample.accel_bias));
+	memcpy(&sample.error_variance, sl->buf + 0x184,
+	       sizeof(sample.error_variance));
+	sample.map_id = get_unaligned_le32(sl->buf + 0x1e4);
+	if (sample.state == 3 || sample.valid_flag == 1 || sample.substate == 5)
+		sample.flags |= PSVR2_POSE_FLAG_TRACKING;
 
 	spin_lock_irqsave(&sl->fifo_lock, flags);
 	if (kfifo_is_full(&sl->fifo))

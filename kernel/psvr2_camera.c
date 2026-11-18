@@ -55,13 +55,19 @@ struct psvr2_camera {
 	bool			streaming;
 };
 
+/*
+ * Sony keeps the camera in mode 0x10 the whole time: the onboard SLAM and the
+ * LED detector need it. V4L2 streaming takes the camera over with mode 1 and
+ * hands it back (psvr2->camera_mode, normally 0x10) when it stops.
+ */
 static int psvr2_cam_set_mode(struct psvr2_camera *cam,
 			      enum psvr2_camera_mode mode)
 {
-	__le32 cmd[2] = { cpu_to_le32(0x1), cpu_to_le32(mode) };
+	struct psvr2_device *psvr2 = cam->psvr2;
 
-	return psvr2_control_set(cam->psvr2, PSVR2_REPORT_SET_CAMERA_MODE, 0x1,
-				 cmd, sizeof(cmd));
+	psvr2->camera_v4l2 = mode != PSVR2_CAMERA_MODE_OFF;
+	return psvr2_set_camera_mode(psvr2, psvr2->camera_v4l2 ?
+				     mode : psvr2->camera_mode);
 }
 
 /*
@@ -230,6 +236,8 @@ static int psvr2_cam_start_streaming(struct vb2_queue *q, unsigned int count)
 	if (ret)
 		goto err_return;
 
+	dev_info(&cam->udev->dev,
+		 "camera mode 1 while V4L2 streams: headset tracking pauses until it stops\n");
 	ret = psvr2_cam_set_mode(cam, PSVR2_CAMERA_MODE_BOTTOM_SBS_CROPPED);
 	if (ret) {
 		dev_err(&cam->udev->dev, "failed to set camera mode: %d\n", ret);

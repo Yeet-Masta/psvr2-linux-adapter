@@ -21,14 +21,59 @@ enum psvr2_report_id {
 	PSVR2_REPORT_SET_GAZE_STREAM	= 0x0c,
 	PSVR2_REPORT_SET_GAZE_USER_CAL	= 0x0d,
 	PSVR2_REPORT_SET_BRIGHTNESS	= 0x12,
+	PSVR2_REPORT_SET_SEE_THROUGH	= 0x17,	/* u8 on, u8 3 */
+	PSVR2_REPORT_SET_SLAM_CONFIG	= 0x1f,	/* 256 bytes at IF3 connect */
+	PSVR2_REPORT_SET_HOST_MODE	= 0x22,	/* u8; SteamVR hosts send 0 */
+	PSVR2_REPORT_SET_EDID_TYPE	= 0x29,	/* u8; headset re-enumerates DP */
+	PSVR2_REPORT_GET_FW_INFO	= 0x81,
 	PSVR2_REPORT_GET_LENS_CAL	= 0x8f,	/* per-unit lens distortion block */
+	PSVR2_REPORT_GET_SEE_THROUGH	= 0x97,	/* u8, non-zero = on */
+	PSVR2_REPORT_GET_MIN_DRIVER	= 0xa1,	/* u32 minimum host driver version */
+	PSVR2_REPORT_GET_EDID_TYPE	= 0xa9,	/* u8 */
+	PSVR2_REPORT_SET_RESTART	= 0x05,	/* subcmd 2, no data: resume */
+	PSVR2_REPORT_SET_LD_BLOB	= 0x09,	/* 24 bytes, LED blob detection */
+	PSVR2_REPORT_SET_LD_WINDOW	= 0x14,	/* 16 bytes, LED detect window */
+	PSVR2_REPORT_SET_QUIT		= 0x27,	/* u16 1000 on SteamVR quit */
+	PSVR2_REPORT_GET_RP_INFO	= 0x8a,	/* 8 bytes at IF9 connect */
+	PSVR2_REPORT_GET_DEVICE_TIME	= 0xde,	/* 0x18 bytes, u32 us at +4 */
+};
+
+/*
+ * Get 0x81: firmware info, 0x54 bytes. +0x00 is the headset software version,
+ * +0x34 the board stage (2 EVA2 ... 9 PVT, 10 MP); 0 means the info is not
+ * valid yet. Layout from docs/sony-re/headset.md section 2.4.
+ */
+#define PSVR2_FW_INFO_LEN		0x54
+#define PSVR2_FW_INFO_VERSION		0x00
+#define PSVR2_FW_INFO_BOARD_STAGE	0x34
+
+#define PSVR2_SLAM_CONFIG_LEN		256
+
+/*
+ * Sony's driver sends subcmd 1 with every report except Set 0x05 (subcmd 2)
+ * and Set 0x0a (relocaliser, varies).
+ */
+
+/* Set 0x17 second byte, as Sony sends it. */
+#define PSVR2_SEE_THROUGH_ARG		3
+
+/*
+ * Get 0xa9 / Set 0x29 EDID type. The headset advertises one of two EDIDs and
+ * re-enumerates its DisplayPort sink about a second after a Set.
+ */
+enum psvr2_edid_type {
+	PSVR2_EDID_90_120HZ	= 0,
+	PSVR2_EDID_90HZ		= 1,
 };
 
 #define PSVR2_SET_PERIPHERAL_SUBCMD_MOTOR	0x01
 #define PSVR2_RUMBLE_MAX_HZ			25
 
-/* Lens calibration: u8 version + 7 unknown + 32 x float32. */
-#define PSVR2_LENS_CAL_LEN			136
+/*
+ * Lens calibration block, Get 0x8f: 256 bytes. The first 136 are u8 version,
+ * 7 unknown, then 32 x float32 (Monado layout); Sony's driver reads all 256.
+ */
+#define PSVR2_LENS_CAL_LEN			256
 
 /*
  * Camera modes (report 0x0b). Many modes interleave several views in exotic
@@ -56,7 +101,8 @@ enum psvr2_camera_mode {
  * Vendor control transfer payload. Sent/received on ep0 with:
  *   set: bRequestType = VENDOR|RECIPIENT_ENDPOINT,        bRequest = 0x09
  *   get: bRequestType = VENDOR|RECIPIENT_ENDPOINT|DIR_IN, bRequest = 0x01
- *   wValue = report_id, wIndex = 0
+ *   wValue = 0 (set) or report_id (get), wIndex = 0
+ * Sony's driver uses wValue 0 on every Set; the header carries the id.
  */
 #define PSVR2_CTRL_DATA_MAX	(512 - 8)
 

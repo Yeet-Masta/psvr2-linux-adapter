@@ -9,11 +9,15 @@ SUBSYSTEM=="input", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0cde", TAG+="uac
 # (Add yourself once with: sudo usermod -aG input "$USER"  then re-login.)
 SUBSYSTEM=="misc", KERNEL=="psvr2-pose", MODE="0660", GROUP="input"
 SUBSYSTEM=="misc", KERNEL=="psvr2-gaze", MODE="0660", GROUP="input"
+# control reports + clock map, LED-detector and relocaliser streams
+SUBSYSTEM=="misc", KERNEL=="psvr2-ctrl", MODE="0660", GROUP="input"
+SUBSYSTEM=="misc", KERNEL=="psvr2-ld", MODE="0660", GROUP="input"
+SUBSYSTEM=="misc", KERNEL=="psvr2-rp", MODE="0660", GROUP="input"
 # V4L2 camera node
 SUBSYSTEM=="video4linux", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0cde", TAG+="uaccess"
-# brightness / rumble sysfs attributes, writable by the "input" group (the
-# SteamVR driver sets them).
-ACTION=="bind", SUBSYSTEM=="usb", DRIVER=="psvr2", RUN+="/bin/sh -c 'chgrp input /sys%p/brightness /sys%p/rumble; chmod g+w /sys%p/brightness /sys%p/rumble'"
+# brightness / rumble / see-through / EDID type sysfs attributes, writable by
+# the "input" group (the SteamVR driver sets them).
+ACTION=="bind", SUBSYSTEM=="usb", DRIVER=="psvr2", RUN+="/bin/sh -c 'cd /sys%p && chgrp input brightness rumble see_through edid_type && chmod g+w brightness rumble see_through edid_type'"
 # PS VR2 Sense controllers (054c:0e45 left, 0e46 right): hidraw for the SteamVR
 # driver, over USB and Bluetooth. Group, not uaccess: this file sorts after
 # 73-seat-late.rules, so a uaccess tag set here never becomes an ACL.

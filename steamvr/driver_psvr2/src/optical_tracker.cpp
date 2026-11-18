@@ -52,12 +52,23 @@ void Block09( int mode, uint8_t b[24] )
 // by more than the ±1.25 ms PRESCAN window, by a different amount each run,
 // so the LEDs first showed up after 3.5 to 44 s. Own method: shift each call
 // by one window width (2 ms), alternating sides out to ±8 ms, so nine
-// re-syncs cover the whole 16.7 ms frame.
+// re-syncs cover the whole 16.7 ms frame. While the cameras see the LEDs the
+// shift is held: on hardware (2026-11-18) the next re-sync moved the window
+// off the exposure right as PRESCAN handed over to BROAD, which then saw
+// nothing.
+std::atomic<bool> g_sweep_hold{ false };
+std::atomic<unsigned> g_shift{ 8 };
+
 uint64_t HeadsetTimeCallback()
 {
 	static const int8_t kShift[9] = { 0, 1, -1, 2, -2, 3, -3, 4, -4 };
-	static std::atomic<unsigned> calls{ 0 };
-	return OpticalTracker::HeadsetFrameMicros() + int64_t( kShift[calls++ % 9] ) * 2000;
+	unsigned k = g_shift.load();
+	if ( !g_sweep_hold )
+	{
+		k = ( k + 1 ) % 9;
+		g_shift = k;
+	}
+	return OpticalTracker::HeadsetFrameMicros() + int64_t( kShift[k] ) * 2000;
 }
 
 // Logical -> physical LED (table at 0x180260aa0): identity for logical
@@ -252,6 +263,15 @@ void OpticalTracker::Run()
 				UpdateBlobMode( h );
 				PushDetectionConfig( pkt, h );
 				DecodeBlobs( pkt, h );
+				// LEDs in view (>= 3 blobs): hold the PRESCAN time sweep
+				// until none were seen for 3 s.
+				int total = 0;
+				for ( int c = 0; c < PSVR2_LD_CAMERAS; c++ )
+					total += blob_count_[c];
+				lit_frame_ = total >= 3;
+				if ( lit_frame_ )
+					lit_at_us_ = now;
+				g_sweep_hold = now - lit_at_us_ < 3 * kSec;
 				RunSyncers( now );
 				SolvePoses( now );
 			}
@@ -525,10 +545,10 @@ LedObservation OpticalTracker::Observe( int hand, int phase_owner )
 		o.count[c] = 1;
 		o.sync_weight[c] = present ? w : 0.01f;
 	}
-	// PRESCAN only needs to know the headset sees blobs at all: the LED does
-	// not blink yet, so no site qualifies.
+	// PRESCAN only needs to know the headset sees the LEDs: they do not blink
+	// yet, so no site qualifies. A lone stray blob does not count.
 	if ( syncers_[hand]->Current() == LedSyncer::kPrescan )
-		o.visible = any;
+		o.visible = any && lit_frame_;
 	return o;
 }
 

@@ -68,6 +68,8 @@ private:
 	Psvr2ControllerDriver *controllers_[2];
 	std::unique_ptr<LedSyncer> syncers_[2];
 	std::unique_ptr<OpticalPose> pose_;
+	bool lit_frame_ = false;   // this LD frame shows >= 3 blobs
+	uint64_t lit_at_us_ = 0;   // last such frame
 	uint64_t rig_try_us_ = 0;
 	psvr2_t *dev_ = nullptr;
 	std::thread thread_;

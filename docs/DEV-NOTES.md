@@ -98,9 +98,12 @@ path cannot fix it (its display setter is a stub on Linux).
 
 Fix: `steamvr/vk_mode_order`, an explicit Vulkan layer that, inside
 vrcompositor only, returns each resolution's modes in ascending refresh. The
-installer writes its manifest to `~/.local/share/vulkan/explicit_layer.d/`;
-the driver adds it to `VK_INSTANCE_LAYERS` in vrserver, which forwards that
-variable to the compositor. At 90 Hz the 90.0 default stays (0.1 % off
+installer writes its manifest to `~/.local/share/vulkan/implicit_layer.d/`.
+The loader enables it only when `_STEAMVR_LOGGING_READY=1` (exported by
+SteamVR's launch scripts); setting `VK_INSTANCE_LAYERS` from vrserver did not
+work, because the compositor is started through steam-runtime-launch-client
+with only `LD_LIBRARY_PATH` passed. `PSVR2_VK_MODE_ORDER_DISABLE=1` turns it
+off. At 90 Hz the 90.0 default stays (0.1 % off
 89.91, as before with the 90-only EDID).
 
 ## Not done, and why

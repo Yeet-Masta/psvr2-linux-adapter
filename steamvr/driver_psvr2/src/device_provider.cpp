@@ -3,30 +3,9 @@
 
 #include "driverlog.h"
 
-#include <cstdlib>
-#include <string>
-
-// vrcompositor keeps a 90 Hz frame timing when the wanted mode is the first
-// one listed at the HMD's resolution, which the 90/120 Hz EDID's 119.88 Hz
-// mode is. The VK_LAYER_PSVR2_mode_order layer (steamvr/vk_mode_order)
-// lists the modes in ascending refresh. vrserver forwards VK_INSTANCE_LAYERS
-// to the compositor it launches after the drivers load, so add it here.
-static void EnableModeOrderLayer()
-{
-	static const char kLayer[] = "VK_LAYER_PSVR2_mode_order";
-	const char *cur = getenv( "VK_INSTANCE_LAYERS" );
-	std::string v = cur ? cur : "";
-	if ( v.find( kLayer ) != std::string::npos ) return;
-	if ( !v.empty() ) v += ':';
-	v += kLayer;
-	setenv( "VK_INSTANCE_LAYERS", v.c_str(), 1 );
-	DriverLog( "psvr2: VK_INSTANCE_LAYERS=%s", v.c_str() );
-}
-
 vr::EVRInitError Psvr2DeviceProvider::Init( vr::IVRDriverContext *pDriverContext )
 {
 	VR_INIT_SERVER_DRIVER_CONTEXT( pDriverContext );
-	EnableModeOrderLayer();
 
 	hmd_ = std::make_unique<Psvr2HmdDriver>();
 

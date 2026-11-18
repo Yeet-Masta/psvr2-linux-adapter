@@ -9,6 +9,8 @@
         "description": "PSVR2: list HMD display modes in ascending refresh so vrcompositor uses the 119.88 Hz rate",
         "functions": {
             "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
-        }
+        },
+        "enable_environment": { "_STEAMVR_LOGGING_READY": "1" },
+        "disable_environment": { "PSVR2_VK_MODE_ORDER_DISABLE": "1" }
     }
 }

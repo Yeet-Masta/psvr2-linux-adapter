@@ -19,12 +19,14 @@
 // selected index still names the right mode. Every other call passes
 // straight through.
 //
-// It is an explicit layer. The SteamVR driver adds it to VK_INSTANCE_LAYERS
-// inside vrserver, which forwards that variable when it launches
-// vrcompositor (through steam-runtime-launch-client --pass-env). The layer
-// also checks the process name, so any other process that inherits the
-// variable sees no change.
-//
+// It is an implicit layer that the loader enables only when
+// _STEAMVR_LOGGING_READY=1, which SteamVR's own launch scripts export
+// (vrstartup.sh, vrcompositor-launcher.sh); vrserver's environment does not
+// reach the compositor, which is started through steam-runtime-launch-client
+// with only LD_LIBRARY_PATH passed. The layer also checks the process name,
+// so other SteamVR processes see no change. PSVR2_VK_MODE_ORDER_DISABLE=1
+// turns it off.
+
 // No Vulkan headers are needed; the few types used are declared here as the
 // Vulkan and loader-layer ABIs define them.
 

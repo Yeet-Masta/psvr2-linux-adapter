@@ -46,8 +46,19 @@ void Block09( int mode, uint8_t b[24] )
 	}
 }
 
-// libpad calls this for the PRESCAN base time (ledsync.md §5.4).
-uint64_t HeadsetTimeCallback() { return OpticalTracker::HeadsetFrameMicros(); }
+// libpad calls this for the PRESCAN base time (ledsync.md §5.4), once per
+// PRESCAN command and per 1 s re-sync. Sony returns the frame time as is.
+// On hardware (2026-11-18) the headset -> host -> controller mapping was off
+// by more than the ±1.25 ms PRESCAN window, by a different amount each run,
+// so the LEDs first showed up after 3.5 to 44 s. Own method: shift each call
+// by one window width (2 ms), alternating sides out to ±8 ms, so nine
+// re-syncs cover the whole 16.7 ms frame.
+uint64_t HeadsetTimeCallback()
+{
+	static const int8_t kShift[9] = { 0, 1, -1, 2, -2, 3, -3, 4, -4 };
+	static std::atomic<unsigned> calls{ 0 };
+	return OpticalTracker::HeadsetFrameMicros() + int64_t( kShift[calls++ % 9] ) * 2000;
+}
 
 // Logical -> physical LED (table at 0x180260aa0): identity for logical
 // 1..16 in every Sense model; logical 0 maps to the last LED. The sync LED

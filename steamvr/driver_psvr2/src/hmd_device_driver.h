@@ -131,6 +131,9 @@ private:
 	std::string model_number_;
 	std::string serial_number_;
 	float display_frequency_ = 90.0f;
+	// DisplayAvailableFrameRates entries; the one in use equals
+	// steamvr/preferredRefreshRate exactly.
+	float rate_90_ = 90.0f, rate_120_ = 120.0f;
 	bool direct_mode_ = true;
 
 	std::atomic<bool> active_{ false };

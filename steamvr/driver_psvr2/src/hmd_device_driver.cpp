@@ -55,13 +55,25 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 		hz = vr::VRSettings()->GetFloat( kSettingsSection, "display_frequency" );
 	if ( hz > 0.0f )
 		display_frequency_ = hz > 105.0f ? 119.88f : 89.91f;
+	// The compositor matches steamvr/preferredRefreshRate against the
+	// available-rates list exactly. With {90, 120} a stored 119.88 matched
+	// nothing, so it fell back to the first entry and set the display
+	// frequency to 90 while scanning out the 119.88 Hz mode: frames paced
+	// for 90 Hz on a 120 Hz panel, seen as tearing (vrcompositor.txt,
+	// 2026-11-18). List the stored value itself as the entry it is closest to.
+	if ( hz > 0.0f && std::fabs( hz - display_frequency_ ) < 1.0f )
+		display_frequency_ = hz;
+	if ( hz > 105.0f )
+		rate_120_ = display_frequency_;
+	else if ( hz > 0.0f )
+		rate_90_ = display_frequency_;
 
 	dev_ = psvr2_open();
 	// Sony offers 120 Hz only on headset software newer than 0x06000000.
 	firmware_version_ = psvr2_firmware_version( dev_ );
 	supports_120_ = firmware_version_ == 0 || firmware_version_ > 0x06000000;
-	if ( !supports_120_ )
-		display_frequency_ = 89.91f;
+	if ( !supports_120_ && display_frequency_ > 105.0f )
+		display_frequency_ = rate_90_;
 	SelectEdid( "init" );
 	// The tracker's origin is where it started; without a SteamVR room setup
 	// this lifts the view to standing height. 0 (default) leaves it alone.
@@ -186,14 +198,14 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 	// list them as Sony does.
 	vr::VRProperties()->SetBoolProperty( c, vr::Prop_DisplaySupportsMultipleFramerates_Bool, supports_120_ );
 	{
-		const float rates[2] = { 90.0f, 120.0f };
+		const float rates[2] = { rate_90_, rate_120_ };
 		vr::VRProperties()->SetProperty( c, vr::Prop_DisplayAvailableFrameRates_Float_Array, const_cast<float *>( rates ),
 		                                 sizeof( float ) * ( supports_120_ ? 2 : 1 ), vr::k_unFloatPropertyTag );
 	}
 	DriverLog( "psvr2: display refresh %.2f Hz", display_frequency_ );
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserHeadToEyeDepthMeters_Float, 0.0f );
 	// Panel timing as Sony's driver reports it (docs/sony-re/display.md).
-	const bool hz120 = std::fabs( display_frequency_ - 90.0f ) >= 0.1f;
+	const bool hz120 = display_frequency_ > 105.0f;
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromVsyncToPhotons_Float, hz120 ? 0.00102f : 0.00136f );
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromPhotonsToVblank_Float, hz120 ? 0.00773f : 0.0103f );
 

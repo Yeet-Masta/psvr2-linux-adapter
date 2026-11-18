@@ -1,0 +1,341 @@
+va	lines	area	status	note
+0x180049240	416	ctrl-tracker-frame	todo	
+0x180049cb0	255	ctrl-tracker-frame	todo	
+0x18004a240	66	ctrl-tracker-frame	todo	
+0x18004a340	288	ctrl-tracker-frame	todo	
+0x18004a9d0	47	ctrl-tracker-frame	todo	
+0x18004ab10	11	ctrl-tracker-frame	todo	
+0x18004ab50	83	ctrl-tracker-frame	todo	
+0x18004ad80	131	ctrl-tracker-frame	todo	
+0x18004b0a0	1442	ctrl-tracker-frame	todo	
+0x18004c590	14	ctrl-tracker-frame	todo	
+0x18004c600	147	ctrl-tracker-frame	todo	
+0x18004c9c0	22	ctrl-tracker-frame	todo	
+0x18004cac0	374	ctrl-tracker-frame	todo	
+0x180050010	29	ctrl-tracker	todo	
+0x180050160	63	ctrl-tracker	todo	
+0x180050270	24	ctrl-tracker	todo	
+0x180050370	74	ctrl-tracker	todo	
+0x1800505a0	76	ctrl-tracker	todo	
+0x180050720	79	ctrl-tracker	todo	
+0x180050880	70	ctrl-tracker	todo	
+0x1800509c0	79	ctrl-tracker	todo	
+0x180050b60	80	ctrl-tracker	todo	
+0x180050d10	15	ctrl-tracker	todo	
+0x180050d50	43	ctrl-tracker	todo	
+0x180050e30	29	ctrl-tracker	todo	
+0x180050e90	12	ctrl-tracker	todo	
+0x180050ee0	19	ctrl-tracker	todo	
+0x180050f30	21	ctrl-tracker	todo	
+0x180051060	21	ctrl-tracker	todo	
+0x180051190	63	ctrl-tracker	todo	
+0x180051380	10	ctrl-tracker	todo	
+0x1800513d0	9	ctrl-tracker	todo	
+0x1800513f0	9	ctrl-tracker	todo	
+0x180051430	9	ctrl-tracker	todo	
+0x180051480	177	ctrl-tracker	todo	
+0x180051770	12	ctrl-tracker	todo	
+0x180051a70	63	ctrl-tracker	todo	
+0x180051ba0	13	ctrl-tracker	todo	
+0x180051c10	46	ctrl-tracker	todo	
+0x180051d20	13	ctrl-tracker	todo	
+0x180051d60	46	ctrl-tracker	todo	
+0x180051e70	13	ctrl-tracker	todo	
+0x180051eb0	43	ctrl-tracker	todo	
+0x180051fa0	13	ctrl-tracker	todo	
+0x180051fe0	46	ctrl-tracker	todo	
+0x1800520e0	13	ctrl-tracker	todo	
+0x180052140	27	ctrl-tracker	todo	
+0x180052210	48	ctrl-tracker	todo	
+0x180052430	23	ctrl-tracker	todo	
+0x1800525b0	34	ctrl-tracker	todo	
+0x180052670	20	ctrl-tracker	todo	
+0x180052760	14	ctrl-tracker	todo	
+0x1800527e0	13	ctrl-tracker	todo	
+0x180052860	56	ctrl-tracker	todo	
+0x1800529d0	41	ctrl-tracker	todo	
+0x180052b20	41	ctrl-tracker	todo	
+0x180052c70	38	ctrl-tracker	todo	
+0x180052d90	41	ctrl-tracker	todo	
+0x180052e80	45	ctrl-tracker	todo	
+0x180053020	18	ctrl-tracker	todo	
+0x180053070	19	ctrl-tracker	todo	
+0x1800530f0	48	ctrl-tracker	todo	
+0x180053200	27	ctrl-tracker	todo	
+0x180053300	27	ctrl-tracker	todo	
+0x180053400	27	ctrl-tracker	todo	
+0x1800534e0	27	ctrl-tracker	todo	
+0x180053620	18	ctrl-tracker	todo	
+0x1800537b0	16	ctrl-tracker	todo	
+0x180053820	12	ctrl-tracker	todo	
+0x180053840	12	ctrl-tracker	todo	
+0x180053870	12	ctrl-tracker	todo	
+0x180053890	18	ctrl-tracker	todo	
+0x1800538d0	29	ctrl-tracker	todo	
+0x180053940	9	ctrl-tracker	todo	
+0x180053970	15	ctrl-tracker	todo	
+0x1800539b0	9	ctrl-tracker	todo	
+0x1800539d0	9	ctrl-tracker	todo	
+0x180053a20	23	ctrl-tracker	todo	
+0x180053b00	13	ctrl-tracker	todo	
+0x180053b20	34	ctrl-tracker	todo	
+0x180053bd0	28	ctrl-tracker	todo	
+0x180053c70	9	ctrl-tracker	todo	
+0x180053c90	16	ctrl-tracker	todo	
+0x180053cd0	12	ctrl-tracker	todo	
+0x180053d10	13	ctrl-tracker	todo	
+0x180053d40	20	ctrl-tracker	todo	
+0x180053da0	28	ctrl-tracker	todo	
+0x180053e20	14	ctrl-tracker	todo	
+0x180053e70	24	ctrl-tracker	todo	
+0x180053f30	21	ctrl-tracker	todo	
+0x180053fc0	34	ctrl-tracker	todo	
+0x180054070	30	ctrl-tracker	todo	
+0x1800540e0	65	ctrl-tracker	todo	
+0x1800542c0	53	ctrl-tracker	todo	
+0x180054410	24	ctrl-tracker	todo	
+0x180054490	12	ctrl-tracker	todo	
+0x1800544d0	20	ctrl-tracker	todo	
+0x180054530	12	ctrl-tracker	todo	
+0x180054570	40	ctrl-tracker	todo	
+0x180054660	9	ctrl-tracker	todo	
+0x180054690	15	ctrl-tracker	todo	
+0x180054710	18	ctrl-tracker	todo	
+0x1800547c0	23	ctrl-tracker	todo	
+0x180054870	58	ctrl-tracker	todo	
+0x1800549e0	23	ctrl-tracker	todo	
+0x180054a90	27	ctrl-tracker	todo	
+0x180054bd0	14	ctrl-tracker	todo	
+0x180054c20	11	ctrl-tracker	todo	
+0x180054ec0	313	ctrl-tracker	todo	
+0x1800558e0	291	ctrl-tracker	todo	
+0x180056100	289	ctrl-tracker	todo	
+0x180056a10	32	ctrl-tracker	todo	
+0x180056ac0	9	ctrl-tracker	todo	
+0x180056ae0	15	ctrl-tracker	todo	
+0x180056b00	9	ctrl-tracker	todo	
+0x180056b60	39	ctrl-tracker	todo	
+0x180056c10	28	ctrl-tracker	todo	
+0x180056c90	40	ctrl-tracker	todo	
+0x180056d70	22	ctrl-tracker	todo	
+0x180056df0	39	ctrl-tracker	todo	
+0x180056ea0	28	ctrl-tracker	todo	
+0x180056f20	39	ctrl-tracker	todo	
+0x180056fd0	28	ctrl-tracker	todo	
+0x180057050	77	ctrl-tracker	todo	
+0x1800571e0	210	ctrl-tracker	todo	
+0x180057560	138	ctrl-tracker	todo	
+0x180057850	371	ctrl-tracker	todo	
+0x180057f30	18	ctrl-tracker	todo	
+0x180057fa0	58	ctrl-tracker	todo	
+0x1800580b0	21	ctrl-tracker	todo	
+0x180058130	80	ctrl-tracker	todo	
+0x180058720	33	ctrl-tracker	bit-exact	psvr2_ct_quat_rotate; t_ctrltracker_math 200k
+0x180058900	18	ctrl-tracker	bit-exact	psvr2_ct_quat_length/normalize; 200k
+0x180058970	29	ctrl-tracker	bit-exact	psvr2_ct_quat_length/normalize; 200k
+0x180058a10	45	ctrl-tracker	bit-exact	psvr2_ct_quat_to_mat3 (lanes 0..2); 200k
+0x180058bc0	16	ctrl-tracker	todo	
+0x180058c60	32	ctrl-tracker	todo	
+0x180058cd0	30	ctrl-tracker	todo	
+0x180058e40	40	ctrl-tracker	bit-exact	psvr2_ct_mat4_mul_vec4 / mat43_mul_vec3; 200k
+0x180058f30	34	ctrl-tracker	bit-exact	psvr2_ct_mat4_mul_vec4 / mat43_mul_vec3; 200k
+0x180059000	112	ctrl-tracker	bit-exact	psvr2_ct_mat4_inverse; 200k
+0x180059770	9	ctrl-tracker	todo	
+0x180059790	52	ctrl-tracker	todo	
+0x180059880	9	ctrl-tracker	todo	
+0x1800598a0	107	ctrl-tracker	todo	
+0x180059b60	28	ctrl-tracker	todo	
+0x180059bc0	28	ctrl-tracker	todo	
+0x180059c20	38	ctrl-tracker	todo	
+0x180059cb0	31	ctrl-tracker	todo	
+0x180059d20	31	ctrl-tracker	todo	
+0x180059d90	84	ctrl-tracker	todo	
+0x180059f00	81	ctrl-tracker	todo	
+0x18005a060	29	ctrl-tracker	todo	
+0x18005a0c0	24	ctrl-tracker	todo	
+0x18005a110	24	ctrl-tracker	todo	
+0x18005a160	72	ctrl-tracker	todo	
+0x18005a280	66	ctrl-tracker	todo	
+0x18005a390	24	ctrl-tracker	todo	
+0x18005a3e0	24	ctrl-tracker	todo	
+0x18005a430	67	ctrl-tracker	todo	
+0x18005a570	111	ctrl-tracker	todo	
+0x18005a800	26	ctrl-tracker	todo	
+0x18005a860	26	ctrl-tracker	todo	
+0x18005a940	76	ctrl-tracker	todo	
+0x18005aae0	282	ctrl-tracker	todo	
+0x18005b010	366	ctrl-tracker	todo	
+0x18005b740	12	ctrl-tracker	todo	
+0x18005b770	10	ctrl-tracker	todo	
+0x18005b790	51	ctrl-tracker	todo	
+0x18005b860	95	ctrl-tracker	todo	
+0x18005bb00	139	ctrl-tracker	todo	
+0x18005bf30	46	ctrl-tracker	todo	
+0x18005c0d0	19	ctrl-tracker	todo	
+0x18005c130	457	ctrl-tracker	todo	
+0x18005c7f0	529	ctrl-tracker	todo	
+0x18005cff0	12	ctrl-tracker	todo	
+0x18005d0e0	25	ctrl-tracker	todo	
+0x18005d160	21	ctrl-tracker	todo	
+0x18005d180	19	ctrl-tracker	todo	
+0x18005d220	35	ctrl-tracker	todo	
+0x18005d2d0	19	ctrl-tracker	todo	
+0x18005d360	12	ctrl-tracker	todo	
+0x18005d3d0	14	ctrl-tracker	todo	
+0x18005d440	14	ctrl-tracker	todo	
+0x18005d4b0	19	ctrl-tracker	todo	
+0x18005d530	15	ctrl-tracker	todo	
+0x18005d580	11	ctrl-tracker	todo	
+0x18005d5d0	209	ctrl-tracker	todo	
+0x18005d970	47	ctrl-tracker	todo	
+0x18005dab0	240	ctrl-tracker	todo	
+0x18005df40	10	ctrl-tracker	todo	
+0x18005dff0	73	ctrl-tracker	todo	
+0x18005e240	72	ctrl-tracker	todo	
+0x18005e340	106	ctrl-tracker	todo	
+0x18005e590	21	ctrl-tracker	todo	
+0x18005e5f0	15	ctrl-tracker	todo	
+0x18005e670	17	ctrl-tracker	todo	
+0x18005e6e0	118	ctrl-tracker	todo	
+0x18005e9c0	89	ctrl-tracker	todo	
+0x18005eac0	97	ctrl-tracker	todo	
+0x18005ec00	268	ctrl-tracker	todo	
+0x18005f150	9	ctrl-tracker	todo	
+0x18005f180	12	ctrl-tracker	todo	
+0x18005f1b0	397	ctrl-tracker	todo	
+0x18005f8b0	22	ctrl-tracker	todo	
+0x18005f8f0	10	ctrl-tracker	todo	
+0x18005f910	23	ctrl-tracker	todo	
+0x18005f950	51	ctrl-tracker	todo	
+0x18005fad0	65	ctrl-tracker	todo	
+0x18005fc00	17	ctrl-tracker	todo	
+0x18005fc20	154	ctrl-tracker	todo	
+0x180060000	8	ctrl-tracker	todo	
+0x180060010	8	ctrl-tracker	todo	
+0x180060020	8	ctrl-tracker	todo	
+0x180060030	62	ctrl-tracker	todo	
+0x180060280	8	ctrl-tracker	todo	
+0x180060290	8	ctrl-tracker	todo	
+0x1800602d0	83	ctrl-tracker	todo	
+0x180060570	16	ctrl-tracker	todo	
+0x180060590	58	ctrl-tracker	todo	
+0x180060690	114	ctrl-tracker	todo	
+0x1800607f0	10	ctrl-tracker	todo	
+0x180060820	12	ctrl-tracker	todo	
+0x180060870	10	ctrl-tracker	todo	
+0x1800608a0	30	ctrl-tracker	todo	
+0x180060910	31	ctrl-tracker	todo	
+0x180060a40	24	ctrl-tracker	todo	
+0x180060af0	9	ctrl-tracker	todo	
+0x180060b30	30	ctrl-tracker	todo	
+0x180060ba0	31	ctrl-tracker	todo	
+0x180060c40	30	ctrl-tracker	todo	
+0x180060cb0	31	ctrl-tracker	todo	
+0x180060d90	30	ctrl-tracker	todo	
+0x180060e00	33	ctrl-tracker	todo	
+0x180060ea0	30	ctrl-tracker	todo	
+0x180060f10	31	ctrl-tracker	todo	
+0x180060fb0	30	ctrl-tracker	todo	
+0x180061020	33	ctrl-tracker	todo	
+0x1800610c0	30	ctrl-tracker	todo	
+0x180061130	31	ctrl-tracker	todo	
+0x1800611e0	13	ctrl-tracker	todo	
+0x1800612f0	39	ctrl-tracker	todo	
+0x180061370	28	ctrl-tracker	todo	
+0x180061490	12	ctrl-tracker	todo	
+0x1800617a0	62	ctrl-tracker	todo	
+0x180061880	27	ctrl-tracker	todo	
+0x180061900	9	ctrl-tracker	todo	
+0x180061920	16	ctrl-tracker	todo	
+0x180061950	15	ctrl-tracker	todo	
+0x1800619d0	32	ctrl-tracker	todo	
+0x180061ab0	8	ctrl-tracker	todo	
+0x180061be0	16	ctrl-tracker	bit-exact	psvr2_ct_vec3_add_inplace; math2 200k
+0x180061c60	17	ctrl-tracker	bit-exact	psvr2_ct_vec3_length
+0x180061cc0	24	ctrl-tracker	bit-exact	psvr2_ct_vec3_cross
+0x180061d40	88	ctrl-tracker	bit-exact	psvr2_ct_mat3_to_quat (Ghidra flag logic wrong; spec from disassembly)
+0x180061fa0	29	ctrl-tracker	bit-exact	psvr2_ct_quat_mul
+0x1800620b0	17	ctrl-tracker	bit-exact	psvr2_ct_quat_yaw (same UCRT sinf/cosf; mingw libm differs <=1ulp)
+0x1800621a0	78	ctrl-tracker	bit-exact	psvr2_ct_mat3_mul
+0x1800623d0	52	ctrl-tracker	bit-exact	psvr2_ct_mat3_rot_y (same UCRT sinf/cosf)
+0x180062490	32	ctrl-tracker	todo	
+0x180062540	28	ctrl-tracker	todo	
+0x180062610	36	ctrl-tracker	todo	
+0x180062710	48	ctrl-tracker	todo	
+0x1800627f0	25	ctrl-tracker	bit-exact	psvr2_ct_azimuth_diff (UCRT atan2f)
+0x180062880	48	ctrl-tracker	bit-exact	psvr2_ct_axis_noise
+0x180062950	51	ctrl-tracker	bit-exact	psvr2_ct_axis_noise
+0x180062bc0	16	ctrl-tracker	bit-exact	psvr2_ct_mwc_uniform
+0x180062c30	53	ctrl-tracker	todo	
+0x180062d60	104	ctrl-tracker	todo	
+0x180063140	32	ctrl-tracker	todo	
+0x180063220	46	ctrl-tracker	todo	
+0x180063310	23	ctrl-tracker	todo	
+0x1800633c0	22	ctrl-tracker	todo	
+0x180063480	9	ctrl-tracker	todo	
+0x1800634b0	25	ctrl-tracker	todo	
+0x180063580	72	ctrl-tracker	todo	
+0x180063890	13	ctrl-tracker	todo	
+0x1800638f0	196	ctrl-tracker	todo	
+0x180063d30	63	ctrl-tracker	todo	
+0x180063f50	154	ctrl-tracker	todo	
+0x1800641d0	441	ctrl-tracker	todo	
+0x180064f40	101	ctrl-tracker	todo	
+0x180065130	64	ctrl-tracker	todo	
+0x180065390	85	ctrl-tracker	todo	
+0x1800654f0	134	ctrl-tracker	todo	
+0x180065760	154	ctrl-tracker	todo	
+0x180065b70	1078	ctrl-tracker	todo	
+0x180067410	67	ctrl-tracker	todo	
+0x1800675e0	44	ctrl-tracker	todo	
+0x1800676a0	169	ctrl-tracker	todo	
+0x180067900	101	ctrl-tracker	todo	
+0x180067b50	554	ctrl-tracker	todo	
+0x180068620	310	ctrl-tracker	todo	
+0x180068ee0	443	ctrl-tracker	todo	
+0x180069950	14	ctrl-tracker	todo	
+0x180069a20	18	ctrl-tracker	todo	
+0x180069b50	24	ctrl-tracker	todo	
+0x180069d20	16	ctrl-tracker	todo	
+0x180069e10	22	ctrl-tracker	todo	
+0x18006a000	14	ctrl-tracker	todo	
+0x18006a070	22	ctrl-tracker	todo	
+0x18006a240	45	ctrl-tracker	todo	
+0x18006abf0	13	ctrl-tracker	todo	
+0x18006ac30	13	ctrl-tracker	todo	
+0x18006ac80	10	ctrl-tracker	todo	
+0x18006acb0	10	ctrl-tracker	todo	
+0x18006ace0	56	ctrl-tracker	todo	
+0x18006ae80	16	ctrl-tracker	todo	
+0x18006aec0	10	ctrl-tracker	todo	
+0x18006af00	16	ctrl-tracker	bit-exact	psvr2_ct_vec3_sub_inplace; math3 200k
+0x18006af50	16	ctrl-tracker	bit-exact	psvr2_ct_vec3_scale_inplace
+0x18006b030	38	ctrl-tracker	bit-exact	psvr2_ct_quat_from_to
+0x18006b250	30	ctrl-tracker	bit-exact	psvr2_ct_quatd_normalize
+0x18006b310	29	ctrl-tracker	bit-exact	psvr2_ct_quatd_mul
+0x18006b4a0	36	ctrl-tracker	bit-exact	psvr2_ct_quat_cap
+0x18006b5c0	38	ctrl-tracker	bit-exact	psvr2_ct_quat_cap_d
+0x18006b700	25	ctrl-tracker	bit-exact	duplicate of 0x1800627f0 -> psvr2_ct_azimuth_diff
+0x18006b790	79	ctrl-tracker	bit-exact	psvr2_ct_quat_rel_yaw; math4 200k
+0x18006bb50	54	ctrl-tracker	bit-exact	psvr2_ct_quat_exp (Sony small-angle series sign bug, harmless)
+0x18006bcd0	81	ctrl-tracker	bit-exact	psvr2_ct_quatd_integrate
+0x18006bf80	20	ctrl-tracker	bit-exact	psvr2_ct_set_ref_and_diff (obj+0xc0/+0xe0)
+0x18006bfd0	20	ctrl-tracker	bit-exact	psvr2_ct_set_ref_and_diff (obj+0xd0/+0xf0 from +0x10)
+0x18006c020	48	ctrl-tracker	bit-exact	psvr2_ct_cov_reset_block; t_ctrltracker_cov 50k
+0x18006c100	23	ctrl-tracker	bit-exact	psvr2_ct_cov_get_block
+0x18006c1b0	60	ctrl-tracker	bit-exact	psvr2_ct_cov_set_block
+0x18006c340	53	ctrl-tracker	bit-exact	psvr2_ct_lever_transfer 200k
+0x18006c4c0	75	ctrl-tracker	todo	
+0x18006c760	305	ctrl-tracker	todo	
+0x18006ce80	79	ctrl-tracker	todo	
+0x18006d0b0	265	ctrl-tracker	todo	
+0x18006d6e0	45	ctrl-tracker	todo	
+0x18006d890	101	ctrl-tracker	todo	
+0x18006dbd0	429	ctrl-tracker	todo	
+0x18006e520	9	ctrl-tracker	todo	
+0x18006e540	9	ctrl-tracker	todo	
+0x18006e560	9	ctrl-tracker	todo	
+0x18006e580	9	ctrl-tracker	todo	
+0x18006e5a0	389	ctrl-tracker	todo	
+0x18006f020	594	ctrl-tracker	todo	
+0x18006fe90	328	ctrl-tracker	todo	

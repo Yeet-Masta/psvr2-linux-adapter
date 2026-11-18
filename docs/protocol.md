@@ -32,6 +32,22 @@ Known report IDs:
 | `0x08`    | 1      | Set peripheral / motor (haptic) | **not yet reversed**   |
 | `0x0b`    | 1      | Set camera mode                 | `__le32 data[2]`       |
 | `0x0c`    | —      | Enable/disable gaze stream      | subcmd 1=on, 2=off     |
+| `0x17`    | 1      | Set see-through                 | `u8 on, u8 3`          |
+| `0x1f`    | 1      | SLAM config, at IF3 bind        | 256 bytes; see `psvr2_send_slam_config` |
+| `0x22`    | 1      | Sent once at init               | `u8 0`                 |
+| `0x29`    | 1      | Set EDID type                   | `u8` 0 = 90/120 Hz, 1 = 90 Hz |
+| `0x81`    | 1      | Get firmware info               | 0x54 bytes; +0 version, +0x34 board stage (retail unit seen: version `06000102`, stage 11) |
+| `0x8f`    | 1      | Get lens calibration block      | 256 bytes              |
+| `0x97`    | 1      | Get see-through state           | `u8`                   |
+| `0xa1`    | 1      | Get minimum host driver version | `u32`                  |
+| `0xa9`    | 1      | Get EDID type                   | `u8`                   |
+
+The full list, with when Sony's driver sends each one, is in
+[sony-re/headset.md](sony-re/headset.md) section 2.3. The module runs the
+same init sequence once IF7 binds (`psvr2_init_work`): Get `0x81` and `0xa1`,
+then Set `0x17` off, `0x22` 0 and `0x12` brightness. It exposes
+`firmware_version`, `board_stage`, `min_driver_version`, `see_through` and
+`edid_type` in sysfs next to `brightness`. Sets use wValue 0 and every report uses subcmd 1, as Sony's do (Set `0x05` uses subcmd 2).
 
 No host authentication handshake is required to stream data. (Sony's
 `sieusb.h` documents a device-side challenge/response, but it is not exercised

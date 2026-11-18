@@ -1,0 +1,374 @@
+va	lines	area	status	note
+0x1801b0120	112	libpad	todo	
+0x1801b0500	8	libpad	todo	
+0x1801b0510	38	libpad	todo	
+0x1801b05c0	19	libpad	todo	
+0x1801b0600	136	libpad	todo	
+0x1801b08b0	243	libpad	todo	
+0x1801b0dc0	38	libpad	todo	
+0x1801b0e70	41	libpad	todo	
+0x1801b0f50	48	libpad	todo	
+0x1801b10b0	38	libpad	todo	
+0x1801b11e0	24	libpad	todo	
+0x1801b1280	1619	libpad	todo	
+0x1801b37b0	2525	libpad	todo	
+0x1801b7d90	9	libpad	todo	
+0x1801b7da0	20	libpad	todo	
+0x1801b7e40	163	libpad	todo	
+0x1801b81c0	587	libpad	todo	
+0x1801b91d0	70	libpad	todo	
+0x1801b93f0	70	libpad	todo	
+0x1801b9560	33	libpad	todo	
+0x1801b9640	107	libpad	todo	
+0x1801b9880	73	libpad	todo	
+0x1801b99a0	136	libpad	todo	
+0x1801b9d70	214	libpad	todo	
+0x1801ba190	637	libpad	todo	
+0x1801baff0	44	libpad	todo	
+0x1801bb160	160	libpad	todo	
+0x1801bb330	151	libpad	todo	
+0x1801bb650	161	libpad	todo	
+0x1801bb9d0	129	libpad	todo	
+0x1801bbc50	172	libpad	todo	
+0x1801bbfd0	108	libpad	todo	
+0x1801bc210	27	libpad	todo	
+0x1801bc270	102	libpad	todo	
+0x1801bc440	8	libpad	todo	
+0x1801bc450	28	libpad	todo	
+0x1801bc4d0	31	libpad	todo	
+0x1801bc570	42	libpad	todo	
+0x1801bc660	95	libpad	todo	
+0x1801bc850	159	libpad	todo	
+0x1801bcc90	41	libpad	todo	
+0x1801bcd90	42	libpad	todo	
+0x1801bcea0	46	libpad	todo	
+0x1801bcfa0	75	libpad	todo	
+0x1801bd120	45	libpad	todo	
+0x1801bd240	30	libpad	todo	
+0x1801bd2d0	49	libpad	todo	
+0x1801bd420	71	libpad	todo	
+0x1801bd5d0	62	libpad	todo	
+0x1801bd740	48	libpad	todo	
+0x1801bd840	60	libpad	todo	
+0x1801bd950	61	libpad	todo	
+0x1801bdaa0	45	libpad	todo	
+0x1801bdb60	54	libpad	todo	
+0x1801bdc90	43	libpad	todo	
+0x1801bdd70	33	libpad	todo	
+0x1801bde70	248	libpad	todo	
+0x1801be510	32	libpad	todo	
+0x1801be5d0	31	libpad	todo	
+0x1801be660	35	libpad	todo	
+0x1801be720	37	libpad	todo	
+0x1801be7d0	45	libpad	todo	
+0x1801be8e0	19	libpad	todo	
+0x1801be930	20	libpad	todo	
+0x1801be980	37	libpad	todo	
+0x1801bea30	51	libpad	todo	
+0x1801bebb0	41	libpad	todo	
+0x1801bec80	46	libpad	todo	
+0x1801beda0	52	libpad	todo	
+0x1801beeb0	19	libpad	todo	
+0x1801bef00	19	libpad	todo	
+0x1801bef50	45	libpad	todo	
+0x1801bf060	50	libpad	todo	
+0x1801bf170	70	libpad	todo	
+0x1801bf2d0	49	libpad	todo	
+0x1801bf3d0	34	libpad	todo	
+0x1801bf4a0	31	libpad	todo	
+0x1801bf550	49	libpad	todo	
+0x1801bf650	12	libpad	todo	
+0x1801bf670	80	libpad	todo	
+0x1801bf850	15	libpad	todo	
+0x1801bf880	69	libpad	todo	
+0x1801bfa20	187	libpad	todo	
+0x1801bfd70	67	libpad	todo	
+0x1801bfee0	34	libpad	todo	
+0x1801bffb0	63	libpad	todo	
+0x1801c0160	12	libpad	todo	
+0x1801c0190	19	libpad	todo	
+0x1801c01e0	12	libpad	todo	
+0x1801c0200	37	libpad	spec-only	polling-rate setter
+0x1801c0340	47	libpad	todo	
+0x1801c0490	12	libpad	todo	
+0x1801c04b0	23	libpad	todo	
+0x1801c0510	32	libpad	todo	
+0x1801c05d0	30	libpad	todo	
+0x1801c0690	19	libpad	todo	
+0x1801c06e0	20	libpad	skip:crt	sprintf_s wrapper
+0x1801c0740	20	libpad	skip:crt	sprintf_s wrapper
+0x1801c07a0	40	libpad	skip:logging	[HID_SYNC] log printf
+0x1801c0890	8	libpad	skip:no-op	empty log stub
+0x1801c08a0	22	libpad	bit-exact	psvr2_sync_clamp_base
+0x1801c08f0	30	libpad	bit-exact	psvr2_sync_clamp_cycle
+0x1801c0980	22	libpad	bit-exact	psvr2_sync_clamp_period
+0x1801c09e0	29	libpad	bit-exact	psvr2_sync_host_to_ctrl
+0x1801c0a80	15	libpad	todo	
+0x1801c0ab0	39	libpad	bit-exact	psvr2_sync_stats_reset (via init/cmd 7)
+0x1801c0b90	522	libpad	bit-exact	psvr2_sync_update: HID_SYNC clock fit, 415k steps incl. wraps
+0x1801c1500	8	libpad	bit-exact	psvr2_sync_ticks_to_us; t_libpad_hidsync
+0x1801c1520	25	libpad	bit-exact	psvr2_sync_ctrl_to_host
+0x1801c15b0	20	libpad	todo	
+0x1801c15f0	26	libpad	todo	
+0x1801c1660	25	libpad	bit-exact	psvr2_sync_init
+0x1801c1720	45	libpad	todo	
+0x1801c17f0	9	libpad	spec-only	fit-enable flag setter
+0x1801c1800	9	libpad	spec-only	headset-time callback setter
+0x1801c1810	9	libpad	spec-only	log callback setter
+0x1801c1820	22	libpad	bit-exact	psvr2_ledsync_set_mode
+0x1801c1880	454	libpad	bit-exact	psvr2_ledsync_command; measurement-stop log/file not reproduced (untested)
+0x1801c27d0	36	libpad	bit-exact	psvr2_ledsync_resync (via output test)
+0x1801c28a0	62	libpad	bit-exact	psvr2_pad_lightbar_scale; t_libpad_dsout
+0x1801c2aa0	47	libpad	todo	
+0x1801c2ba0	47	libpad	todo	
+0x1801c2c80	468	libpad	spec-only	resend full state (buffer protocol + c6250/c6330/c6550)
+0x1801c2f50	38	libpad	todo	
+0x1801c3020	581	libpad	bit-exact	psvr2_sense_set_vibration (VR branch); t_libpad_vibration
+0x1801c34d0	197	libpad	todo	
+0x1801c3640	178	libpad	todo	
+0x1801c37a0	217	libpad	todo	
+0x1801c3970	178	libpad	todo	
+0x1801c3ac0	60	libpad	todo	
+0x1801c3ba0	249	libpad	spec-only	output buffer double-buffering
+0x1801c3d20	382	libpad	todo	
+0x1801c4030	371	libpad	todo	
+0x1801c4310	198	libpad	todo	
+0x1801c44a0	516	libpad	bit-exact	psvr2_sense_set_trigger_effect (VR buffer); pad+0x0e garbage write not modelled
+0x1801c4a30	804	libpad	bit-exact	psvr2_sense_set_trigger_level (VR); t_libpad_trigger
+0x1801c50c0	182	libpad	todo	
+0x1801c5200	370	libpad	todo	
+0x1801c54c0	177	libpad	todo	
+0x1801c5610	167	libpad	todo	
+0x1801c5730	250	libpad	todo	
+0x1801c58d0	723	libpad	todo	
+0x1801c5e00	379	libpad	todo	
+0x1801c6170	53	libpad	spec-only	send-complete: promote pending buffer
+0x1801c6250	49	libpad	bit-exact	psvr2_sense_fill_state; t_libpad_state
+0x1801c6330	98	libpad	bit-exact	psvr2_ds_output_fill; t_libpad_dsout
+0x1801c6550	35	libpad	bit-exact	psvr2_ds4_output_fill; t_libpad_dsout
+0x1801c65f0	204	libpad	bit-exact	psvr2_pad_trigger_effect_decode; t_libpad_trigdec
+0x1801c6910	8	libpad	skip:trivial	u16 load
+0x1801c6920	8	libpad	skip:trivial	u32 load
+0x1801c6940	78	libpad	bit-exact	psvr2_pad_trigger_levels
+0x1801c6a40	69	libpad	bit-exact	psvr2_pad_effect_unsupported; t_libpad_dsout
+0x1801c6b20	132	libpad	bit-exact	psvr2_pad_push_sample_ds; t_libpad_ringds 450k (c3970 call returned, not made)
+0x1801c6ee0	312	libpad	bit-exact	psvr2_pad_push_sample; t_libpad_ring 450k (perf statistics block not reproduced)
+0x1801c7630	27	libpad	todo	
+0x1801c7680	39	libpad	todo	
+0x1801c7770	186	libpad	spec-only	pad slot open; doc "DS4 / DualSense IMU calibration report"
+0x1801c7b10	184	libpad	todo	
+0x1801c7e90	29	libpad	todo	
+0x1801c7ef0	41	libpad	todo	
+0x1801c7fa0	31	libpad	todo	
+0x1801c80c0	72	libpad	todo	
+0x1801c8210	20	libpad	spec-only	QPC host clock us
+0x1801c8280	59	libpad	todo	
+0x1801c83a0	11	libpad	todo	
+0x1801c83c0	44	libpad	bit-exact	psvr2_pad_read_bits; t_libpad_dsinput
+0x1801c8450	57	libpad	todo	
+0x1801c8570	359	libpad	todo	
+0x1801c8a40	49	libpad	todo	
+0x1801c8b20	140	libpad	todo	
+0x1801c8ca0	39	libpad	todo	
+0x1801c8d50	25	libpad	todo	
+0x1801c8e60	17	libpad	todo	
+0x1801c8ea0	17	libpad	todo	
+0x1801c8ef0	18	libpad	todo	
+0x1801c8f80	17	libpad	todo	
+0x1801c8fc0	47	libpad	todo	
+0x1801c90a0	9	libpad	todo	
+0x1801c90c0	12	libpad	skip:trivial	u32 LE store
+0x1801c90e0	116	libpad	bit-exact	psvr2_pad_trigger_state
+0x1801c9380	17	libpad	spec-only	pad lookup by handle
+0x1801c93b0	30	libpad	todo	
+0x1801c9410	17	libpad	todo	
+0x1801c9440	11	libpad	bit-exact	psvr2_pad_is_vr; t_libpad_util
+0x1801c9470	15	libpad	bit-exact	psvr2_pad_is_vr_left
+0x1801c94b0	23	libpad	bit-exact	psvr2_pad_is_vr_right
+0x1801c9500	11	libpad	bit-exact	psvr2_pad_is_dualsense_std
+0x1801c9530	29	libpad	bit-exact	psvr2_pad_is_ps5_family
+0x1801c9590	11	libpad	bit-exact	psvr2_pad_is_0ba0
+0x1801c95c0	11	libpad	bit-exact	psvr2_pad_is_edge
+0x1801c95f0	16	libpad	bit-exact	psvr2_pad_is_ds4_new
+0x1801c9630	23	libpad	bit-exact	psvr2_pad_is_ds4v2_fw
+0x1801c9690	11	libpad	bit-exact	psvr2_pad_is_dualsense
+0x1801c96c0	8	libpad	skip:trivial	subtract
+0x1801c9710	39	libpad	todo	
+0x1801c9800	49	libpad	todo	
+0x1801c9870	37	libpad	todo	
+0x1801c9930	64	libpad	todo	
+0x1801c99f0	76	libpad	todo	
+0x1801c9b30	51	libpad	todo	
+0x1801c9c30	49	libpad	todo	
+0x1801c9d10	18	libpad	todo	
+0x1801c9d50	16	libpad	todo	
+0x1801c9d80	19	libpad	todo	
+0x1801c9dd0	17	libpad	todo	
+0x1801c9e10	19	libpad	todo	
+0x1801c9e60	231	libpad	todo	
+0x1801ca200	177	libpad	todo	
+0x1801ca480	33	libpad	todo	
+0x1801ca4e0	33	libpad	todo	
+0x1801ca540	91	libpad	todo	
+0x1801ca700	23	libpad	todo	
+0x1801ca780	27	libpad	todo	
+0x1801ca7e0	118	libpad	todo	
+0x1801ca9d0	24	libpad	todo	
+0x1801caa30	8	libpad	skip:trivial	global getter
+0x1801caa40	171	libpad	todo	
+0x1801caeb0	32	libpad	todo	
+0x1801caf90	21	libpad	todo	
+0x1801cafc0	8	libpad	skip:trivial	global getter
+0x1801cafd0	8	libpad	skip:trivial	global getter
+0x1801cafe0	8	libpad	skip:trivial	global getter
+0x1801caff0	8	libpad	skip:trivial	global getter
+0x1801cb000	8	libpad	skip:trivial	global getter
+0x1801cb010	96	libpad	todo	
+0x1801cb240	90	libpad	todo	
+0x1801cb4b0	8	libpad	todo	
+0x1801cb4c0	107	libpad	todo	
+0x1801cb6d0	57	libpad	todo	
+0x1801cb7d0	117	libpad	todo	
+0x1801cba20	221	libpad	todo	
+0x1801cbeb0	341	libpad	bit-exact	psvr2_sense_output_fill (VR branch; QPC times as inputs); DS4/DualSense branches spec-only; t_libpad_output
+0x1801cc640	12	libpad	todo	
+0x1801cc670	9	libpad	todo	
+0x1801cc680	9	libpad	todo	
+0x1801cc690	69	libpad	todo	
+0x1801cc830	21	libpad	todo	
+0x1801cc870	84	libpad	todo	
+0x1801cc9f0	31	libpad	todo	
+0x1801cca80	123	libpad	todo	
+0x1801cccf0	65	libpad	todo	
+0x1801cce70	804	libpad	todo	
+0x1801cdd40	123	libpad	todo	
+0x1801cdff0	86	libpad	spec-only	polling-rate feature 0x08
+0x1801ce210	134	libpad	todo	
+0x1801ce480	116	libpad	todo	
+0x1801ce6c0	29	libpad	todo	
+0x1801ce730	85	libpad	todo	
+0x1801ce8a0	21	libpad	todo	
+0x1801ce8e0	815	libpad	spec-only	HID reader thread
+0x1801cf8a0	44	libpad	todo	
+0x1801cf980	110	libpad	todo	
+0x1801cfb90	53	libpad	todo	
+0x1801cfca0	88	libpad	todo	
+0x1801cfe40	1537	libpad	todo	
+0x1801d1ce0	17	libpad	todo	
+0x1801d1d10	125	libpad	bit-exact	psvr2_sense_input_decode; t_libpad_input
+0x1801d1f50	225	libpad	bit-exact	psvr2_ds_input_decode; t_libpad_dsinput 300k
+0x1801d23c0	151	libpad	todo	
+0x1801d2690	59	libpad	skip:os-io	overlapped ReadFile with timeout
+0x1801d27f0	12	libpad	todo	
+0x1801d2820	9	libpad	todo	
+0x1801d2830	12	libpad	todo	
+0x1801d2850	9	libpad	todo	
+0x1801d2860	12	libpad	todo	
+0x1801d2880	9	libpad	todo	
+0x1801d2890	9	libpad	todo	
+0x1801d28a0	94	libpad	todo	
+0x1801d2a90	99	libpad	todo	
+0x1801d2cf0	66	libpad	bit-exact	psvr2_pad_imu_cal_parse; t_libpad_imucal
+0x1801d2ef0	39	libpad	todo	
+0x1801d2fb0	315	libpad	todo	
+0x1801d3490	102	libpad	todo	
+0x1801d3750	57	libpad	todo	
+0x1801d3870	106	libpad	todo	
+0x1801d3a60	11	libpad	todo	
+0x1801d3a80	46	libpad	todo	
+0x1801d3b90	261	libpad	todo	
+0x1801d4080	99	libpad	todo	
+0x1801d4280	12	libpad	spec-only	library lock
+0x1801d42b0	14	libpad	spec-only	library unlock
+0x1801d42d0	12	libpad	spec-only	device-table lock
+0x1801d4300	14	libpad	spec-only	device-table unlock
+0x1801d4320	13	libpad	spec-only	lock init
+0x1801d4360	13	libpad	spec-only	lock teardown
+0x1801d4390	18	libpad	bit-exact	psvr2_pad_crc32
+0x1801d43f0	21	libpad	bit-exact	psvr2_pad_crc32_bad
+0x1801d4490	15	libpad	bit-exact	psvr2_pad_crc32_update
+0x1801d44d0	29	libpad	bit-exact	psvr2_pad_quat_mul
+0x1801d4610	15	libpad	todo	
+0x1801d4650	10	libpad	todo	
+0x1801d4660	10	libpad	todo	
+0x1801d4670	11	libpad	skip:trivial	identity quaternion
+0x1801d4680	15	libpad	todo	
+0x1801d46b0	15	libpad	todo	
+0x1801d46f0	92	libpad	bit-exact	psvr2_tilt_correct; t_libpad_motion (via d4a90)
+0x1801d4a90	184	libpad	bit-exact	psvr2_motion_update; t_libpad_motion 1.2M steps
+0x1801d5170	111	libpad	bit-exact	psvr2_motion_cal_ds; t_libpad_dscal 400k (540 dps branch is dead code)
+0x1801d54e0	78	libpad	bit-exact	
+0x1801d5750	44	libpad	bit-exact	psvr2_mat3_inverse; via d4a90 axis bits
+0x1801d5950	32	libpad	bit-exact	psvr2_gyro_still_reset; t_libpad_motion
+0x1801d59e0	38	libpad	bit-exact	bias correction step inside psvr2_gyro_still_update
+0x1801d5a60	29	libpad	bit-exact	psvr2_gyro_still_thresholds; via inits
+0x1801d5ad0	49	libpad	bit-exact	psvr2_gyro_still_init_ds4; t_libpad_motion
+0x1801d5c30	47	libpad	bit-exact	psvr2_gyro_still_init_ps5; t_libpad_motion
+0x1801d5d80	185	libpad	bit-exact	psvr2_gyro_still_update; t_libpad_motion 6M samples
+0x1801d6230	317	libpad	todo	
+0x1801d6880	10	libpad	todo	
+0x1801d68b0	279	libpad	todo	
+0x1801d6df0	147	libpad	todo	
+0x1801d70c0	41	libpad	todo	
+0x1801d7140	25	libpad	todo	
+0x1801d71f0	19	libpad	todo	
+0x1801d7230	14	libpad	todo	
+0x1801d7260	14	libpad	todo	
+0x1801d7290	12	libpad	todo	
+0x1801d72b0	37	libpad	todo	
+0x1801d7350	155	libpad	todo	
+0x1801d75f0	155	libpad	todo	
+0x1801d7880	130	libpad	todo	
+0x1801d79e0	42	libpad	todo	
+0x1801d7a90	35	libpad	todo	
+0x1801d7b30	35	libpad	todo	
+0x1801d7bd0	652	libpad	todo	
+0x1801d8710	34	libpad	todo	
+0x1801d8800	14	libpad	todo	
+0x1801d8850	11	libpad	todo	
+0x1801d88b0	8	libpad	todo	
+0x1801d88c0	10	libpad	todo	
+0x1801d8900	41	libpad	todo	
+0x1801d8970	5356	libpad	todo	
+0x1801db160	198	libpad	todo	
+0x1801db4c0	71	libpad	todo	
+0x1801db660	67	libpad	todo	
+0x1801db7c0	163	libpad	todo	
+0x1801dbc60	156	libpad	todo	
+0x1801dc0a0	312	libpad	todo	
+0x1801dc490	57	libpad	todo	
+0x1801dc6e0	75	libpad	todo	
+0x1801dc8b0	36	libpad	todo	
+0x1801dcb40	444	libpad	todo	
+0x1801dd530	457	libpad	todo	
+0x1801ddef0	12	libpad	todo	
+0x1801ddf10	19	libpad	todo	
+0x1801ddf70	24	libpad	todo	
+0x1801ddfe0	15	libpad	todo	
+0x1801de010	22	libpad	todo	
+0x1801de050	22	libpad	todo	
+0x1801de090	22	libpad	todo	
+0x1801de0d0	15	libpad	todo	
+0x1801de100	22	libpad	todo	
+0x1801de140	22	libpad	todo	
+0x1801de180	64	libpad	todo	
+0x1801de2a0	320	libpad	todo	
+0x1801debe0	60	libpad	todo	
+0x1801decf0	21	libpad	todo	
+0x1801ded40	21	libpad	todo	
+0x1801ded90	102	libpad	todo	
+0x1801def10	22	libpad	todo	
+0x1801def50	19	libpad	todo	
+0x1801defa0	33	libpad	todo	
+0x1801df010	209	libpad	todo	
+0x1801df380	21	libpad	todo	
+0x1801df3d0	22	libpad	todo	
+0x1801df410	15	libpad	todo	
+0x1801df440	22	libpad	todo	
+0x1801df480	22	libpad	todo	
+0x1801df4c0	52	libpad	todo	
+0x1801df5a0	36	libpad	todo	
+0x1801df630	82	libpad	todo	
+0x1801df900	9	libpad	todo	
+0x1801df920	41	libpad	todo	
+0x1801dfb00	350	libpad	todo	

@@ -110,7 +110,7 @@ off. At 90 Hz the 90.0 default stays (0.1 % off
 
 | Item | Why |
 |------|-----|
-| Controller **optical pose** wiring and UKF fusion | The solver exists and passes synthetic tests. Wiring needs the rig camera poses (camera 0's built-in rotation, rig ↔ IMU, physical camera index) and the blob pixel scale, which need one hardware log. Until then controllers keep IMU-only tracking. |
+| Controller **optical pose**: Sony's UKF | Wired without a UKF (`optical_pose.cpp`, 2026-11-18, not yet run on hardware): the optical position is used as is (extrapolated 0.3 s, then held, as Sony), and each fix pulls the IMU heading. See "Optical controller pose" below. |
 | Blob association in LED sync | Sony associates blobs by predicted pose. Without a pose, the tracker syncs **one controller at a time** and `BlinkFinder` picks, per camera, the blob whose on/off pattern repeats every 11 (BROAD) or 20 (BG) frames; steady room lights and random flicker are rejected (simulated: 70 lights, 3 flickering lamps, 0 wrong picks). The first hardware run had 50–80 room blobs per camera, which the old "≤ 4 blobs" rule could never decode (stuck in BROAD). Hardware, 2026-11-18 (dark room): PRESCAN → BROAD → BG reached. A dark sync LED often still shows a dim blob (weight ~4 vs ~13 lit), so lit/dark is judged by weight against the site's own range; in BG the BROAD pick is kept while seen. First STABLE on hardware 2026-11-18 (17.7 s in BG, held 44 s). Two own changes made it lock: the drift fit slope is sent as a dimensionless rate (BG: −slope·step, BROAD: slope·2.5·step; raw it changed the cycle by 0.14 ppm against an 11 ppm drift), and every BG fit needs 10 samples (Sony: 40 after the first; BG gives ~1.3 samples/s). Open: PRESCAN → BROAD took 3.5–44 s with the controller in view. |
 | Drift-fit units | Sent as a dimensionless rate, not Sony's raw slope; see the blob-association row. |
 | Controller preset | Sony reads it from libpad's info block (+0x10). Here libpad's sync mode (1 / 2) stands in, since it has the same timing values. |
@@ -145,6 +145,42 @@ The module, library and driver build clean (kernel 7.0, gcc). To try them:
 4. Optional: set `"optical_tracking": true` in the `driver_psvr2` section of
    `steamvr.vrsettings`. Then look in `vrserver.txt` for `psvr2: optical:`
    and `psvr2: ledsync:` lines, and send the camera calibration lines back.
+
+## Optical controller pose (steamvr/driver_psvr2/src/optical_pose.cpp)
+
+From `docs/sony-re/opticalpose.md`. Runs per LD frame for each controller in
+STABLE (`optical_tracking` must be on).
+
+- Rig: camera 0 at Sony's built-in pose, **variant 2**; cameras 1-3 from
+  the calibration extrinsics, read as "a -> b" = b <- a. On this headset
+  that lands within 3 mm / 2 deg of Sony's variant-2 table (variant 1:
+  up to 75 deg off, so variant 2 it is).
+- Offline check (recorded BG frame, right controller, rev 0x0224 = Sony's
+  "other" model, no mirror): boot finds a pose 41 cm ahead with 28-30 LED
+  matches at 0.78 px, stable to 2 mm over 35 frames. Weak boots (4-9
+  matches) were wrong, so boots need >= 12 matches (own floor).
+- World <- rig = head pose at the LD frame time (interpolated from the pose
+  history) ∘ head <- rig. Default head <- rig: 180 deg about y (rig +x
+  left, +z forward; OpenVR head +x right, +z back), origin at the OpenVR
+  head origin. Settings `optical_rig_offset_x/y/z` (m, head axes) and
+  `optical_rig_tilt_deg` adjust it. Sony's chain (`INS · A⁻¹ · B`) is not
+  used: whether its X frame is this rig frame is open (opticalpose.md §8),
+  and taken literally it would put the cameras at the eyes. Setting
+  `optical_pose_log` writes rig-frame poses and head poses to
+  `~/psvr2-optical-pose.txt` (3 min) to fit head <- rig from a capture.
+- IMU <-> LED model: Sony uses a pure translation (pad +0x48). Our fusion's
+  IMU axes may differ from Sony's, so until learned the boot tries the 24
+  axis rotations (and for the left hand, mirror on/off). A guess is kept
+  after 30 frames over 30 deg of rotation whose optical orientation agrees
+  with gravity, then saved as `optical_remap_left/right` and
+  `optical_mirror_left`. Fixes reach the controller only after that.
+- Controller: a fix sets the IMU position (with Sony's 5 cm / 20 cm gate)
+  and pulls `yaw_offset_` toward the optical heading; head-based
+  recentering is off while fixes arrive. With no fix yet, the arm model
+  stays.
+- Open: one controller syncs at a time, so the second is only tracked
+  after the first reached STABLE; boot costs ~5 ms, one hypothesis per
+  frame (up to ~10 s to learn the remap); no UKF.
 
 ## Controller LED pose solver (userspace/lib/psvr2_led_solver.c)
 

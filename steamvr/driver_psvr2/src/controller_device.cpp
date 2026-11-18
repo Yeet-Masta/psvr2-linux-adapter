@@ -549,6 +549,11 @@ void Psvr2ControllerDriver::HandleState( const SenseState &s )
 	const double dt = last_imu_time_ < 0.0 ? 0.0 : s.imu_time_s - last_imu_time_;
 	last_imu_time_ = s.imu_time_s;
 	fusion_.Update( s.accel, s.gyro, dt );
+	{
+		std::lock_guard<std::mutex> lock( imu_mutex_ );
+		imu_q_ = fusion_.Orientation();
+		imu_valid_ = fusion_.Initialized();
+	}
 
 	// --- inputs ---
 	SetBool( system_click_, s.ps_click );
@@ -659,11 +664,46 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 		}
 	}
 
+	// Optical tracking: a fresh fix sets the heading, and while fixes keep
+	// coming the head-based recentering is off.
+	Optical o;
+	{
+		std::lock_guard<std::mutex> lock( optical_mutex_ );
+		o = optical_;
+	}
+	const uint64_t now_us = uint64_t(
+		std::chrono::duration_cast<std::chrono::microseconds>( now.time_since_epoch() ).count() );
+	const bool optical_recent = o.have && now_us - o.us < 5000000;
+	if ( o.have && o.seq != optical_seq_used_ )
+	{
+		const bool first = optical_seq_used_ == 0 || !yaw_anchored_;
+		optical_seq_used_ = o.seq;
+		// The fix is a few tens of ms old: only use it while the
+		// controller turns slowly.
+		const vrmath::Vec3 &gw = smoothed_gyro_world_;
+		if ( first || gw.x * gw.x + gw.y * gw.y + gw.z * gw.z < 1.0 )
+		{
+			const vr::HmdQuaternion_t c = vrmath::Mul( o.rot, vrmath::Conj( fusion_.Orientation() ) );
+			const vrmath::Vec3 up = vrmath::Rotate( c, { 0.0, 1.0, 0.0 } );
+			if ( up.y > std::cos( 8.0 * kDeg ) )  // a heading-only difference
+			{
+				const double target = vrmath::Yaw( c );
+				yaw_offset_ += vrmath::WrapPi( target - yaw_offset_ ) * ( first ? 1.0 : 0.1 );
+				yaw_anchored_ = true;
+			}
+		}
+	}
+	if ( optical_recent )
+	{
+		recenter_requested_ = false;
+		wear_recenter_until_ = {};
+	}
 	if ( !yaw_anchored_ || recenter_requested_.exchange( false ) )
 	{
 		yaw_offset_ = head_yaw - vrmath::Yaw( raw_grip );
 		yaw_anchored_ = true;
 	}
+	yaw_pub_ = yaw_offset_;
 	const vr::HmdQuaternion_t yaw_fix = vrmath::AxisAngle( 0, 1, 0, yaw_offset_ );
 	const vr::HmdQuaternion_t grip = vrmath::Mul( yaw_fix, raw_grip );
 
@@ -693,12 +733,30 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	last_pose_time_ = last_imu_time_;
 
 	p.qRotation = grip;
-	p.vecPosition[0] = hand.x;
-	p.vecPosition[1] = hand.y;
-	p.vecPosition[2] = hand.z;
-	p.vecVelocity[0] = hand_velocity_.x;
-	p.vecVelocity[1] = hand_velocity_.y;
-	p.vecVelocity[2] = hand_velocity_.z;
+	vrmath::Vec3 out_pos = hand, out_vel = hand_velocity_;
+	if ( o.have )
+	{
+		// Sony (opticalpose.md §5): extrapolate the newest optical position
+		// for up to 0.3 s, then hold it; the rotation stays IMU-driven.
+		const double age = double( int64_t( now_us - o.us ) ) * 1e-6;
+		if ( age < 0.3 )
+		{
+			const double dt = std::clamp( age - prediction_s_, 0.0, 0.1 );
+			out_pos = vrmath::Add( o.pos, vrmath::Scale( o.vel, dt ) );
+			out_vel = o.vel;
+		}
+		else
+		{
+			out_pos = o.pos;
+			out_vel = {};
+		}
+	}
+	p.vecPosition[0] = out_pos.x;
+	p.vecPosition[1] = out_pos.y;
+	p.vecPosition[2] = out_pos.z;
+	p.vecVelocity[0] = out_vel.x;
+	p.vecVelocity[1] = out_vel.y;
+	p.vecVelocity[2] = out_vel.z;
 	p.vecAngularVelocity[0] = smoothed_gyro_world_.x;
 	p.vecAngularVelocity[1] = smoothed_gyro_world_.y;
 	p.vecAngularVelocity[2] = smoothed_gyro_world_.z;
@@ -706,6 +764,57 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	p.poseIsValid = true;
 	p.result = vr::TrackingResult_Running_OK;
 	return p;
+}
+
+int Psvr2ControllerDriver::HardwareRevision()
+{
+	std::lock_guard<std::mutex> lock( hid_mutex_ );
+	return hid_ ? hid_->HardwareRevision() : 0;
+}
+
+bool Psvr2ControllerDriver::ImuOrientation( vr::HmdQuaternion_t &q, double &yaw )
+{
+	std::lock_guard<std::mutex> lock( imu_mutex_ );
+	q = imu_q_;
+	yaw = yaw_pub_;
+	return imu_valid_ && attached_;
+}
+
+bool Psvr2ControllerDriver::OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos,
+                                        const vr::HmdQuaternion_t &world_from_imu )
+{
+	std::lock_guard<std::mutex> lock( optical_mutex_ );
+	Optical &o = optical_;
+	if ( o.have && frame_us <= o.us )
+		return false;
+	const double dt = o.have ? double( frame_us - o.us ) * 1e-6 : 1e9;
+	if ( dt < 0.3 )
+	{
+		// Innovation gate (Sony's defaults): 5 cm below 1 m/s, else 20 cm.
+		// After ten rejects in a row, start over from the measurement.
+		const vrmath::Vec3 pred = vrmath::Add( o.pos, vrmath::Scale( o.vel, dt ) );
+		const vrmath::Vec3 d = vrmath::Add( pos, vrmath::Scale( pred, -1.0 ) );
+		const double dist = std::sqrt( d.x * d.x + d.y * d.y + d.z * d.z );
+		const double speed = std::sqrt( o.vel.x * o.vel.x + o.vel.y * o.vel.y + o.vel.z * o.vel.z );
+		if ( dist > ( speed < 1.0 ? 0.05 : 0.20 ) && ++o.rejects < 10 )
+			return false;
+		if ( o.rejects < 10 && dt > 0.004 )
+		{
+			const vrmath::Vec3 v = vrmath::Scale( vrmath::Add( pos, vrmath::Scale( o.pos, -1.0 ) ), 1.0 / dt );
+			o.vel = vrmath::Add( vrmath::Scale( o.vel, 0.5 ), vrmath::Scale( v, 0.5 ) );
+		}
+		else if ( o.rejects >= 10 )
+			o.vel = {};
+	}
+	else
+		o.vel = {};
+	o.rejects = 0;
+	o.have = true;
+	o.us = frame_us;
+	o.pos = pos;
+	o.rot = world_from_imu;
+	o.seq++;
+	return true;
 }
 
 void Psvr2ControllerDriver::IoThread()

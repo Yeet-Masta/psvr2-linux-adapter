@@ -90,6 +90,7 @@ OpticalTracker::OpticalTracker( Psvr2ControllerDriver *const controllers[2] )
 	            err == vr::VRSettingsError_None;
 	if ( led_test_ )
 		DriverLog( "psvr2: optical: LED on/off test mode (no sync)" );
+	pose_ = std::make_unique<OpticalPose>( controllers[0]->Hmd(), controllers );
 	for ( int i = 0; i < 2; i++ )
 	{
 		controllers_[i] = controllers[i];
@@ -252,6 +253,7 @@ void OpticalTracker::Run()
 				PushDetectionConfig( pkt, h );
 				DecodeBlobs( pkt, h );
 				RunSyncers( now );
+				SolvePoses( now );
 			}
 		}
 		else if ( r < 0 && errno != EINTR )
@@ -483,6 +485,21 @@ int OpticalTracker::GlobalPreset()
 				break;
 			}
 	return preset_;
+}
+
+// Controller poses for the controllers whose LEDs are synced.
+void OpticalTracker::SolvePoses( uint64_t now_us )
+{
+	if ( now_us - rig_try_us_ > kSec )
+	{
+		rig_try_us_ = now_us;
+		pose_->BuildRig( dev_ );
+	}
+	const bool synced[2] = {
+		!see_through_ && !led_test_ && syncers_[0]->Current() == LedSyncer::kStable,
+		!see_through_ && !led_test_ && syncers_[1]->Current() == LedSyncer::kStable,
+	};
+	pose_->Frame( frame_us_, blobs_, blob_count_, synced );
 }
 
 LedObservation OpticalTracker::Observe( int hand, int phase_owner )

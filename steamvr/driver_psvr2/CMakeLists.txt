@@ -25,6 +25,7 @@ add_library(driver_psvr2 MODULE
     src/camera_component.cpp
     src/led_syncer.cpp
     src/optical_tracker.cpp
+    src/optical_pose.cpp
     src/blink_finder.cpp
     "${LIBPSVR2_DIR}/sie/libpad/psvr2_hidsync.c"
     "${LIBPSVR2_DIR}/sie/libpad/psvr2_sense_output.c"

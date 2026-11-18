@@ -4,6 +4,8 @@
 #include "camera_component.h"
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -95,6 +97,10 @@ public:
 	void *GetComponent( const char *pchComponentNameAndVersion ) override;
 	void DebugRequest( const char *pchRequest, char *pchResponseBuffer, uint32_t unResponseBufferSize ) override;
 	vr::DriverPose_t GetPose() override;
+	// Head pose at a host CLOCK_MONOTONIC time (µs), interpolated from the
+	// recent poses; false when there is none within 100 ms. Includes
+	// standing_height_, like GetPose().
+	bool PoseAt( uint64_t host_us, vr::DriverPose_t &out );
 
 	const std::string &GetSerialNumber() const { return serial_number_; }
 
@@ -142,6 +148,12 @@ private:
 
 	std::mutex pose_mutex_;
 	vr::DriverPose_t last_pose_{};
+	struct TimedPose
+	{
+		uint64_t host_us;
+		vr::DriverPose_t pose;
+	};
+	std::deque<TimedPose> pose_history_;  // ~0.5 s, oldest first; pose_mutex_
 	std::thread pose_thread_;
 
 	// Gaze, controls and rumble go through a second libpsvr2 handle.

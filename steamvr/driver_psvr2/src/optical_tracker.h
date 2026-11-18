@@ -6,10 +6,10 @@
 // driver keeps them, publishes the newest camera frame time for libpad's
 // PRESCAN base time, and runs one LedSyncer per controller.
 //
-// Not done yet (see docs/DEV-NOTES.md): the controller pose solve. Until it
-// exists, blobs cannot be associated with a controller by predicted pose, so
-// this syncs one controller at a time and treats every blob a camera sees as
-// that controller's sync LED. Gated by the "optical_tracking" setting.
+// Blobs are not yet associated with a controller by predicted pose during
+// sync, so this syncs one controller at a time and treats every blob a
+// camera sees as that controller's sync LED. Once a controller is STABLE,
+// OpticalPose solves its pose. Gated by the "optical_tracking" setting.
 #pragma once
 
 #include <cstdio>
@@ -21,6 +21,7 @@
 
 #include "blink_finder.h"
 #include "led_syncer.h"
+#include "optical_pose.h"
 
 #include "libpsvr2.h"
 #include "sie_c.h"
@@ -62,9 +63,12 @@ private:
 	int GlobalPreset();
 	LedObservation Observe( int hand, int phase_owner );
 	void RunSyncers( uint64_t now_us );
+	void SolvePoses( uint64_t now_us );
 
 	Psvr2ControllerDriver *controllers_[2];
 	std::unique_ptr<LedSyncer> syncers_[2];
+	std::unique_ptr<OpticalPose> pose_;
+	uint64_t rig_try_us_ = 0;
 	psvr2_t *dev_ = nullptr;
 	std::thread thread_;
 	std::atomic<bool> running_{ false };

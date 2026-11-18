@@ -38,6 +38,7 @@ public:
 
 	const std::string &GetSerialNumber() const { return serial_; }
 	bool IsLeft() const { return left_; }
+	Psvr2HmdDriver *Hmd() const { return hmd_; }
 
 	// Hand a freshly discovered hidraw node to this controller. Ignored while
 	// a node is already attached.
@@ -48,6 +49,17 @@ public:
 	bool LedSyncCommand( const uint8_t *cmd, uint8_t len );
 	bool LedTestSweep( int32_t offset_us );
 	bool LedSyncStatus( SenseHid::LedSyncStatus &out );
+
+	// ---- Optical tracking (called from the OpticalTracker thread) ----
+	// Sense hardware revision (selects the LED model); 0 when unknown.
+	int HardwareRevision();
+	// Fused IMU orientation (gravity-aligned, arbitrary heading) and the
+	// heading correction in use: world <- IMU = RotY(yaw) * q.
+	bool ImuOrientation( vr::HmdQuaternion_t &q, double &yaw );
+	// An optical fix for the LED frame at host time frame_us: the IMU's
+	// position (m) and orientation in the world. Returns false when the
+	// innovation gate rejects it (docs/sony-re/opticalpose.md §4.1).
+	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu );
 
 	// SteamVR haptic event for our haptic component.
 	void OnHaptic( const vr::VREvent_HapticVibration_t &h );
@@ -140,6 +152,25 @@ private:
 
 	std::mutex pose_mutex_;
 	vr::DriverPose_t pose_{};
+
+	// Optical state (optical_mutex_). Position: the newest accepted fix,
+	// extrapolated for 0.3 s and then held, as Sony does. Heading: each new
+	// fix pulls yaw_offset_ toward the optical heading.
+	struct Optical
+	{
+		bool have = false;
+		uint64_t us = 0, seq = 0;
+		vrmath::Vec3 pos, vel;
+		vr::HmdQuaternion_t rot = vrmath::Identity();
+		int rejects = 0;
+	};
+	std::mutex optical_mutex_;
+	Optical optical_;
+	uint64_t optical_seq_used_ = 0;  // IoThread
+	std::mutex imu_mutex_;
+	vr::HmdQuaternion_t imu_q_ = vrmath::Identity();
+	bool imu_valid_ = false;
+	std::atomic<double> yaw_pub_{ 0.0 };
 
 	// Output state.
 	std::mutex out_mutex_;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "hmd_device_driver.h"
+#include "vr_math.h"
 
 #include <algorithm>
 #include <chrono>
@@ -293,6 +294,35 @@ vr::DriverPose_t Psvr2HmdDriver::GetPose()
 	return last_pose_;
 }
 
+bool Psvr2HmdDriver::PoseAt( uint64_t host_us, vr::DriverPose_t &out )
+{
+	std::lock_guard<std::mutex> lock( pose_mutex_ );
+	if ( pose_history_.empty() )
+		return false;
+	auto it = pose_history_.begin();
+	while ( it != pose_history_.end() && it->host_us < host_us )
+		++it;
+	if ( it == pose_history_.end() || it == pose_history_.begin() )
+	{
+		// Outside the history: take the nearest end if it is close enough.
+		const TimedPose &e = it == pose_history_.end() ? pose_history_.back() : pose_history_.front();
+		const int64_t gap = int64_t( host_us ) - int64_t( e.host_us );
+		if ( gap > 100000 || gap < -100000 )
+			return false;
+		out = e.pose;
+		return out.poseIsValid;
+	}
+	const TimedPose &b = *it, &a = *( it - 1 );
+	if ( b.host_us - a.host_us > 100000 )
+		return false;
+	const double t = double( host_us - a.host_us ) / double( b.host_us - a.host_us );
+	out = b.pose;
+	for ( int i = 0; i < 3; i++ )
+		out.vecPosition[i] = a.pose.vecPosition[i] + ( b.pose.vecPosition[i] - a.pose.vecPosition[i] ) * t;
+	out.qRotation = vrmath::Nlerp( a.pose.qRotation, b.pose.qRotation, t );
+	return a.pose.poseIsValid && b.pose.poseIsValid;
+}
+
 Psvr2GazeData Psvr2HmdDriver::GetGaze()
 {
 	std::lock_guard<std::mutex> lock( gaze_mutex_ );
@@ -541,8 +571,14 @@ void Psvr2HmdDriver::PoseThread()
 		{
 			pose.vecPosition[1] += standing_height_;
 			{
+				const uint64_t now_us = uint64_t( std::chrono::duration_cast<std::chrono::microseconds>(
+									  std::chrono::steady_clock::now().time_since_epoch() )
+				                                      .count() );
 				std::lock_guard<std::mutex> lock( pose_mutex_ );
 				last_pose_ = pose;
+				pose_history_.push_back( { now_us + uint64_t( int64_t( pose.poseTimeOffset * 1e6 ) ), pose } );
+				while ( pose_history_.size() > 2 && pose_history_.back().host_us - pose_history_.front().host_us > 500000 )
+					pose_history_.pop_front();
 			}
 			if ( !chaperone_written_ && pose.result == vr::TrackingResult_Running_OK &&
 			     container_ != vr::k_ulInvalidPropertyContainer )

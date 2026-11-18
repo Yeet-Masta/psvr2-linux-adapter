@@ -91,4 +91,73 @@ inline Pose Invert( const Pose &p )
 	return { r, Scale( Rotate( r, p.pos ), -1.0 ) };
 }
 
+// Rotation matrix, row-major, of a unit quaternion.
+inline void ToMatrix( const vr::HmdQuaternion_t &q, double R[9] )
+{
+	const double w = q.w, x = q.x, y = q.y, z = q.z;
+	R[0] = 1 - 2 * ( y * y + z * z );
+	R[1] = 2 * ( x * y - w * z );
+	R[2] = 2 * ( x * z + w * y );
+	R[3] = 2 * ( x * y + w * z );
+	R[4] = 1 - 2 * ( x * x + z * z );
+	R[5] = 2 * ( y * z - w * x );
+	R[6] = 2 * ( x * z - w * y );
+	R[7] = 2 * ( y * z + w * x );
+	R[8] = 1 - 2 * ( x * x + y * y );
+}
+
+// Unit quaternion of a row-major rotation matrix.
+inline vr::HmdQuaternion_t FromMatrix( const double R[9] )
+{
+	vr::HmdQuaternion_t q;
+	const double tr = R[0] + R[4] + R[8];
+	if ( tr > 0 )
+	{
+		const double s = std::sqrt( tr + 1.0 ) * 2;
+		q = { 0.25 * s, ( R[7] - R[5] ) / s, ( R[2] - R[6] ) / s, ( R[3] - R[1] ) / s };
+	}
+	else if ( R[0] > R[4] && R[0] > R[8] )
+	{
+		const double s = std::sqrt( 1.0 + R[0] - R[4] - R[8] ) * 2;
+		q = { ( R[7] - R[5] ) / s, 0.25 * s, ( R[1] + R[3] ) / s, ( R[2] + R[6] ) / s };
+	}
+	else if ( R[4] > R[8] )
+	{
+		const double s = std::sqrt( 1.0 + R[4] - R[0] - R[8] ) * 2;
+		q = { ( R[2] - R[6] ) / s, ( R[1] + R[3] ) / s, 0.25 * s, ( R[5] + R[7] ) / s };
+	}
+	else
+	{
+		const double s = std::sqrt( 1.0 + R[8] - R[0] - R[4] ) * 2;
+		q = { ( R[3] - R[1] ) / s, ( R[2] + R[6] ) / s, ( R[5] + R[7] ) / s, 0.25 * s };
+	}
+	return Normalize( q );
+}
+
+// Normalised linear blend; fine for the small steps it is used for.
+inline vr::HmdQuaternion_t Nlerp( const vr::HmdQuaternion_t &a, vr::HmdQuaternion_t b, double t )
+{
+	if ( a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z < 0 )
+		b = { -b.w, -b.x, -b.y, -b.z };
+	return Normalize( { a.w + ( b.w - a.w ) * t, a.x + ( b.x - a.x ) * t, a.y + ( b.y - a.y ) * t,
+	                    a.z + ( b.z - a.z ) * t } );
+}
+
+// Rotation angle of q, radians, 0..pi.
+inline double Angle( const vr::HmdQuaternion_t &q )
+{
+	const double v = std::sqrt( q.x * q.x + q.y * q.y + q.z * q.z );
+	return 2.0 * std::atan2( v, std::fabs( q.w ) );
+}
+
+// Wrap an angle to (-pi, pi].
+inline double WrapPi( double a )
+{
+	while ( a > M_PI )
+		a -= 2 * M_PI;
+	while ( a <= -M_PI )
+		a += 2 * M_PI;
+	return a;
+}
+
 } // namespace vrmath

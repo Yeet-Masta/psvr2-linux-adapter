@@ -16,6 +16,7 @@ namespace
 using Clock = std::chrono::steady_clock;
 constexpr double kDeg = 3.14159265358979323846 / 180.0;
 constexpr auto kOutputPeriod = std::chrono::microseconds( 10667 );  // 32 PCM samples at 3 kHz
+constexpr auto kInputTimeout = std::chrono::milliseconds( 1000 );
 constexpr auto kRecenterHold = std::chrono::milliseconds( 1000 );
 constexpr auto kCalibrateHold = std::chrono::milliseconds( 3000 );
 constexpr auto kSkeletonPeriod = std::chrono::milliseconds( 10 );
@@ -26,6 +27,13 @@ float GetFloatSetting( const char *key, float fallback )
 {
 	vr::EVRSettingsError err = vr::VRSettingsError_None;
 	const float v = vr::VRSettings()->GetFloat( kSection, key, &err );
+	return err == vr::VRSettingsError_None ? v : fallback;
+}
+
+int GetIntSetting( const char *key, int fallback )
+{
+	vr::EVRSettingsError err = vr::VRSettingsError_None;
+	const int v = vr::VRSettings()->GetInt32( kSection, key, &err );
 	return err == vr::VRSettingsError_None ? v : fallback;
 }
 
@@ -213,6 +221,7 @@ void Psvr2ControllerDriver::Attach( const SenseHidInfo &info )
 		hid_ = std::move( hid );
 		fusion_ = ImuFusion();
 		last_imu_time_ = -1.0;
+		last_input_ = Clock::now();
 		last_pose_time_ = -1.0;
 		yaw_anchored_ = false;
 		bias_saved_ = false;
@@ -233,6 +242,7 @@ void Psvr2ControllerDriver::Attach( const SenseHidInfo &info )
 		std::lock_guard<std::mutex> lock( out_mutex_ );
 		trigger_dirty_ = true;  // re-apply the current effect on reconnect
 	}
+	props_dirty_ = true;
 	attached_ = true;
 	DriverLog( "psvr2: %s Sense controller on %s (%s)", left_ ? "left" : "right", info.path.c_str(),
 	           info.bluetooth ? "Bluetooth" : "USB" );
@@ -248,6 +258,13 @@ void Psvr2ControllerDriver::Disconnected()
 		hid_.reset();
 	}
 	attached_ = false;
+	// As Sony: no battery status while the controller is away.
+	if ( container_ != vr::k_ulInvalidPropertyContainer )
+	{
+		vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DeviceProvidesBatteryStatus_Bool, false );
+		vr::VRProperties()->SetFloatProperty( container_, vr::Prop_DeviceBatteryPercentage_Float, 0.0f );
+		battery_ = -1.0f;
+	}
 	{
 		std::lock_guard<std::mutex> lock( pose_mutex_ );
 		pose_.deviceIsConnected = false;
@@ -264,12 +281,26 @@ void Psvr2ControllerDriver::Disconnected()
 
 void Psvr2ControllerDriver::OnHaptic( const vr::VREvent_HapticVibration_t &h )
 {
+	// Thresholds as Sony's driver applies them (docs/sony-re/sense.md 5.1):
+	// a zero amplitude or frequency stops the pulse, but no earlier than
+	// 80 ms after it started; events weaker than 0.049 are ignored; every
+	// pulse lasts at least 80 ms.
+	constexpr auto kMinPulse = std::chrono::milliseconds( 80 );
 	std::lock_guard<std::mutex> lock( out_mutex_ );
-	haptic_amplitude_ = std::clamp( h.fAmplitude, 0.0f, 1.0f );
+	const auto now = Clock::now();
+	if ( !( h.fAmplitude > 0.0f ) || !( h.fFrequency > 0.0f ) )
+	{
+		if ( now < haptic_end_ )
+			haptic_end_ = std::max( now, haptic_start_ + kMinPulse );
+		return;
+	}
+	if ( h.fAmplitude < 0.049f )
+		return;
+	haptic_amplitude_ = std::min( h.fAmplitude, 1.0f );
 	haptic_frequency_ = h.fFrequency;
-	// A zero duration is a single short pulse.
-	const double secs = std::max( 0.011, double( h.fDurationSeconds ) );
-	haptic_end_ = Clock::now() + std::chrono::duration_cast<Clock::duration>( std::chrono::duration<double>( secs ) );
+	const double secs = std::max( 0.08, double( h.fDurationSeconds ) );
+	haptic_start_ = now;
+	haptic_end_ = now + std::chrono::duration_cast<Clock::duration>( std::chrono::duration<double>( secs ) );
 }
 
 void Psvr2ControllerDriver::SetTriggerEffect( const TriggerEffect *fx )
@@ -315,6 +346,10 @@ void Psvr2ControllerDriver::LoadSettings()
 	prediction_s_ = std::clamp( GetFloatSetting( "controller_prediction_ms", 12.0f ), 0.0f, 50.0f ) / 1000.0;
 	recenter_on_wear_ = GetBoolSetting( "recenter_on_wear", true );
 	battery_alerts_ = GetBoolSetting( "controller_alerts", true );
+	// 0 off, 1 strong (default), 2 medium, 3 weak.
+	vibration_strength_ = std::clamp( GetIntSetting( "vibration_strength", 1 ), 0, 3 );
+	SenseHid::SetSonyFraming( GetBoolSetting( "sony_bt_framing", true ) );
+	SenseHid::SetLedSync( GetBoolSetting( "optical_tracking", false ) );
 	default_trigger_ = DefaultTriggerEffect();
 	trigger_ = default_trigger_;
 	trigger_dirty_ = true;
@@ -363,6 +398,33 @@ void Psvr2ControllerDriver::SaveCalibration()
 
 void Psvr2ControllerDriver::UpdateBattery( const SenseState &s )
 {
+	if ( hmd_ && container_ != vr::k_ulInvalidPropertyContainer && hmd_->UniverseId() != universe_set_ )
+	{
+		universe_set_ = hmd_->UniverseId();
+		vr::VRProperties()->SetUint64Property( container_, vr::Prop_CurrentUniverseId_Uint64, universe_set_ );
+	}
+	if ( props_dirty_ && container_ != vr::k_ulInvalidPropertyContainer )
+	{
+		props_dirty_ = false;
+		uint16_t fw = 0, hw = 0;
+		{
+			std::lock_guard<std::mutex> lock( hid_mutex_ );
+			if ( hid_ )
+			{
+				fw = hid_->FirmwareRevision();
+				hw = hid_->HardwareRevision();
+			}
+		}
+		char buf[16];
+		snprintf( buf, sizeof( buf ), "%04x", fw );
+		vr::VRProperties()->SetStringProperty( container_, vr::Prop_TrackingFirmwareVersion_String, fw ? buf : "Unknown" );
+		if ( hw )
+		{
+			snprintf( buf, sizeof( buf ), "%04x", hw );
+			vr::VRProperties()->SetStringProperty( container_, vr::Prop_HardwareRevision_String, buf );
+		}
+		vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DeviceProvidesBatteryStatus_Bool, true );
+	}
 	if ( !s.battery_valid )
 		return;
 	if ( std::fabs( s.battery - battery_ ) > 0.01f || s.charging != charging_ )
@@ -450,7 +512,12 @@ void Psvr2ControllerDriver::FillOutput( SenseOutput &out )
 		pcm_phase_ = 0.0;
 		return;
 	}
-	// Driver alerts win over game haptics.
+	// Driver alerts win over game haptics. Vibration strength (Sony's
+	// setting): off drops game haptics, medium/weak reduce them in 12.5 % steps.
+	if ( !buzzing && vibration_strength_ == 0 )
+		return;
+	const uint8_t reduction = buzzing ? 0 : vibration_strength_ == 2 ? 2 : vibration_strength_ == 3 ? 3 : 0;
+	out.reduction = reduction;
 	const float amplitude = buzzing ? 0.7f : haptic_amplitude_;
 	const float frequency = buzzing ? 160.0f : haptic_frequency_;
 
@@ -461,17 +528,18 @@ void Psvr2ControllerDriver::FillOutput( SenseOutput &out )
 		const double step = 2.0 * 3.14159265358979323846 * hz / sense::kPcmSampleRate;
 		for ( int i = 0; i < sense::kPcmSamplesPerReport; i++ )
 		{
-			out.pcm[i] = int8_t( std::lround( 127.0 * amplitude * std::sin( pcm_phase_ ) ) );
+			out.pcm[i] = int8_t( std::lround( 127.0 * amplitude * ( 1.0 - 0.125 * reduction ) * std::sin( pcm_phase_ ) ) );
 			pcm_phase_ = std::fmod( pcm_phase_ + step, 2.0 * 3.14159265358979323846 );
 		}
 		out.has_pcm = true;
 	}
 	else
 	{
-		out.rumble_amplitude = uint8_t( std::lround( amplitude * 255.0f ) );
-		out.rumble_mode = frequency > 0.0f && frequency <= 70.0f ? sense::kFlag1VibrationLow60Hz
-		                  : frequency >= 110.0f                          ? sense::kFlag1VibrationHigh120Hz
-		                                                                         : sense::kFlag1VibrationClassic;
+		// Sony: amplitude byte ceil(a * 20), frequency ignored, flag1
+		// 0x40 (vibration valid) | 0x03 (mode 2).
+		out.rumble_amplitude = uint8_t( std::ceil( amplitude * sense::kVibrationMax ) );
+		out.rumble_mode = sense::kFlag1VibrationValid;
+		(void)frequency;
 	}
 }
 
@@ -688,6 +756,21 @@ void Psvr2ControllerDriver::IoThread()
 			continue;
 		}
 
+		// BlueZ keeps the hidraw node open across a Bluetooth link drop, so a
+		// lost controller just goes quiet. When it reconnects it is back in
+		// basic mode until its calibration is read again. Treat a second of
+		// silence as a disconnect; the provider then reopens the node, which
+		// re-reads the calibration and restores full reports.
+		if ( updated )
+			last_input_ = Clock::now();
+		else if ( Clock::now() - last_input_ > kInputTimeout )
+		{
+			DriverLog( "psvr2: %s Sense controller sent nothing for %lld ms; reopening", left_ ? "left" : "right",
+			           (long long)std::chrono::duration_cast<std::chrono::milliseconds>( kInputTimeout ).count() );
+			Disconnected();
+			continue;
+		}
+
 		if ( updated )
 		{
 			const vr::DriverPose_t pose = BuildPose();
@@ -714,4 +797,28 @@ void Psvr2ControllerDriver::IoThread()
 				next_output = Clock::now() + kOutputPeriod;
 		}
 	}
+}
+
+bool Psvr2ControllerDriver::LedSyncCommand( const uint8_t *cmd, uint8_t len )
+{
+	std::lock_guard<std::mutex> lock( hid_mutex_ );
+	if ( !hid_ )
+		return false;
+	hid_->LedSyncCommand( cmd, len );
+	return true;
+}
+
+bool Psvr2ControllerDriver::LedTestSweep( int32_t offset_us )
+{
+	std::lock_guard<std::mutex> lock( hid_mutex_ );
+	return hid_ && hid_->LedTestSweep( offset_us );
+}
+
+bool Psvr2ControllerDriver::LedSyncStatus( SenseHid::LedSyncStatus &out )
+{
+	std::lock_guard<std::mutex> lock( hid_mutex_ );
+	if ( !hid_ || !attached_ )
+		return false;
+	out = hid_->LedSync();
+	return true;
 }

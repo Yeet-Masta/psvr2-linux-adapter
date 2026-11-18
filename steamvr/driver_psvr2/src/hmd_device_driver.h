@@ -25,9 +25,10 @@ struct Psvr2DisplayConfig
 	int32_t render_height = 2040;
 	// Left-eye field of view in degrees (Sony's values, via Monado's PSVR2
 	// driver); the right eye mirrors it horizontally.
-	float   fov_outer_deg = 61.5f;
-	float   fov_inner_deg = 43.5f;
-	float   fov_vertical_deg = 53.0f;
+	// 0 = Sony's projection tangents (1.84177 outer, 0.94719 inner, 1.32898).
+	float   fov_outer_deg = 0.0f;
+	float   fov_inner_deg = 0.0f;
+	float   fov_vertical_deg = 0.0f;
 
 	// Per-unit lens parameters for psvr2_distort() (libpsvr2).
 	float   lens[8] = { -0.09919293f, 0.0f, 0.09919293f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f };
@@ -55,6 +56,8 @@ public:
 	vr::DistortionCoordinates_t ComputeDistortion( vr::EVREye eEye, float fU, float fV ) override;
 	void GetWindowBounds( int32_t *pnX, int32_t *pnY, uint32_t *pnWidth, uint32_t *pnHeight ) override;
 	bool ComputeInverseDistortion( vr::HmdVector2_t *pResult, vr::EVREye eEye, uint32_t unChannel, float fU, float fV ) override;
+
+	const float *Lens() const { return config_.lens; }
 
 private:
 	Psvr2DisplayConfig config_;
@@ -108,11 +111,16 @@ public:
 
 	// Bumped each time the headset is put on (proximity sensor).
 	uint32_t PutOnCount() const { return put_on_count_; }
+	// Universe of the play area this driver published, 0 = none yet.
+	uint64_t UniverseId() const { return universe_id_; }
 	// Short headset rumble to flag an event (e.g. a controller dropped out).
 	void RequestAlert() { alert_requested_ = true; }
 
 private:
 	void PoseThread();
+	void SelectEdid( const char *why );
+	void WriteChaperone( const vr::DriverPose_t &pose );
+	void SubmitPose( const vr::DriverPose_t &pose, bool worn );
 	void GazeThread();
 	void PollControls();
 
@@ -148,5 +156,15 @@ private:
 	std::atomic<bool> alert_requested_{ false };
 	float standing_height_ = 0.0f;  // metres added to the tracker's height
 	int rumble_hz_ = 0;
+	uint32_t firmware_version_ = 0;
+	bool supports_120_ = true;
+	int see_through_ = -1;
+	int see_through_poll_ = 0;
+	bool chaperone_written_ = false;
+	std::atomic<uint64_t> universe_id_{ 0 };
+	// Not-worn throttle (docs/sony-re/display.md 5.5).
+	vr::DriverPose_t ref_pose_{};
+	std::chrono::steady_clock::time_point ref_time_{};
+	bool have_ref_ = false;
 	std::chrono::steady_clock::time_point rumble_end_{};
 };

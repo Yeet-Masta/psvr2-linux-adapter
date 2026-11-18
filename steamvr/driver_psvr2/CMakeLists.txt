@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 cmake_minimum_required(VERSION 3.16)
-project(driver_psvr2 LANGUAGES CXX)
+project(driver_psvr2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +23,13 @@ add_library(driver_psvr2 MODULE
     src/trigger_effect.cpp
     src/toolkit_ipc.cpp
     src/camera_component.cpp
+    src/led_syncer.cpp
+    src/optical_tracker.cpp
+    src/blink_finder.cpp
+    "${LIBPSVR2_DIR}/sie/libpad/psvr2_hidsync.c"
+    "${LIBPSVR2_DIR}/sie/libpad/psvr2_sense_output.c"
+    "${LIBPSVR2_DIR}/sie/libpad/psvr2_pad_util.c"
+    "${LIBPSVR2_DIR}/sie/irtracker/psvr2_ld.c"
     "${OPENVR_DIR}/hand_simulation.cpp"
     "${OPENVR_DIR}/driverlog.cpp"
 )

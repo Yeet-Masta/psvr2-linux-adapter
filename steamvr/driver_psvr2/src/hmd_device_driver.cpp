@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstring>
 #include <poll.h>
+#include <string>
+#include <thread>
 
 #include "driverlog.h"
 #include "libpsvr2.h"
@@ -18,6 +20,16 @@ static const char *kSettingsSection = "driver_psvr2";
 // physical connector in direct mode.
 static constexpr int32_t kEdidVendorId = 0x4DD9;   // "SNY"
 static constexpr int32_t kEdidProductId = 0xA205;
+
+// Sony's names for the board stage in Get 0x81 +0x34.
+static std::string BoardStageName( uint32_t stage )
+{
+	static const char *const names[] = { nullptr, nullptr, "EVA2", "EVA3", "EVT1", "EVT1R",
+	                                     "EVT2", "DVT1", "DVT2", "PVT", "MP" };
+	if ( stage < sizeof( names ) / sizeof( names[0] ) && names[stage] )
+		return names[stage];
+	return "stage " + std::to_string( stage );
+}
 
 Psvr2HmdDriver::Psvr2HmdDriver()
 {
@@ -43,6 +55,14 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 		hz = vr::VRSettings()->GetFloat( kSettingsSection, "display_frequency" );
 	if ( hz > 0.0f )
 		display_frequency_ = hz > 105.0f ? 119.88f : 89.91f;
+
+	dev_ = psvr2_open();
+	// Sony offers 120 Hz only on headset software newer than 0x06000000.
+	firmware_version_ = psvr2_firmware_version( dev_ );
+	supports_120_ = firmware_version_ == 0 || firmware_version_ > 0x06000000;
+	if ( !supports_120_ )
+		display_frequency_ = 89.91f;
+	SelectEdid( "init" );
 	// The tracker's origin is where it started; without a SteamVR room setup
 	// this lifts the view to standing height. 0 (default) leaves it alone.
 	standing_height_ = std::clamp( vr::VRSettings()->GetFloat( kSettingsSection, "standing_height_m" ), 0.0f, 2.5f );
@@ -53,8 +73,10 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 	if ( int32_t v = vr::VRSettings()->GetInt32( kSettingsSection, "window_y" ) )      cfg.window_y = v;
 	if ( int32_t v = vr::VRSettings()->GetInt32( kSettingsSection, "window_width" ) )  cfg.window_width = v;
 	if ( int32_t v = vr::VRSettings()->GetInt32( kSettingsSection, "window_height" ) ) cfg.window_height = v;
-	cfg.render_width = cfg.window_width / 2;
-	cfg.render_height = cfg.window_height;
+	// Sony recommends 1.7x the per-eye panel size (3400 x 3468), so the lens
+	// centre gets about one rendered pixel per panel pixel after distortion.
+	cfg.render_width = cfg.window_width / 2 * 17 / 10;
+	cfg.render_height = cfg.window_height * 17 / 10;
 
 	// Direct mode is the default; an explicit "direct_mode": false in settings
 	// switches to the extended-desktop scaffold.
@@ -63,7 +85,6 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 	cfg.direct_mode = ( dm_err == vr::VRSettingsError_None ) ? direct_mode : true;
 	direct_mode_ = cfg.direct_mode;
 
-	dev_ = psvr2_open();
 	if ( psvr2_get_lens_distortion( dev_, cfg.lens ) == 0 )
 		DriverLog( "psvr2: using the headset's lens calibration" );
 	else
@@ -79,7 +100,34 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 Psvr2HmdDriver::~Psvr2HmdDriver()
 {
 	Deactivate();
+	// As Sony on SteamVR quit: tell the headset (Set 0x27), and leave the EDID
+	// matching the refresh setting for the next session.
+	if ( psvr2_send_quit( dev_ ) != 0 )
+		DriverLog( "psvr2: quit command (report 0x27) failed" );
+	SelectEdid( "cleanup" );
 	psvr2_close( dev_ );
+}
+
+// Sony's EDID choice (docs/sony-re/display.md 3.2): expose the 90/120 Hz
+// EDID only when SteamVR runs at 120 Hz, the 90 Hz-only one otherwise, and
+// give the DisplayPort sink a second to re-enumerate after a switch.
+void Psvr2HmdDriver::SelectEdid( const char *why )
+{
+	const bool want120 = supports_120_ && display_frequency_ > 105.0f;
+	const int type = psvr2_get_edid_type( dev_ );
+	if ( type < 0 )
+		return;
+	const int target = want120 ? 0 : 1;
+	if ( type == target )
+		return;
+	if ( psvr2_set_edid_type( dev_, target ) != 0 )
+	{
+		DriverLog( "psvr2: %s: EDID type %d -> %d failed", why, type, target );
+		return;
+	}
+	DriverLog( "psvr2: %s: EDID type %d -> %d (%s), waiting for the display", why, type, target,
+	           want120 ? "90/120 Hz" : "90 Hz" );
+	std::this_thread::sleep_for( std::chrono::seconds( 1 ) );
 }
 
 vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
@@ -90,6 +138,19 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 	container_ = c;
 	vr::VRProperties()->SetStringProperty( c, vr::Prop_ModelNumber_String, model_number_.c_str() );
 	vr::VRProperties()->SetStringProperty( c, vr::Prop_ManufacturerName_String, "Sony" );
+	vr::VRProperties()->SetBoolProperty( c, vr::Prop_ContainsProximitySensor_Bool, true );
+	vr::VRProperties()->SetFloatProperty( c, vr::Prop_IpdUIRangeMinMeters_Float, 0.059f );
+	vr::VRProperties()->SetFloatProperty( c, vr::Prop_IpdUIRangeMaxMeters_Float, 0.072f );
+	vr::VRProperties()->SetInt32Property( c, vr::Prop_HmdTrackingStyle_Int32, vr::HmdTrackingStyle_InsideOutCameras );
+	// Firmware and board, as Sony reports them once the headset is ready.
+	if ( firmware_version_ )
+	{
+		char fw[16];
+		snprintf( fw, sizeof( fw ), "%08x", firmware_version_ );
+		vr::VRProperties()->SetStringProperty( c, vr::Prop_TrackingFirmwareVersion_String, fw );
+	}
+	if ( const uint32_t stage = psvr2_board_stage( dev_ ) )
+		vr::VRProperties()->SetStringProperty( c, vr::Prop_HardwareRevision_String, BoardStageName( stage ).c_str() );
 
 	// IPD: the headset's dial when the controls are readable, else SteamVR's.
 	float ipd = vr::VRSettings()->GetFloat( vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IPD_Float );
@@ -97,7 +158,7 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 	if ( psvr2_read_controls( dev_, &controls ) == 0 && controls.ipd_mm > 0 )
 	{
 		ipd_mm_ = controls.ipd_mm;
-		ipd = ipd_mm_ / 1000.0f;
+		ipd = float( ipd_mm_ ) * 0.001f;
 	}
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserIpdMeters_Float, ipd );
 	vr::VRProperties()->SetStringProperty( c, vr::Prop_InputProfilePath_String, "{psvr2}/input/psvr2_hmd_profile.json" );
@@ -121,11 +182,20 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 
 	// Required for the compositor to start.
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_DisplayFrequency_Float, display_frequency_ );
-	// Let SteamVR offer the panel's modes (it reads them from the EDID).
-	vr::VRProperties()->SetBoolProperty( c, vr::Prop_DisplaySupportsMultipleFramerates_Bool, true );
+	// Let SteamVR offer the panel's modes (it reads them from the EDID), and
+	// list them as Sony does.
+	vr::VRProperties()->SetBoolProperty( c, vr::Prop_DisplaySupportsMultipleFramerates_Bool, supports_120_ );
+	{
+		const float rates[2] = { 90.0f, 120.0f };
+		vr::VRProperties()->SetProperty( c, vr::Prop_DisplayAvailableFrameRates_Float_Array, const_cast<float *>( rates ),
+		                                 sizeof( float ) * ( supports_120_ ? 2 : 1 ), vr::k_unFloatPropertyTag );
+	}
 	DriverLog( "psvr2: display refresh %.2f Hz", display_frequency_ );
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserHeadToEyeDepthMeters_Float, 0.0f );
-	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromVsyncToPhotons_Float, 0.011f );
+	// Panel timing as Sony's driver reports it (docs/sony-re/display.md).
+	const bool hz120 = std::fabs( display_frequency_ - 90.0f ) >= 0.1f;
+	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromVsyncToPhotons_Float, hz120 ? 0.00102f : 0.00136f );
+	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromPhotonsToVblank_Float, hz120 ? 0.00773f : 0.0103f );
 
 	// EDID identity lets SteamVR's compositor find the physical connector and
 	// (in direct mode) DRM-lease it. In extended mode it's harmless.
@@ -135,6 +205,19 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 	// IsOnDesktop must agree with the display component: false => SteamVR
 	// acquires the panel directly (direct mode); true => extended desktop.
 	vr::VRProperties()->SetBoolProperty( c, vr::Prop_IsOnDesktop_Bool, !direct_mode_ );
+
+	// Hidden area outside the lenses, from this headset's lens calibration.
+	for ( int eye = 0; eye < 2; eye++ )
+	{
+		float v[PSVR2_HIDDEN_AREA_VERTS][2];
+		const int n = psvr2_hidden_area( display_->Lens(), eye, v );
+		vr::HmdVector2_t mesh[PSVR2_HIDDEN_AREA_VERTS];
+		for ( int i = 0; i < n; i++ )
+			mesh[i] = { v[i][0], v[i][1] };
+		vr::VRProperties()->SetProperty( c, vr::ETrackedDeviceProperty( vr::Prop_DisplayHiddenArea_Binary_Start + eye ),
+		                                 mesh, sizeof( vr::HmdVector2_t ) * n, vr::k_unHiddenAreaPropertyTag );
+	}
+	vr::VRProperties()->SetInt32Property( c, vr::Prop_DistortionMeshResolution_Int32, 80 );
 
 	DriverLog( "psvr2: display mode = %s (EDID %04X:%04X)",
 	           direct_mode_ ? "direct (DRM lease)" : "extended desktop",
@@ -230,8 +313,23 @@ void Psvr2HmdDriver::PollControls()
 	if ( c.ipd_mm > 0 && c.ipd_mm != ipd_mm_ )
 	{
 		ipd_mm_ = c.ipd_mm;
-		vr::VRProperties()->SetFloatProperty( container_, vr::Prop_UserIpdMeters_Float, ipd_mm_ / 1000.0f );
+		vr::VRProperties()->SetFloatProperty( container_, vr::Prop_UserIpdMeters_Float, float( ipd_mm_ ) * 0.001f );
 		DriverLog( "psvr2: IPD dial %d mm", ipd_mm_ );
+	}
+	// See-through (the function button toggles it in the kernel): Sony asks
+	// SteamVR to pause the app and draw the controllers meanwhile.
+	if ( ++see_through_poll_ >= 10 )
+	{
+		see_through_poll_ = 0;
+		const int st = psvr2_get_see_through( dev_ );
+		if ( st >= 0 && st != see_through_ )
+		{
+			see_through_ = st;
+			vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DriverRequestsApplicationPause_Bool, st );
+			vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DriverIsDrawingControllers_Bool, st );
+			vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DriverRequestsReducedRendering_Bool, st );
+			DriverLog( "psvr2: see-through %s", st ? "on" : "off" );
+		}
 	}
 	if ( c.worn != worn_ )
 	{
@@ -320,6 +418,94 @@ void Psvr2HmdDriver::GazeThread()
 	}
 }
 
+// Sony's not-worn throttle (docs/sony-re/display.md 5.5): while the headset
+// is off the head, a pose that has not moved is only re-sent for half a
+// second, so SteamVR can idle; any motion or state change sends again.
+void Psvr2HmdDriver::SubmitPose( const vr::DriverPose_t &pose, bool worn )
+{
+	const auto now = std::chrono::steady_clock::now();
+	bool fresh = worn || !have_ref_ || pose.poseIsValid != ref_pose_.poseIsValid ||
+	             pose.deviceIsConnected != ref_pose_.deviceIsConnected || pose.result != ref_pose_.result;
+	for ( int i = 0; i < 3 && !fresh; i++ )
+		fresh = std::fabs( ref_pose_.vecPosition[i] - pose.vecPosition[i] ) >= 0.005 ||
+		        std::fabs( pose.vecAngularVelocity[i] ) >= 0.03;
+	if ( fresh )
+	{
+		ref_pose_ = pose;
+		ref_time_ = now;
+		have_ref_ = true;
+	}
+	else if ( now - ref_time_ > std::chrono::microseconds( 500001 ) )
+		return;
+	if ( device_index_ != vr::k_unTrackedDeviceIndexInvalid )
+		vr::VRServerDriverHost()->TrackedDevicePoseUpdated( device_index_, pose, sizeof( pose ) );
+}
+
+// Play area for SteamVR, as Sony's driver provides one (docs/sony-re/room.md
+// 1, 2.5): a chaperone_info file (version 5) with one universe, published
+// through Prop_DriverProvidedChaperonePath and Prop_CurrentUniverseId.
+// Without Sony's relocaliser the tracker's origin is wherever the headset
+// started, so every session gets a fresh default area: a 24-point circle of
+// radius 1.5 m around the first tracked pose, floor 1.5 m below the head
+// (or at y = 0 when standing_height_m lifts the view already).
+void Psvr2HmdDriver::WriteChaperone( const vr::DriverPose_t &pose )
+{
+	chaperone_written_ = true;
+	vr::EVRSettingsError err = vr::VRSettingsError_None;
+	const bool on = vr::VRSettings()->GetBool( kSettingsSection, "provide_chaperone", &err );
+	if ( err == vr::VRSettingsError_None && !on )
+		return;
+	char dir[1024] = { 0 };
+	vr::VRProperties()->GetStringProperty( container_, vr::Prop_UserConfigPath_String, dir, sizeof( dir ) );
+	if ( !dir[0] )
+		return;
+	const std::string path = std::string( dir ) + "/psvr2_chaperone_info.vrchap";
+
+	const vr::HmdQuaternion_t &q = pose.qRotation;
+	// Heading about +y of the headset's forward (-z) axis.
+	const double fx = -2.0 * ( q.x * q.z + q.w * q.y ), fz = -( 1.0 - 2.0 * ( q.x * q.x + q.y * q.y ) );
+	const double yaw = std::atan2( -fx, -fz );
+	const double hx = pose.vecPosition[0], hy = pose.vecPosition[1], hz = pose.vecPosition[2];
+	const double floor_y = standing_height_ > 0.0f ? 0.0 : hy - 1.5;
+	const uint64_t universe = uint64_t( time( nullptr ) );
+
+	constexpr int kPoints = 24;
+	constexpr double kRadius = 1.5, kWall = 2.43, kPi = 3.14159265358979323846;
+	std::string bounds;
+	char buf[512];
+	for ( int i = 0; i < kPoints; i++ )
+	{
+		const double a0 = 2.0 * kPi * i / kPoints, a1 = 2.0 * kPi * ( i + 1 ) / kPoints;
+		const double x0 = kRadius * std::cos( a0 ), z0 = kRadius * std::sin( a0 );
+		const double x1 = kRadius * std::cos( a1 ), z1 = kRadius * std::sin( a1 );
+		snprintf( buf, sizeof( buf ), "%s[[%.6f,0,%.6f],[%.6f,%.2f,%.6f],[%.6f,%.2f,%.6f],[%.6f,0,%.6f]]",
+		          i ? "," : "", x0, z0, x0, kWall, z0, x1, kWall, z1, x1, z1 );
+		bounds += buf;
+	}
+	FILE *f = fopen( path.c_str(), "w" );
+	if ( !f )
+	{
+		DriverLog( "psvr2: cannot write %s", path.c_str() );
+		return;
+	}
+	const double side = std::sqrt( 2.0 ) * kRadius;
+	fprintf( f,
+	         "{\n\"jsonid\":\"chaperone_info\",\n\"universes\":[{\n"
+	         "\"collision_bounds\":[%s],\n"
+	         "\"play_area\":[%.6f,%.6f],\n"
+	         "\"seated\":{\"translation\":[%.6f,%.6f,%.6f],\"yaw\":%.6f},\n"
+	         "\"standing\":{\"translation\":[%.6f,%.6f,%.6f],\"yaw\":%.6f},\n"
+	         "\"universeID\":\"%llu\"\n}],\n\"version\":5\n}\n",
+	         bounds.c_str(), side, side, hx, hy, hz, yaw, hx, floor_y, hz, yaw, (unsigned long long)universe );
+	fclose( f );
+
+	vr::VRProperties()->SetStringProperty( container_, vr::Prop_DriverProvidedChaperonePath_String, path.c_str() );
+	vr::VRProperties()->SetUint64Property( container_, vr::Prop_CurrentUniverseId_Uint64, universe );
+	universe_id_ = universe;
+	DriverLog( "psvr2: play area: 1.5 m circle at (%.2f, %.2f), universe %llu", hx, hz,
+	           (unsigned long long)universe );
+}
+
 void Psvr2HmdDriver::PoseThread()
 {
 	while ( active_ )
@@ -332,9 +518,10 @@ void Psvr2HmdDriver::PoseThread()
 				std::lock_guard<std::mutex> lock( pose_mutex_ );
 				last_pose_ = pose;
 			}
-			if ( device_index_ != vr::k_unTrackedDeviceIndexInvalid )
-				vr::VRServerDriverHost()->TrackedDevicePoseUpdated(
-					device_index_, pose, sizeof( pose ) );
+			if ( !chaperone_written_ && pose.result == vr::TrackingResult_Running_OK &&
+			     container_ != vr::k_ulInvalidPropertyContainer )
+				WriteChaperone( pose );
+			SubmitPose( pose, worn_ != 0 );
 		}
 		else
 		{
@@ -382,11 +569,12 @@ void Psvr2DisplayComponent::GetEyeOutputViewport( vr::EVREye eEye, uint32_t *pnX
 
 void Psvr2DisplayComponent::GetProjectionRaw( vr::EVREye eEye, float *pfLeft, float *pfRight, float *pfTop, float *pfBottom )
 {
-	// Asymmetric per-eye FOV: wider towards the temple than the nose.
+	// Asymmetric per-eye FOV: wider towards the temple than the nose. Sony's
+	// tangents unless the settings override the angles.
 	constexpr float kDeg = 3.14159265f / 180.0f;
-	const float outer = std::tan( config_.fov_outer_deg * kDeg );
-	const float inner = std::tan( config_.fov_inner_deg * kDeg );
-	const float vert = std::tan( config_.fov_vertical_deg * kDeg );
+	const float outer = config_.fov_outer_deg > 0 ? std::tan( config_.fov_outer_deg * kDeg ) : 1.84177f;
+	const float inner = config_.fov_inner_deg > 0 ? std::tan( config_.fov_inner_deg * kDeg ) : 0.94719f;
+	const float vert = config_.fov_vertical_deg > 0 ? std::tan( config_.fov_vertical_deg * kDeg ) : 1.32898f;
 	*pfLeft = ( eEye == vr::Eye_Left ) ? -outer : -inner;
 	*pfRight = ( eEye == vr::Eye_Left ) ? inner : outer;
 	*pfTop = -vert;

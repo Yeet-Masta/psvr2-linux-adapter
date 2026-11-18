@@ -23,6 +23,20 @@ constexpr uint8_t kOutputReportBluetooth = 0x31;
 constexpr uint8_t kOutputReportTag = 0x10;
 constexpr uint8_t kCalibrationFeatureReport = 0x05;
 constexpr uint8_t kPollingRateFeatureReport = 0x08;
+constexpr uint8_t kFirmwareInfoFeatureReport = 0x20;
+// LED-sync capability probe (docs/sony-re/ledsync.md 2.2): set 0x80
+// "80 13 22 00", get 0x81; a reply starting 0x81 means sync mode 2.
+constexpr uint8_t kSyncProbeSetReport = 0x80;
+constexpr uint8_t kSyncProbeGetReport = 0x81;
+// Sony's Bluetooth output: byte 1 is the constant 0xa2 and the settings
+// follow directly (docs/sony-re/sense.md 2.3).
+constexpr uint8_t kOutputModeSense = 0xa2;
+// Flag1 bits as Sony uses them: 0x40 marks the vibration field valid, 0x03
+// selects vibration mode 2, 0x10 marks the reduction byte valid.
+constexpr uint8_t kFlag1VibrationValid = 0x40;
+constexpr uint8_t kFlag1ReductionValid = 0x10;
+// Sony's amplitude scale: ceil(amplitude * 20).
+constexpr int kVibrationMax = 20;
 constexpr uint8_t kCalibrationPart1 = 0x00;
 constexpr uint8_t kCalibrationPart2 = 0x81;
 
@@ -141,12 +155,49 @@ struct BluetoothOutputReport
 };
 static_assert( sizeof( BluetoothOutputReport ) == 78, "BT output report size" );
 
+// Sony's Bluetooth output report: 31 a2, the 0x30-byte body without its
+// report ID, zeros, CRC-32 (seed 0xa2) over bytes 0..0x49.
+struct SonyBluetoothOutputReport
+{
+	uint8_t report_id;  // kOutputReportBluetooth
+	uint8_t mode;       // kOutputModeSense
+	OutputSettings settings;
+	uint8_t padding[34];
+	uint32_t crc;
+};
+static_assert( sizeof( SonyBluetoothOutputReport ) == 78, "Sony BT output report size" );
+
+// Feature 0x20, firmware information (docs/sony-re/sense.md 2.7).
+struct FirmwareInfoReport
+{
+	uint8_t report_id;
+	char build_date[11];
+	char build_time[8];
+	uint16_t firmware_type;
+	uint16_t software_series;
+	uint32_t hardware_info;     // low 16 bits: hardware revision
+	uint32_t firmware_version;  // >= 0x1006d: LED-sync probe
+	uint8_t device_info[12];
+	uint16_t firmware_revision; // libpad's feature gates
+	uint8_t update_image;
+	uint8_t unk2f;
+	uint8_t hand;               // bit 0: 1 = left
+	uint8_t rest[11];
+	uint32_t crc;
+};
+static_assert( sizeof( FirmwareInfoReport ) == 64, "firmware info size" );
+
+// Over USB Sony writes a plain report ID 0x02 and pads the report to its
+// 48-byte HID length; there is no sequence nibble (docs/sony-re/sense.md 2.2).
+constexpr uint8_t kOutputReportUsb = 0x02;
+
 struct UsbOutputReport
 {
-	uint8_t seq_no_mode;  // seq << 4 | 0x2
+	uint8_t report_id;  // kOutputReportUsb
 	OutputSettings settings;
+	uint8_t padding[9];
 };
-static_assert( sizeof( UsbOutputReport ) == 39, "USB output report size" );
+static_assert( sizeof( UsbOutputReport ) == 48, "USB output report size" );
 
 struct FeatureReport
 {

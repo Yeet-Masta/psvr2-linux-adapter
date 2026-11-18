@@ -4,6 +4,7 @@
 #include "sense_hid.h"
 
 #include <cerrno>
+#include <cstdlib>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -18,6 +19,7 @@
 #include <unistd.h>
 
 #include "driverlog.h"
+#include "openvr_driver.h"
 
 namespace
 {
@@ -68,7 +70,27 @@ std::vector<SenseHidInfo> FindSenseControllers()
 	return found;
 }
 
-SenseHid::SenseHid( const SenseHidInfo &info ) : info_( info ) {}
+namespace
+{
+uint64_t SteadyMicros()
+{
+	return uint64_t(
+		std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now().time_since_epoch() )
+			.count() );
+}
+}  // namespace
+
+SenseHid::SenseHid( const SenseHidInfo &info ) : info_( info )
+{
+	psvr2_sync_init( &sync_, info_.bluetooth ? 1 : 0, info_.left ? 1 : 0 );
+	// libpad's reset values (ledsync.md 2.2): LED ALL OFF, preset-1 timing.
+	led_.phase = sense::kLedPhaseAllOff;
+	led_.cycle_ns = 16683350;
+	std::memset( led_.led, 0xff, sizeof( led_.led ) );
+	led_.width = 1000;
+	led_.step = 105;
+	led_.half = 1575;
+}
 
 SenseHid::~SenseHid()
 {
@@ -96,9 +118,26 @@ bool SenseHid::Open()
 		fd_ = -1;
 		return false;
 	}
-	if ( !SetPollingRate() )
+	ReadFirmwareInfo();
+	// Sony never sets the polling rate (feature 0x08); keep it opt-in.
+	if ( vr::VRSettings()->GetBool( "driver_psvr2", "set_polling_rate" ) && !SetPollingRate() )
 		DriverLog( "psvr2: %s: could not set PC polling rate; continuing", info_.path.c_str() );
 	return true;
+}
+
+void SenseHid::ReadFirmwareInfo()
+{
+	sense::FirmwareInfoReport r{};
+	r.report_id = sense::kFirmwareInfoFeatureReport;
+	if ( ioctl( fd_, HIDIOCGFEATURE( sizeof( r ) ), &r ) != static_cast<int>( sizeof( r ) ) )
+		return;
+	if ( info_.bluetooth && sense::SeededCrc32( sense::kFeatureCrcSeed, &r, sizeof( r ) - 4 ) != r.crc )
+		return;
+	fw_version_ = r.firmware_version;
+	fw_revision_ = r.firmware_revision;
+	hw_revision_ = uint16_t( r.hardware_info & 0xffff );
+	DriverLog( "psvr2: %s: firmware %08x rev %04x, hardware %04x", info_.path.c_str(), fw_version_, fw_revision_,
+	           hw_revision_ );
 }
 
 bool SenseHid::ReadCalibration()
@@ -139,16 +178,54 @@ bool SenseHid::ReadCalibration()
 		}
 	}
 
-	// Reading the report is what switches the controller to full mode. Its
-	// layout is not known (Monado does not parse it either), so use the fixed
-	// sensor scales Monado's pssense driver uses; ImuFusion learns gyro bias.
-	(void)cal;
-	gyro_bias_ = {};
-	accel_bias_ = {};
-	const double g = 180.0 / 1024.0 * kPi / 180.0;  // rad/s per LSB
-	const double a = kGravity / 4096.0;             // m/s^2 per LSB
-	gyro_scale_ = { g, g, g };
-	accel_scale_ = { a, a, a };
+	// Reading the report is also what switches the controller to full mode.
+	// Use the factory calibration the way Sony's libpad does (the DualSense
+	// formula; docs/sony-driver-re.md "IMU calibration"). If it is degenerate,
+	// fall back to Monado's fixed scales and let ImuFusion learn gyro bias.
+	if ( !ApplyCalibration( cal ) )
+	{
+		DriverLog( "psvr2: %s: factory IMU calibration unusable, using nominal scales", info_.path.c_str() );
+		gyro_bias_ = {};
+		accel_bias_ = {};
+		const double g = 180.0 / 1024.0 * kPi / 180.0;  // rad/s per LSB
+		const double a = kGravity / 4096.0;             // m/s^2 per LSB
+		gyro_scale_ = { g, g, g };
+		accel_scale_ = { a, a, a };
+	}
+	return true;
+}
+
+bool SenseHid::ApplyCalibration( const sense::CalibrationData &cal )
+{
+	struct Axis
+	{
+		int bias, plus, minus;  // gyro
+		int aplus, aminus;      // accel
+	};
+	const Axis axes[3] = {
+		{ cal.gyro_bias_x, cal.gyro_plus_x, cal.gyro_minus_x, cal.accel_plus_x, cal.accel_minus_x },
+		{ cal.gyro_bias_y, cal.gyro_plus_y, cal.gyro_minus_y, cal.accel_plus_y, cal.accel_minus_y },
+		{ cal.gyro_bias_z, cal.gyro_plus_z, cal.gyro_minus_z, cal.accel_plus_z, cal.accel_minus_z },
+	};
+	// Reference rotation speed in deg/s, as rad/s.
+	const double speed = ( cal.gyro_speed_ref1 + cal.gyro_speed_ref2 ) * 0.5 * kPi / 180.0;
+	double gb[3], gs[3], ao[3], as[3];
+	for ( int i = 0; i < 3; i++ )
+	{
+		const Axis &x = axes[i];
+		const int grange = std::abs( x.plus - x.bias ) + std::abs( x.minus - x.bias );
+		const int arange = std::abs( x.aplus ) + std::abs( x.aminus );
+		if ( grange == 0 || arange == 0 || !( speed > 0.0 ) )
+			return false;
+		gb[i] = x.bias;
+		gs[i] = speed / ( grange * 0.5 );
+		ao[i] = x.aplus - arange * 0.5;
+		as[i] = 2.0 / arange * kGravity;  // g per LSB, as m/s^2
+	}
+	gyro_bias_ = { gb[0], gb[1], gb[2] };
+	gyro_scale_ = { gs[0], gs[1], gs[2] };
+	accel_bias_ = { ao[0], ao[1], ao[2] };
+	accel_scale_ = { as[0], as[1], as[2] };
 	return true;
 }
 
@@ -179,6 +256,7 @@ int SenseHid::Read( SenseState &out )
 		if ( sense::SeededCrc32( sense::kInputCrcSeed, &r, sizeof( r ) - 4 ) != r.crc )
 			return 0;
 		Parse( r.common, out );
+		FeedSyncFit( r.common );
 		return 1;
 	}
 	if ( buf[0] == sense::kInputReportUsb && n == sizeof( sense::UsbInputReport ) )
@@ -186,6 +264,7 @@ int SenseHid::Read( SenseState &out )
 		sense::UsbInputReport r;
 		std::memcpy( &r, buf, sizeof( r ) );
 		Parse( r.common, out );
+		FeedSyncFit( r.common );
 		return 1;
 	}
 	return 0;
@@ -242,10 +321,12 @@ void SenseHid::Parse( const sense::InputCommon &in, SenseState &s )
 	s.accel = { ( in.accel[0] - accel_bias_.x ) * accel_scale_.x, ( in.accel[1] - accel_bias_.y ) * accel_scale_.y,
 	            ( in.accel[2] - accel_bias_.z ) * accel_scale_.z };
 
-	const uint8_t charge = in.battery_state >> 4;
+	// Sony's mapping (docs/sony-re/sense.md 2.4): level 0..9 = 10n+5 %,
+	// 10 = 100 %, 11..15 = 0 %; charge state 0..2, anything else an error.
+	const uint8_t charge = in.battery_state >> 4, level = in.battery_state & 0xf;
 	s.battery_valid = charge <= sense::kFull;
 	s.charging = charge == sense::kCharging || charge == sense::kFull;
-	s.battery = charge == sense::kFull ? 1.0f : std::min( 1.0f, ( in.battery_state & 0xf ) * 0.1f + 0.05f );
+	s.battery = level <= 9 ? ( level * 10 + 5 ) * 0.01f : level == 10 ? 1.0f : 0.0f;
 }
 
 bool SenseHid::Write( const SenseOutput &out )
@@ -257,6 +338,11 @@ bool SenseHid::Write( const SenseOutput &out )
 		st.flag1 |= sense::kFlag1VibrationEnable | out.rumble_mode;
 		st.vibration_amplitude = out.rumble_amplitude;
 	}
+	if ( out.reduction )
+	{
+		st.flag1 |= sense::kFlag1ReductionValid;
+		st.reduction = out.reduction & 7;
+	}
 	if ( out.trigger_dirty )
 	{
 		trigger_ = EncodeTriggerEffect( out.trigger );
@@ -264,13 +350,53 @@ bool SenseHid::Write( const SenseOutput &out )
 	}
 	st.trigger_mode = trigger_.mode;
 	std::memcpy( st.trigger_params, trigger_.params.data(), sizeof( st.trigger_params ) );
-	st.led.phase = sense::kLedPhaseAllOff;
+	if ( led_sync_enabled_ )
+	{
+		FillLedSync( st, SteadyMicros() );
+		// Sony's driver turns on libpad's first output switch once at
+		// start and never off, so for firmware revisions above 0x253 every
+		// report carries flag2 bit 1 (libpad.md "Sense output report",
+		// step 8). Reports without it got no visible LED response
+		// (hardware test, 2026-11-18).
+		if ( fw_revision_ > 0x253 )
+			st.flag2 |= 0x02;
+	}
+	else
+		st.led.phase = sense::kLedPhaseAllOff;
+
+	// Over Bluetooth every report goes through bluetoothd's uhid bridge and
+	// shares the radio with the other controller. Sending ~94 reports/s each
+	// overruns bluetoothd's socket (EAGAIN) and the link drops within a
+	// minute. Sony sends a report when something changes and refreshes it
+	// every 100 ms; do the same unless PCM haptics need the full rate.
+	const auto now = std::chrono::steady_clock::now();
+	if ( info_.bluetooth && !out.has_pcm )
+	{
+		if ( std::memcmp( &st, &last_bt_settings_, sizeof( st ) ) == 0 &&
+		     now - last_bt_write_ < std::chrono::milliseconds( 100 ) )
+			return true;
+		last_bt_settings_ = st;
+		last_bt_write_ = now;
+	}
+
+	// Stamped right before the write, as Sony does: the controller echoes it
+	// in its input report, which the LED-sync clock fit relies on.
 	st.host_timestamp_us = uint32_t(
 		std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now().time_since_epoch() )
 			.count() );
 
 	seq_ = ( seq_ + 1 ) & 0xf;
 
+	if ( info_.bluetooth && sony_framing_ && !out.has_pcm )
+	{
+		sense::SonyBluetoothOutputReport r{};
+		r.report_id = sense::kOutputReportBluetooth;
+		r.mode = sense::kOutputModeSense;
+		r.settings = st;
+		r.crc = sense::SeededCrc32( sense::kOutputCrcSeed, &r, sizeof( r ) - 4 );
+		LogReport( &r, sizeof( r ), st.led.phase );
+		return write( fd_, &r, sizeof( r ) ) == static_cast<ssize_t>( sizeof( r ) );
+	}
 	if ( info_.bluetooth )
 	{
 		sense::BluetoothOutputReport r{};
@@ -286,7 +412,141 @@ bool SenseHid::Write( const SenseOutput &out )
 	}
 
 	sense::UsbOutputReport r{};
-	r.seq_no_mode = uint8_t( ( seq_ << 4 ) | 0x2 );
+	r.report_id = sense::kOutputReportUsb;
 	r.settings = st;
+	LogReport( &r, sizeof( r ), st.led.phase );
 	return write( fd_, &r, sizeof( r ) ) == static_cast<ssize_t>( sizeof( r ) );
+}
+
+// ---- LED sync -------------------------------------------------------------
+
+// With LED sync on, log the whole output report once per LED phase change,
+// to check the bytes on the wire against Sony's layout.
+void SenseHid::LogReport( const void *r, size_t n, uint8_t phase )
+{
+	if ( !led_sync_enabled_ || phase == logged_phase_ )
+		return;
+	logged_phase_ = phase;
+	char hex[3 * 80 + 1] = {};
+	const uint8_t *b = static_cast<const uint8_t *>( r );
+	for ( size_t i = 0; i < n && i < 80; i++ )
+		std::snprintf( hex + 3 * i, 4, "%02x ", b[i] );
+	DriverLog( "psvr2: %s: output phase %u: %s", info_.path.c_str(), phase, hex );
+}
+
+void SenseHid::FeedSyncFit( const sense::InputCommon &in )
+{
+	if ( !led_sync_enabled_ )
+		return;
+	// The controller echoes the host_timestamp_us of the last output report
+	// and adds its own clock; libpad turns pairs of these into the
+	// host <-> controller time map (libpad.md, "Clock fit").
+	std::lock_guard<std::mutex> lock( led_mutex_ );
+	last_rx_us_ = SteadyMicros();
+	const uint32_t ticks = in.device_timestamp_ticks ? in.device_timestamp_ticks : in.imu_ticks;
+	last_ctrl_us_ = ticks / 3 + ( ticks % 3 == 2 );
+	psvr2_sync_update( &sync_, last_rx_us_, in.host_timestamp, in.device_timestamp_ticks, in.imu_ticks,
+	                   info_.bluetooth ? 1 : 0 );
+}
+
+void SenseHid::LedSyncCommand( const uint8_t *cmd, uint8_t len )
+{
+	if ( !len || len > 11 )
+		return;
+	std::lock_guard<std::mutex> lock( led_mutex_ );
+	psvr2_ledsync_command( &sync_, &led_, cmd, len );
+}
+
+bool SenseHid::LedTestSweep( int32_t offset_us )
+{
+	std::lock_guard<std::mutex> lock( led_mutex_ );
+	if ( !test_anchored_ )
+	{
+		const uint64_t t = psvr2_sync_headset_time ? psvr2_sync_headset_time() : 0;
+		if ( !t || !sync_.fit_off || psvr2_sync_host_to_ctrl( &sync_, int64_t( t ), &test_anchor_ ) )
+			return false;
+		test_anchored_ = true;
+	}
+	led_.phase = 6;
+	led_.seq++;
+	led_.base_time = test_anchor_ + offset_us;
+	std::memset( led_.led, 0xff, 4 );
+	return true;
+}
+
+SenseHid::LedSyncStatus SenseHid::LedSync()
+{
+	std::lock_guard<std::mutex> lock( led_mutex_ );
+	LedSyncStatus s;
+	s.phase = led_.phase;
+	s.sync_mode = led_.sync_mode;
+	s.step = led_.step;
+	s.width = led_.width;
+	s.clock_ready = sync_.fit_off != 0;
+	int32_t c = 0;
+	if ( s.clock_ready && !psvr2_sync_host_to_ctrl( &sync_, int64_t( last_rx_us_ ), &c ) )
+		s.fit_err_us = int32_t( uint32_t( c ) - last_ctrl_us_ );
+	s.seq = led_.seq;
+	s.period_id = led_.period_id;
+	s.base_time = led_.base_time;
+	s.cycle_ns = led_.cycle_ns;
+	return s;
+}
+
+// Capability probe (ledsync.md 2.2): Set 0x80 "80 13 22 00", then Get 0x81.
+// A reply whose first byte is 0x81 means the controller supports the
+// tighter sync window (mode 2).
+uint8_t SenseHid::ProbeSyncMode()
+{
+	uint8_t r[64] = { sense::kSyncProbeSetReport, 0x13, 0x22, 0x00 };
+	auto crc = [&]( uint8_t seed ) {
+		const uint32_t c = sense::SeededCrc32( seed, r, sizeof( r ) - 4 );
+		std::memcpy( r + sizeof( r ) - 4, &c, 4 );
+	};
+	if ( info_.bluetooth )
+		crc( sense::kSetFeatureCrcSeed );
+	if ( ioctl( fd_, HIDIOCSFEATURE( sizeof( r ) ), r ) < 0 )
+		return 0;
+	std::memset( r, 0, sizeof( r ) );
+	r[0] = sense::kSyncProbeGetReport;
+	if ( ioctl( fd_, HIDIOCGFEATURE( sizeof( r ) ), r ) <= 0 )
+		return 0;
+	return r[0] == sense::kSyncProbeGetReport ? 2 : 0;
+}
+
+// Same rules as libpad's output fill (psvr2_sense_output_fill): pick the
+// sync mode, refresh the PRESCAN base time, then copy the record.
+void SenseHid::FillLedSync( sense::OutputSettings &st, uint64_t now_us )
+{
+	std::lock_guard<std::mutex> lock( led_mutex_ );
+	if ( led_.sync_mode == 0 )
+	{
+		if ( fw_version_ < 0x1006d || led_.probes > 3 )
+			psvr2_ledsync_set_mode( &led_, 2 );
+		else
+		{
+			const uint8_t m = ProbeSyncMode();
+			if ( led_.sync_mode != m )
+				psvr2_ledsync_set_mode( &led_, m );
+			led_.probes++;
+		}
+	}
+	if ( led_.phase && !led_.last_resync )
+		led_.last_resync = now_us;
+	else
+		psvr2_ledsync_resync( &sync_, &led_, now_us );
+
+	// Before the clock fit exists Sony leaves the phase byte at its
+	// default for phases 1..4.
+	if ( led_.phase == 0 || led_.phase > 4 || sync_.fit_off )
+		st.led.phase = led_.phase;
+	st.led.sequence_number = led_.seq;
+	st.led.period_id = led_.period_id;
+	// Sony writes both values times three (controller clock units).
+	st.led.cycle_position = uint32_t( led_.base_time ) * 3;
+	st.led.cycle_length = led_.cycle_ns * 3;
+	if ( led_.phase == 2 || led_.phase == 3 )
+		std::memcpy( st.led.led_blink, led_.led, 4 );
+	else
+		std::memset( st.led.led_blink, 0xff, 4 );
 }

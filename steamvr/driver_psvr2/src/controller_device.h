@@ -43,6 +43,11 @@ public:
 	// a node is already attached.
 	void Attach( const SenseHidInfo &info );
 	bool Attached() const { return attached_; }
+	// LED sync (optical tracking): forward a tracker command to the open
+	// controller and read its sync record. False / default when detached.
+	bool LedSyncCommand( const uint8_t *cmd, uint8_t len );
+	bool LedTestSweep( int32_t offset_us );
+	bool LedSyncStatus( SenseHid::LedSyncStatus &out );
 
 	// SteamVR haptic event for our haptic component.
 	void OnHaptic( const vr::VREvent_HapticVibration_t &h );
@@ -99,6 +104,7 @@ private:
 	// Tracking state, IO thread only (copied into pose_ under pose_mutex_).
 	ImuFusion fusion_;
 	double last_imu_time_ = -1.0;
+	std::chrono::steady_clock::time_point last_input_{};
 	vrmath::Vec3 gyro_world_;
 	double yaw_offset_ = 0.0;
 	bool yaw_anchored_ = false;
@@ -125,6 +131,9 @@ private:
 	std::chrono::steady_clock::time_point next_skeleton_{};
 
 	bool battery_alerts_ = true;
+	int vibration_strength_ = 1;
+	bool props_dirty_ = false;
+	uint64_t universe_set_ = 0;
 	// Orientation fix in the controller frame, from the hold-to-calibrate
 	// gesture; persisted in the driver_psvr2 settings section.
 	vr::HmdQuaternion_t calibration_ = vrmath::Identity();
@@ -137,6 +146,7 @@ private:
 	float haptic_amplitude_ = 0.0f;
 	float haptic_frequency_ = 0.0f;
 	std::chrono::steady_clock::time_point haptic_end_{};
+	std::chrono::steady_clock::time_point haptic_start_{};
 	double pcm_phase_ = 0.0;
 	TriggerEffect trigger_;         // what is on the trigger now
 	TriggerEffect default_trigger_; // default_trigger_effect setting

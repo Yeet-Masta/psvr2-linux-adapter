@@ -34,6 +34,8 @@ private:
 	// Recent samples for velocity estimation, newest last.
 	std::deque<Sample> history_;
 	uint32_t last_vts_ = 0;
+	int last_reset_ = -1;
+	uint32_t last_map_ = 0xffffffffu;
 	double device_time_ = 0.0;  // unwrapped device_vts_us
 	double vel_[3]{}, ang_vel_[3]{};
 };

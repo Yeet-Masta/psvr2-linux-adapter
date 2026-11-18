@@ -50,6 +50,25 @@
 		"standing_height_m": 0.0,
 
 		"//camera": "Expose the tracking cameras to SteamVR (Room View / passthrough).",
-		"passthrough_camera": true
+		"passthrough_camera": true,
+
+		"//chaperone": "Write a 1.5 m circle play area at the first tracked pose when",
+		"//chaperone2": "SteamVR has none for this headset.",
+		"provide_chaperone": true,
+
+		"//vib": "Sony's vibration strength: 0 off, 1 normal, 2 weak, 3 weakest.",
+		"vibration_strength": 1,
+
+		"//btframe": "Bluetooth output framing: true = Sony's (31 a2), false = DualSense-style.",
+		"sony_bt_framing": true,
+
+		"//poll": "Send the PC polling-rate feature report (Sony's driver never does).",
+		"set_polling_rate": false,
+
+		"//optical": "EXPERIMENTAL: sync the controller LEDs to the headset cameras",
+		"//optical2": "(LED sync only; no optical pose yet). Needs the dev kernel module.",
+		"optical_tracking": false,
+		"optical_log_blobs": false,
+		"optical_trace": false
 	}
 }

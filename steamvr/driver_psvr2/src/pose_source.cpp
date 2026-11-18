@@ -2,10 +2,12 @@
 #include "pose_source.h"
 
 #include "libpsvr2.h"
+#include "driverlog.h"
 
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <poll.h>
 
 // ---------------------------------------------------------------------------
 // Device -> OpenVR frame remap.
@@ -118,16 +120,42 @@ void PoseSource::EstimateVelocity( const Sample &now, vr::DriverPose_t &out )
 bool PoseSource::ReadPose( vr::DriverPose_t &out )
 {
 	struct psvr2_pose sample{};
-	if ( !dev_ || psvr2_read_pose( dev_, &sample, /*block=*/1 ) != 1 )
+	if ( !dev_ )
+		return false;
+	// Wait at most 100 ms: the headset stops sending poses when SteamVR
+	// turns the display off, and an endless wait kept the pose thread from
+	// ever seeing Deactivate (SteamVR then aborts after 10 s).
+	pollfd pfd{ psvr2_pose_fd( dev_ ), POLLIN, 0 };
+	if ( pfd.fd < 0 || poll( &pfd, 1, 100 ) <= 0 )
+		return false;
+	if ( psvr2_read_pose( dev_, &sample, /*block=*/0 ) != 1 )
 		return false;
 
 	out = vr::DriverPose_t{};
 
-	// Identity offsets: the device already reports head pose in world space.
+	// The SLAM pose is the IMU rig. RemapPose already folds Sony's
+	// driver-from-head rotation into qRotation, so only Sony's lever arm is
+	// left: in head axes the head origin sits 2.08 cm above and 9.255 cm
+	// behind the IMU (docs/RESEARCH.md §5.2).
 	out.qWorldFromDriverRotation.w = 1.0;
 	out.qDriverFromHeadRotation.w = 1.0;
+	out.vecDriverFromHeadTranslation[1] = 0.02080;
+	out.vecDriverFromHeadTranslation[2] = 0.09255;
 
 	RemapPose( sample, out );
+
+	// A SLAM reset or map latch moves the pose discontinuously: drop the
+	// velocity history so the jump is not extrapolated.
+	if ( sample.reset_count != last_reset_ || ( sample.map_id >> 16 ) != last_map_ )
+	{
+		if ( !history_.empty() )
+			DriverLog( "psvr2: SLAM %s", sample.reset_count != last_reset_ ? "reset" : "map latch" );
+		last_reset_ = sample.reset_count;
+		last_map_ = sample.map_id >> 16;
+		history_.clear();
+		for ( int i = 0; i < 3; i++ )
+			vel_[i] = ang_vel_[i] = 0.0;
+	}
 
 	// Device clock (wraps every ~71 min) for velocity, host clock for age.
 	if ( history_.empty() )
@@ -136,16 +164,25 @@ bool PoseSource::ReadPose( vr::DriverPose_t &out )
 	last_vts_ = sample.device_vts_us;
 	EstimateVelocity( { device_time_, { out.vecPosition[0], out.vecPosition[1], out.vecPosition[2] }, out.qRotation },
 	                  out );
+	// The tracker's own velocity (same raw frame as the position) is less
+	// noisy than a finite difference; use it when it is sane.
+	const double sv[3] = { sample.velocity[2], sample.velocity[1], -sample.velocity[0] };
+	if ( sample.tracking && std::isfinite( sv[0] ) && std::isfinite( sv[1] ) && std::isfinite( sv[2] ) &&
+	     sv[0] * sv[0] + sv[1] * sv[1] + sv[2] * sv[2] < 100.0 )
+		for ( int i = 0; i < 3; i++ )
+			out.vecVelocity[i] = sv[i];
 	timespec ts{};
 	clock_gettime( CLOCK_MONOTONIC, &ts );
 	const double age = ( double( ts.tv_sec ) * 1e9 + double( ts.tv_nsec ) - double( sample.timestamp_ns ) ) * 1e-9;
 	// The sample is this old already; SteamVR predicts forward from here.
 	out.poseTimeOffset = -std::clamp( age, 0.0, 0.05 );
 
+	// Sony's validity rule (state 3, flag, or substate 5). Without 6DoF the
+	// orientation still holds: report it, flagged out of range.
 	out.poseIsValid = sample.valid != 0;
 	out.deviceIsConnected = true;
-	out.result = sample.valid ? vr::TrackingResult_Running_OK
-	                          : vr::TrackingResult_Running_OutOfRange;
+	out.result = sample.valid && sample.tracking ? vr::TrackingResult_Running_OK
+	                                             : vr::TrackingResult_Running_OutOfRange;
 	out.shouldApplyHeadModel = false; // we provide a real 6DoF pose
 
 	return true;

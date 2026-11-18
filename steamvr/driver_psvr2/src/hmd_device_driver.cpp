@@ -206,8 +206,22 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserHeadToEyeDepthMeters_Float, 0.0f );
 	// Panel timing as Sony's driver reports it (docs/sony-re/display.md).
 	const bool hz120 = display_frequency_ > 105.0f;
-	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromVsyncToPhotons_Float, hz120 ? 0.00102f : 0.00136f );
-	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromPhotonsToVblank_Float, hz120 ? 0.00773f : 0.0103f );
+	// Display timing. Like Sony's "debug/vsync to photons" and "debug/photons
+	// to vblank" keys, settings in microseconds override both values (a
+	// value of -1 or less leaves the default; 0 is a valid override).
+	float vsync_to_photons = hz120 ? 0.00102f : 0.00136f;
+	float photons_to_vblank = hz120 ? 0.00773f : 0.0103f;
+	{
+		vr::EVRSettingsError e1 = vr::VRSettingsError_None, e2 = vr::VRSettingsError_None;
+		const float v1 = vr::VRSettings()->GetFloat( kSettingsSection, "vsync_to_photons_us", &e1 );
+		const float v2 = vr::VRSettings()->GetFloat( kSettingsSection, "photons_to_vblank_us", &e2 );
+		if ( e1 == vr::VRSettingsError_None && v1 > -1.0f ) vsync_to_photons = v1 * 1e-6f;
+		if ( e2 == vr::VRSettingsError_None && v2 > -1.0f ) photons_to_vblank = v2 * 1e-6f;
+	}
+	DriverLog( "psvr2: display timing: vsync->photons %.0f us, photons->vblank %.0f us",
+	           vsync_to_photons * 1e6f, photons_to_vblank * 1e6f );
+	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromVsyncToPhotons_Float, vsync_to_photons );
+	vr::VRProperties()->SetFloatProperty( c, vr::Prop_SecondsFromPhotonsToVblank_Float, photons_to_vblank );
 
 	// EDID identity lets SteamVR's compositor find the physical connector and
 	// (in direct mode) DRM-lease it. In extended mode it's harmless.

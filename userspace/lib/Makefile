@@ -8,9 +8,9 @@ PCDIR    ?= $(LIBDIR)/pkgconfig
 
 all: libpsvr2.a libpsvr2.so psvr2-monitor
 
-OBJS = libpsvr2.o psvr2_distortion.o
+OBJS = libpsvr2.o psvr2_distortion.o psvr2_camera_model.o psvr2_led_solver.o
 
-%.o: %.c libpsvr2.h
+%.o: %.c libpsvr2.h psvr2_lens_lut.h psvr2_led_solver.h psvr2_led_models.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c -o $@ $<
 
 libpsvr2.a: $(OBJS)
@@ -23,6 +23,12 @@ libpsvr2.so: $(OBJS)
 psvr2-monitor: psvr2-monitor.c libpsvr2.a
 	$(CC) -I. $(CFLAGS) -o $@ psvr2-monitor.c libpsvr2.a -lm
 
+test_led_solver: test_led_solver.c libpsvr2.a
+	$(CC) -I. $(CFLAGS) -o $@ test_led_solver.c libpsvr2.a -lm
+
+check: test_led_solver
+	./test_led_solver
+
 install: all
 	install -Dm644 libpsvr2.h $(DESTDIR)$(INCDIR)/libpsvr2.h
 	install -Dm644 libpsvr2.a $(DESTDIR)$(LIBDIR)/libpsvr2.a
@@ -30,6 +36,6 @@ install: all
 	install -Dm644 libpsvr2.pc $(DESTDIR)$(PCDIR)/libpsvr2.pc
 
 clean:
-	$(RM) $(OBJS) libpsvr2.a libpsvr2.so psvr2-monitor
+	$(RM) $(OBJS) libpsvr2.a libpsvr2.so psvr2-monitor test_led_solver
 
-.PHONY: all install clean
+.PHONY: all install clean check

@@ -22,6 +22,8 @@
 
 #define POSE_DEV "/dev/psvr2-pose"
 #define GAZE_DEV "/dev/psvr2-gaze"
+#define CTRL_DEV "/dev/psvr2-ctrl"
+#define LD_DEV   "/dev/psvr2-ld"
 #define IIO_DIR  "/sys/bus/iio/devices"
 #define V4L_DIR  "/sys/class/video4linux"
 #define DRV_DIR  "/sys/bus/usb/drivers/psvr2"
@@ -30,6 +32,8 @@
 struct psvr2 {
 	int	pose_fd;
 	int	gaze_fd;
+	int	ctrl_fd;
+	int	ld_fd;
 	char	imu_dir[300];		/* IIO device dir, "" if none */
 	double	accel_scale;
 	double	gyro_scale;
@@ -203,6 +207,8 @@ psvr2_t *psvr2_open(void)
 
 	p->pose_fd = open(POSE_DEV, O_RDONLY | O_NONBLOCK);
 	p->gaze_fd = open(GAZE_DEV, O_RDONLY | O_NONBLOCK);
+	p->ctrl_fd = open(CTRL_DEV, O_RDWR | O_CLOEXEC);
+	p->ld_fd = open(LD_DEV, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	find_imu(p);
 	find_camera(p);
 	find_sysfs(p);
@@ -220,6 +226,10 @@ void psvr2_close(psvr2_t *p)
 		close(p->gaze_fd);
 	if (p->controls_fd >= 0)
 		close(p->controls_fd);
+	if (p->ctrl_fd >= 0)
+		close(p->ctrl_fd);
+	if (p->ld_fd >= 0)
+		close(p->ld_fd);
 	free(p);
 }
 
@@ -271,6 +281,18 @@ int psvr2_read_pose(psvr2_t *p, struct psvr2_pose *out, int block)
 	out->timestamp_ns = s.timestamp_ns;
 	out->device_vts_us = s.device_vts_us;
 	out->valid = (s.flags & PSVR2_POSE_FLAG_VALID) != 0;
+	out->device_time = (s.flags & PSVR2_POSE_FLAG_DEVICE_TIME) != 0;
+	out->tracking = (s.flags & PSVR2_POSE_FLAG_TRACKING) != 0;
+	out->state = s.state;
+	out->substate = s.substate;
+	out->reset_count = s.reset_count;
+	out->map_id = s.map_id;
+	for (int i = 0; i < 3; i++) {
+		out->velocity[i] = f_from_le(s.velocity[i]);
+		out->gyro_bias[i] = f_from_le(s.gyro_bias[i]);
+		out->accel_bias[i] = f_from_le(s.accel_bias[i]);
+	}
+	out->error_variance = f_from_le(s.error_variance);
 	for (int i = 0; i < 3; i++)
 		out->position[i] = f_from_le(s.position[i]);
 	for (int i = 0; i < 4; i++)
@@ -397,7 +419,8 @@ int psvr2_set_rumble(psvr2_t *p, int hz)
 
 int psvr2_get_lens_distortion(psvr2_t *p, float out[8])
 {
-	char path[400], hex[2 * LENS_CAL_LEN + 8];
+	/* The module prints the whole 256-byte block; the model uses 136. */
+	char path[400], hex[2 * 256 + 8];
 	uint8_t raw[LENS_CAL_LEN];
 	float prm[32];
 	int i;
@@ -411,7 +434,7 @@ int psvr2_get_lens_distortion(psvr2_t *p, float out[8])
 		return -1;
 	snprintf(path, sizeof(path), "%s/lens_calibration", p->sysfs_dir);
 	if (read_file_str(path, hex, sizeof(hex)) ||
-	    strlen(hex) != 2 * LENS_CAL_LEN)
+	    strlen(hex) < 2 * LENS_CAL_LEN)
 		return -1;
 	for (i = 0; i < LENS_CAL_LEN; i++) {
 		unsigned int b;
@@ -438,4 +461,189 @@ int psvr2_get_lens_distortion(psvr2_t *p, float out[8])
 	out[6] = cosf(-prm[5] * (float)M_PI / 180.0f);
 	out[7] = sinf(-prm[5] * (float)M_PI / 180.0f);
 	return 0;
+}
+
+/* ---- control reports ---------------------------------------------------- */
+
+static int ctrl_ioctl(psvr2_t *p, unsigned long cmd, int id, int subcmd,
+		      void *data, unsigned int len)
+{
+	struct psvr2_ctrl_report r;
+
+	if (!p || p->ctrl_fd < 0 || len > PSVR2_CTRL_MAX_LEN) {
+		errno = p && p->ctrl_fd >= 0 ? EINVAL : ENODEV;
+		return -1;
+	}
+	memset(&r, 0, sizeof(r));
+	r.report_id = id;
+	r.subcmd = subcmd;
+	r.len = len;
+	if (len && cmd == PSVR2_IOC_SET)
+		memcpy(r.data, data, len);
+	if (ioctl(p->ctrl_fd, cmd, &r) < 0)
+		return -1;
+	if (len && cmd == PSVR2_IOC_GET)
+		memcpy(data, r.data, len);
+	return 0;
+}
+
+int psvr2_ctrl_set(psvr2_t *p, int report_id, int subcmd, const void *data,
+		   unsigned int len)
+{
+	return ctrl_ioctl(p, PSVR2_IOC_SET, report_id, subcmd, (void *)data, len);
+}
+
+int psvr2_ctrl_get(psvr2_t *p, int report_id, int subcmd, void *data,
+		   unsigned int len)
+{
+	return ctrl_ioctl(p, PSVR2_IOC_GET, report_id, subcmd, data, len);
+}
+
+int psvr2_get_clock(psvr2_t *p, struct psvr2_clock *out)
+{
+	struct psvr2_clock_map m;
+
+	memset(out, 0, sizeof(*out));
+	if (!p || p->ctrl_fd < 0 || ioctl(p->ctrl_fd, PSVR2_IOC_CLOCK, &m) < 0)
+		return -1;
+	out->ref_device_us = m.ref_device_us;
+	out->offset_ns = m.offset_ns;
+	out->drift_ppb = m.drift_ppb;
+	out->valid = m.valid != 0;
+	out->samples = m.samples;
+	out->rtt_us = m.rtt_us;
+	return 0;
+}
+
+int64_t psvr2_clock_to_host_ns(const struct psvr2_clock *c, uint32_t dev_us)
+{
+	uint64_t ext = c->ref_device_us +
+		       (int64_t)(int32_t)(dev_us - (uint32_t)c->ref_device_us);
+	int64_t d = (int64_t)(ext - c->ref_device_us);
+
+	return (int64_t)ext * 1000 + c->offset_ns + d * c->drift_ppb / 1000000;
+}
+
+int psvr2_send_quit(psvr2_t *p)
+{
+	uint8_t v[2] = { 1000 & 0xff, 1000 >> 8 };
+
+	return psvr2_ctrl_set(p, 0x27, 1, v, sizeof(v));
+}
+
+static int read_attr_str(const struct psvr2 *p, const char *attr, char *buf,
+			 size_t len)
+{
+	char path[400];
+
+	if (!p || !p->sysfs_dir[0])
+		return -1;
+	snprintf(path, sizeof(path), "%s/%s", p->sysfs_dir, attr);
+	return read_file_str(path, buf, len);
+}
+
+static long read_attr_long(const struct psvr2 *p, const char *attr, int base)
+{
+	char buf[32];
+
+	if (read_attr_str(p, attr, buf, sizeof(buf)) < 0)
+		return -1;
+	return strtol(buf, NULL, base);
+}
+
+int psvr2_get_see_through(psvr2_t *p)
+{
+	return (int)read_attr_long(p, "see_through", 10);
+}
+
+int psvr2_set_see_through(psvr2_t *p, int on)
+{
+	return write_attr_int(p, "see_through", on ? 1 : 0);
+}
+
+int psvr2_get_edid_type(psvr2_t *p)
+{
+	return (int)read_attr_long(p, "edid_type", 10);
+}
+
+int psvr2_set_edid_type(psvr2_t *p, int type)
+{
+	return write_attr_int(p, "edid_type", type);
+}
+
+uint32_t psvr2_firmware_version(psvr2_t *p)
+{
+	long v = read_attr_long(p, "firmware_version", 16);
+
+	return v < 0 ? 0 : (uint32_t)v;
+}
+
+uint32_t psvr2_min_driver_version(psvr2_t *p)
+{
+	long v = read_attr_long(p, "min_driver_version", 16);
+
+	return v < 0 ? 0 : (uint32_t)v;
+}
+
+uint32_t psvr2_board_stage(psvr2_t *p)
+{
+	long v = read_attr_long(p, "board_stage", 10);
+
+	return v < 0 ? 0 : (uint32_t)v;
+}
+
+int psvr2_ready(psvr2_t *p)
+{
+	return read_attr_long(p, "ready", 10) == 1;
+}
+
+int psvr2_read_calibration(psvr2_t *p, const char *name, void *buf,
+			   unsigned int len)
+{
+	char path[400];
+	ssize_t n;
+	int fd;
+
+	if (!p || !p->sysfs_dir[0])
+		return -1;
+	snprintf(path, sizeof(path), "%s/%s", p->sysfs_dir, name);
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	n = read(fd, buf, len);
+	close(fd);
+	return n < 0 ? -1 : (int)n;
+}
+
+/* ---- LED detector stream ------------------------------------------------ */
+
+int psvr2_ld_fd(const psvr2_t *p) { return p ? p->ld_fd : -1; }
+
+int psvr2_read_ld(psvr2_t *p, struct psvr2_ld_packet *out, int block)
+{
+	static __thread uint8_t buf[sizeof(struct psvr2_packet_hdr) +
+				    PSVR2_LD_MAX_LEN];
+	struct psvr2_packet_hdr h;
+	ssize_t n;
+
+	if (!p || p->ld_fd < 0)
+		return -1;
+	if (block) {
+		struct pollfd pfd = { .fd = p->ld_fd, .events = POLLIN };
+
+		if (poll(&pfd, 1, -1) < 0)
+			return -1;
+	}
+	n = read(p->ld_fd, buf, sizeof(buf));
+	if (n < 0)
+		return (errno == EAGAIN || errno == EWOULDBLOCK) ? 0 : -1;
+	if ((size_t)n < sizeof(h))
+		return -1;
+	memcpy(&h, buf, sizeof(h));
+	out->timestamp_ns = h.timestamp_ns;
+	out->sequence = h.sequence;
+	out->dropped = h.dropped;
+	out->length = h.length <= PSVR2_LD_PACKET_MAX ? h.length : PSVR2_LD_PACKET_MAX;
+	memcpy(out->data, buf + sizeof(h), out->length);
+	return 1;
 }

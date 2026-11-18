@@ -44,3 +44,7 @@ references/
 .vscode/
 .claude/
 .junie/
+
+# Test binaries and Python caches
+userspace/lib/test_led_solver
+__pycache__/

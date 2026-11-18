@@ -86,6 +86,23 @@ source of raw data (constants and tables). No code was copied.
   0.09255)` m is applied (RESEARCH.md §5.2); the rotation part was already
   in the remap.
 
+## 120 Hz frame timing (SteamVR bug workaround)
+
+At 120 Hz SteamVR scanned out 119.88 Hz but logged `Updated HMD
+Prop_DisplayFrequency_Float to 90.000000` and paced frames for 90 Hz (judder
+and tearing). Cause, found in vrcompositor (Linux, 2026-11-18): the mode pick
+loop writes the chosen rate into its frame timing only when the winning mode
+is not the first one at the HMD resolution; otherwise a 90.0 default stays.
+The 90/120 EDID lists 4000x2040@119.88 before @89.91. The runtime rate-change
+path cannot fix it (its display setter is a stub on Linux).
+
+Fix: `steamvr/vk_mode_order`, an explicit Vulkan layer that, inside
+vrcompositor only, returns each resolution's modes in ascending refresh. The
+installer writes its manifest to `~/.local/share/vulkan/explicit_layer.d/`;
+the driver adds it to `VK_INSTANCE_LAYERS` in vrserver, which forwards that
+variable to the compositor. At 90 Hz the 90.0 default stays (0.1 % off
+89.91, as before with the 90-only EDID).
+
 ## Not done, and why
 
 | Item | Why |

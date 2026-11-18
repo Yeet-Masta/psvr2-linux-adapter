@@ -32,10 +32,11 @@ DRIVERS_DIR="$(find_steamvr_drivers)" || {
 }
 DRIVERS_DIR="${STEAMVR_DRIVERS:-$DRIVERS_DIR}"
 LINK="${DRIVERS_DIR}/psvr2"
+LAYER_JSON="${XDG_DATA_HOME:-${HOME}/.local/share}/vulkan/explicit_layer.d/VkLayer_PSVR2_mode_order.json"
 
 if [ "${1:-}" = "--uninstall" ]; then
-	rm -f "${LINK}"
-	echo "Removed ${LINK}"
+	rm -f "${LINK}" "${LAYER_JSON}"
+	echo "Removed ${LINK} and ${LAYER_JSON}"
 	exit 0
 fi
 
@@ -50,4 +51,11 @@ cmake --build "${BUILD_DIR}" -j >/dev/null
 
 ln -sfn "${PKG_DIR}" "${LINK}"
 echo "Linked ${LINK} -> ${PKG_DIR}"
+
+# Vulkan layer that fixes vrcompositor's 120 Hz frame timing (see
+# steamvr/vk_mode_order/vk_mode_order.c). The driver enables it by name.
+mkdir -p "$(dirname "${LAYER_JSON}")"
+sed "s#@LIB@#${PKG_DIR}/bin/linux64/libVkLayer_PSVR2_mode_order.so#" \
+	"${SCRIPT_DIR}/vk_mode_order/VkLayer_PSVR2_mode_order.json.in" > "${LAYER_JSON}"
+echo "Installed ${LAYER_JSON}"
 echo "Start SteamVR; check 'driver_psvr2' in the SteamVR web console for logs."

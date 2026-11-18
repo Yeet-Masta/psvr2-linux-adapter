@@ -72,6 +72,17 @@ set_target_properties(driver_psvr2 PROPERTIES
 # object itself does not relink.
 # SteamVR wants the manifest at the package root and everything else under
 # resources/: "{psvr2}/input/..." resolves to <package>/resources/input/...
+# Vulkan layer for vrcompositor's display-mode pick (see vk_mode_order.c).
+add_library(VkLayer_PSVR2_mode_order MODULE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../vk_mode_order/vk_mode_order.c"
+)
+set_target_properties(VkLayer_PSVR2_mode_order PROPERTIES
+    PREFIX "lib"
+    C_VISIBILITY_PRESET hidden
+    LIBRARY_OUTPUT_DIRECTORY "${PKG_DIR}/bin/linux64"
+)
+target_link_libraries(VkLayer_PSVR2_mode_order PRIVATE Threads::Threads)
+
 add_custom_target(stage_resources ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/resources" "${PKG_DIR}/resources"

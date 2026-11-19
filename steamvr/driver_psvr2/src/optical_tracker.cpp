@@ -48,27 +48,27 @@ void Block09( int mode, uint8_t b[24] )
 
 // libpad calls this for the PRESCAN base time (ledsync.md §5.4), once per
 // PRESCAN command and per 1 s re-sync. Sony returns the frame time as is.
-// On hardware (2026-11-18) the headset -> host -> controller mapping was off
-// by more than the ±1.25 ms PRESCAN window, by a different amount each run,
-// so the LEDs first showed up after 3.5 to 44 s. Own method: shift each call
-// by one window width (2 ms), alternating sides out to ±8 ms, so nine
-// re-syncs cover the whole 16.7 ms frame. While the cameras see the LEDs the
-// shift is held: on hardware (2026-11-18) the next re-sync moved the window
-// off the exposure right as PRESCAN handed over to BROAD, which then saw
-// nothing.
+// On hardware (2026-11-18) our headset -> host -> controller mapping put the
+// window about 2 ms early: in a 47 s trace the LEDs were lit only at
+// re-syncs whose base sat 1.87-2.58 ms (controller clock) after the
+// unshifted one, never at 0. Own method: start at the learned offset
+// (setting optical_sync_offset_us, default 2000) and, while no LEDs are in
+// view, shift each call by one window width (2 ms), alternating sides out to
+// ±8 ms, so nine re-syncs cover the whole 16.7 ms frame. While the cameras
+// see the LEDs the shift is held, and after 3 s lit it is saved as the new
+// offset.
 std::atomic<bool> g_sweep_hold{ false };
 std::atomic<unsigned> g_shift{ 8 };
+std::atomic<int32_t> g_offset_us{ 2000 };
+const int8_t kShift[9] = { 0, 1, -1, 2, -2, 3, -3, 4, -4 };
+
+int32_t CurrentShiftUs() { return g_offset_us + int32_t( kShift[g_shift.load() % 9] ) * 2000; }
 
 uint64_t HeadsetTimeCallback()
 {
-	static const int8_t kShift[9] = { 0, 1, -1, 2, -2, 3, -3, 4, -4 };
-	unsigned k = g_shift.load();
 	if ( !g_sweep_hold )
-	{
-		k = ( k + 1 ) % 9;
-		g_shift = k;
-	}
-	return OpticalTracker::HeadsetFrameMicros() + int64_t( kShift[k] ) * 2000;
+		g_shift = ( g_shift.load() + 1 ) % 9;
+	return OpticalTracker::HeadsetFrameMicros() + int64_t( CurrentShiftUs() );
 }
 
 // Logical -> physical LED (table at 0x180260aa0): identity for logical
@@ -101,6 +101,23 @@ OpticalTracker::OpticalTracker( Psvr2ControllerDriver *const controllers[2] )
 	            err == vr::VRSettingsError_None;
 	if ( led_test_ )
 		DriverLog( "psvr2: optical: LED on/off test mode (no sync)" );
+	err = vr::VRSettingsError_None;
+	const int32_t off = vr::VRSettings()->GetInt32( "driver_psvr2", "optical_sync_offset_us", &err );
+	if ( err == vr::VRSettingsError_None && off > -8400 && off < 8400 )
+		g_offset_us = off;
+	saved_offset_us_ = g_offset_us;
+	g_shift = 8;
+	g_sweep_hold = false;
+	// Sony's full sequence (BROAD, BG, STABLE) only with optical_sync_broad:
+	// on hardware (2026-11-18, firmware 0x0306, preset 2) BROAD lit the sync
+	// LED on every third frame, which matches none of the 11-frame codes, so
+	// it never locked. PRESCAN lights all LEDs in a 2 ms window that libpad
+	// re-centres every second, which is enough for the pose solve.
+	err = vr::VRSettingsError_None;
+	full_sync_ = vr::VRSettings()->GetBool( "driver_psvr2", "optical_sync_broad", &err ) &&
+	             err == vr::VRSettingsError_None;
+	DriverLog( "psvr2: optical: sync offset %d us, %s", int( g_offset_us ),
+	           full_sync_ ? "full sync (BROAD/BG/STABLE)" : "tracking in PRESCAN" );
 	pose_ = std::make_unique<OpticalPose>( controllers[0]->Hmd(), controllers );
 	for ( int i = 0; i < 2; i++ )
 	{
@@ -110,6 +127,7 @@ OpticalTracker::OpticalTracker( Psvr2ControllerDriver *const controllers[2] )
 			controllers_[i]->LedSyncCommand( cmd, len );
 			TraceStatus( trace_, i, controllers_[i] );
 		} );
+		syncers_[i]->HoldPrescan( !full_sync_ );
 	}
 }
 
@@ -270,8 +288,13 @@ void OpticalTracker::Run()
 					total += blob_count_[c];
 				lit_frame_ = total >= 3;
 				if ( lit_frame_ )
+				{
+					if ( now - lit_at_us_ > 200000 )
+						lit_since_us_ = now;
 					lit_at_us_ = now;
+				}
 				g_sweep_hold = now - lit_at_us_ < 3 * kSec;
+				SaveOffset( now );
 				RunSyncers( now );
 				SolvePoses( now );
 			}
@@ -507,6 +530,19 @@ int OpticalTracker::GlobalPreset()
 	return preset_;
 }
 
+// LEDs lit for 3 s: keep the shift that lit them as the new offset.
+void OpticalTracker::SaveOffset( uint64_t now_us )
+{
+	if ( !lit_frame_ || now_us - lit_since_us_ < 3 * kSec )
+		return;
+	const int32_t cur = CurrentShiftUs();
+	if ( cur == saved_offset_us_ )
+		return;
+	saved_offset_us_ = cur;
+	vr::VRSettings()->SetInt32( "driver_psvr2", "optical_sync_offset_us", cur );
+	DriverLog( "psvr2: optical: LEDs lit at sync offset %d us, saved", int( cur ) );
+}
+
 // Controller poses for the controllers whose LEDs are synced.
 void OpticalTracker::SolvePoses( uint64_t now_us )
 {
@@ -515,10 +551,12 @@ void OpticalTracker::SolvePoses( uint64_t now_us )
 		rig_try_us_ = now_us;
 		pose_->BuildRig( dev_ );
 	}
-	const bool synced[2] = {
-		!see_through_ && !led_test_ && syncers_[0]->Current() == LedSyncer::kStable,
-		!see_through_ && !led_test_ && syncers_[1]->Current() == LedSyncer::kStable,
+	// Lit: STABLE, or held PRESCAN with LEDs in view.
+	auto lit = [&]( int i ) {
+		const auto p = syncers_[i]->Current();
+		return p == LedSyncer::kStable || ( !full_sync_ && p == LedSyncer::kPrescan && now_us - lit_at_us_ < 500000 );
 	};
+	const bool synced[2] = { !see_through_ && !led_test_ && lit( 0 ), !see_through_ && !led_test_ && lit( 1 ) };
 	pose_->Frame( frame_us_, blobs_, blob_count_, synced );
 }
 

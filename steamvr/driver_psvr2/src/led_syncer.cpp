@@ -228,7 +228,7 @@ void LedSyncer::Frame( uint64_t now_us, int preset, const LedObservation &obs )
 		break;
 	case kPrescan:
 		SetGood( obs.visible, now_us );
-		if ( good_ && InState( now_us ) >= ( retries_ >= 2 ? 3 : 1 ) * kSec )
+		if ( !hold_prescan_ && good_ && InState( now_us ) >= ( retries_ >= 2 ? 3 : 1 ) * kSec )
 		{
 			std::memcpy( leds_, obs.sync_leds, 4 );
 			Enter( kBroad, now_us );

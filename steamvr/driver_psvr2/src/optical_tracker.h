@@ -64,12 +64,16 @@ private:
 	LedObservation Observe( int hand, int phase_owner );
 	void RunSyncers( uint64_t now_us );
 	void SolvePoses( uint64_t now_us );
+	void SaveOffset( uint64_t now_us );
 
 	Psvr2ControllerDriver *controllers_[2];
 	std::unique_ptr<LedSyncer> syncers_[2];
 	std::unique_ptr<OpticalPose> pose_;
 	bool lit_frame_ = false;   // this LD frame shows >= 3 blobs
 	uint64_t lit_at_us_ = 0;   // last such frame
+	uint64_t lit_since_us_ = 0;  // start of the current lit run
+	int32_t saved_offset_us_ = 0;  // optical_sync_offset_us as last saved
+	bool full_sync_ = false;   // optical_sync_broad
 	uint64_t rig_try_us_ = 0;
 	psvr2_t *dev_ = nullptr;
 	std::thread thread_;

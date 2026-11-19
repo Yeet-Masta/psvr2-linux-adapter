@@ -146,6 +146,25 @@ The module, library and driver build clean (kernel 7.0, gcc). To try them:
    `steamvr.vrsettings`. Then look in `vrserver.txt` for `psvr2: optical:`
    and `psvr2: ledsync:` lines, and send the camera calibration lines back.
 
+## Controller LED sync on hardware (2026-11-18)
+
+From a 47 s LD trace (one controller, firmware 0x0306, preset 2):
+
+- **PRESCAN offset.** The LEDs were lit only at re-syncs whose base time
+  sat 1.87-2.58 ms (controller clock) after the one our time mapping gives,
+  never at 0. The driver now starts at `optical_sync_offset_us` (default
+  2000), sweeps ±8 ms in 2 ms steps only while nothing is lit, and saves the
+  offset after 3 s lit.
+- **BROAD does not lock.** With LED 1 as sync LED and offset 0, the LED
+  showed on exactly every third LD frame, in bursts, which matches none of
+  the 11-frame codes (RESEARCH.md §7.9). Cameras show no third-frame pattern
+  in PRESCAN, so it is the controller. Open: what this firmware's BROAD
+  emits.
+- **So tracking runs in PRESCAN** (default; `optical_sync_broad` true for
+  Sony's full sequence): all LEDs lit in a 2 ms window, libpad re-centres it
+  every 1 s, both controllers at once, and the pose solve runs while LEDs are
+  in view.
+
 ## Optical controller pose (steamvr/driver_psvr2/src/optical_pose.cpp)
 
 From `docs/sony-re/opticalpose.md`. Runs per LD frame for each controller in

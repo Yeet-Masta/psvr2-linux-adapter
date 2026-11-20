@@ -96,12 +96,22 @@ double AngleBetween( const Rt &a, const Rt &b )
 	return std::acos( std::clamp( ( tr - 1 ) / 2, -1.0, 1.0 ) ) / kDeg;
 }
 
-// The 24 proper rotations that map axes onto axes; [0] is the identity.
+// IMU <- LED model rotation, entries [0..23]: the 24 proper rotations that
+// map axes onto axes ([0] is the identity), searched when the remap is
+// unknown. [24] (kSenseMount): the Sense IMU's real mount, which no axis
+// permutation can express: the transpose of libpad's mounting matrix
+// DAT_180351668 (IMU = M * raw, then a pure translation to the LED model),
+// 50.3 deg about x. Measured against Sony's driver (2026-11-18,
+// ~/sony-capture-3): 51 deg for both hands once the head <- rig tilt
+// (optical_rig_tilt_deg) is fitted too.
+constexpr int kSenseMount = 24;
 struct Remaps
 {
-	double R[24][9];
+	double R[25][9];
 	Remaps()
 	{
+		const double mount[9] = { 1, 0, 0, 0, 0.639167, -0.769068, 0, 0.769068, 0.639167 };
+		std::memcpy( R[kSenseMount], mount, sizeof( mount ) );
 		static const int perm[6][3] = { { 0, 1, 2 }, { 0, 2, 1 }, { 1, 0, 2 }, { 1, 2, 0 }, { 2, 0, 1 }, { 2, 1, 0 } };
 		int n = 0;
 		for ( const auto &p : perm )
@@ -118,6 +128,9 @@ struct Remaps
 	}
 };
 const Remaps kRemap;
+
+// See the blob list in OpticalPose::Frame.
+constexpr float kLdBlobOffsetX = 4.0f;
 
 void MatMul( const double A[9], const double B[9], double C[9] )
 {
@@ -178,9 +191,12 @@ OpticalPose::OpticalPose( Psvr2HmdDriver *hmd, Psvr2ControllerDriver *const cont
 	controllers_[0] = controllers[0];
 	controllers_[1] = controllers[1];
 	psvr2_solver_default_cfg( &cfg_ );
-	rig_offset_ = { GetFloat( "optical_rig_offset_x", 0.0f ), GetFloat( "optical_rig_offset_y", 0.0f ),
-	                GetFloat( "optical_rig_offset_z", 0.0f ) };
-	rig_tilt_deg_ = GetFloat( "optical_rig_tilt_deg", 0.0f );
+	// Defaults fitted against Sony's driver (2026-11-18, ~/sony-capture-3):
+	// with them, Sony's poses need < 1 deg and < 5 mm more head <- rig
+	// correction, and the right hand matches Sony to 2.7 mm / 1.6 deg (median).
+	rig_offset_ = { GetFloat( "optical_rig_offset_x", -0.005f ), GetFloat( "optical_rig_offset_y", -0.009f ),
+	                GetFloat( "optical_rig_offset_z", -0.011f ) };
+	rig_tilt_deg_ = GetFloat( "optical_rig_tilt_deg", 6.0f );
 	for ( int i = 0; i < 2; i++ )
 		LoadHand( i );
 
@@ -191,8 +207,12 @@ OpticalPose::OpticalPose( Psvr2HmdDriver *hmd, Psvr2ControllerDriver *const cont
 		const std::string path = std::string( home ? home : "/tmp" ) + "/psvr2-optical-pose.txt";
 		pose_log_ = std::fopen( path.c_str(), "w" );
 		if ( pose_log_ )
+		{
+			// Line-buffered: the log must be readable while SteamVR runs.
+			std::setvbuf( pose_log_, nullptr, _IOLBF, 0 );
 			std::fprintf( pose_log_, "# us hand matched rms_px | rig<-model t(mm) q(wxyz) | world<-head pos q | "
-			                         "fused imu q | yaw\n" );
+			                         "fused imu q | tilt_deg\n" );
+		}
 		DriverLog( "psvr2: optical pose: log %s %s", path.c_str(), pose_log_ ? "open" : "failed" );
 	}
 	DriverLog( "psvr2: optical pose: head <- rig offset (%.3f %.3f %.3f) m, tilt %.1f deg", rig_offset_.x,
@@ -208,14 +228,16 @@ OpticalPose::~OpticalPose()
 void OpticalPose::LoadHand( int hand )
 {
 	Hand &h = hands_[hand];
-	h.remap = GetInt( hand == 0 ? "optical_remap_left" : "optical_remap_right", -1 );
-	if ( h.remap < -1 || h.remap >= 24 )
+	// Both hands: the measured mount (kSenseMount). The earlier default,
+	// remap 7 for the right hand, came from boots biased by their own prior.
+	h.remap = GetInt( hand == 0 ? "optical_remap_left" : "optical_remap_right", kSenseMount );
+	if ( h.remap < -1 || h.remap > kSenseMount )
 		h.remap = -1;
-	// Sony mirrors the left model in x (opticalpose.md §2b.2); whether this
-	// model is already mirrored is open, so the left hand learns it too.
-	h.mirror = hand == 0 ? GetInt( "optical_mirror_left", -1 ) : 0;
-	if ( h.remap < 0 )
-		h.mirror = hand == 0 ? -1 : 0;
+	// Sony always mirrors the left model in x: no model sets its own mirror
+	// byte (+0x31e is 0 in all seven), so the descriptor's 'X' applies
+	// (opticalpose.md §2b.2). Unmirrored, the left hand booted onto the
+	// right controller on hardware.
+	h.mirror = hand == 0 ? 1 : 0;
 }
 
 vrmath::Pose OpticalPose::HeadFromRig() const
@@ -312,13 +334,19 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 		lists[c].count = std::min( n, PSVR2_SOLVER_BLOBS );
 		for ( int k = 0; k < lists[c].count; k++ )
 		{
-			lists[c].xy[k][0] = blobs[c].x[idx[k]];
+			// LD blob x reads 4 px (508 image) left of the calibrated model
+			// on every camera; PSVR2Toolkit compensates in Sony's driver by
+			// moving cx 8 px left in the 1016 calibration (ir_tracker_hooks.cpp).
+			lists[c].xy[k][0] = blobs[c].x[idx[k]] + kLdBlobOffsetX;
 			lists[c].xy[k][1] = blobs[c].y[idx[k]];
 		}
 	}
 
-	for ( int hand = 0; hand < 2; hand++ )
+	// A tracked hand claims its blobs before a searching one boots on them.
+	const int first = !hands_[0].tracking && hands_[1].tracking ? 1 : 0;
+	for ( int k = 0; k < 2; k++ )
 	{
+		const int hand = first ^ k;
 		Hand &h = hands_[hand];
 		if ( !synced[hand] )
 		{
@@ -339,10 +367,10 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 			if ( !h.frames )
 				continue;
 			DriverLog( "psvr2: optical pose: %s: %s, solved %d/%d frames, %d boots tried, %d fixes, matched %.1f, "
-			           "rms %.2f px, remap %d mirror %d",
+			           "rms %.2f px, remap %d",
 			           HandName( hand ), h.tracking ? "tracking" : "searching", h.solved, h.frames, h.boots, h.fixes,
 			           h.solved ? double( h.matched ) / h.solved : 0.0, h.solved ? h.rms / h.solved : 0.0,
-			           h.remap >= 0 ? h.remap : h.cand_remap, h.mirror >= 0 ? h.mirror : h.cand_mirror );
+			           h.remap >= 0 ? h.remap : h.cand_remap );
 			h.frames = h.solved = h.boots = h.fixes = h.matched = 0;
 			h.rms = 0;
 		}
@@ -402,14 +430,13 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 		psvr2_pose3 predicted;
 		std::memcpy( predicted.R, rp.R, sizeof( rp.R ) );
 		std::memcpy( predicted.t, rp.t, sizeof( rp.t ) );
-		const int mirror = h.mirror >= 0 ? h.mirror : h.cand_mirror;
-		ok = psvr2_led_track( &cfg_, cams_, lists, &h.model[mirror], &predicted, &out, &res ) == 0;
+		ok = psvr2_led_track( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &out, &res ) == 0;
 		if ( !ok && ++h.fails >= 6 )
 			h.tracking = false;
 	}
 	if ( !h.tracking )
 	{
-		ok = Boot( hand, h, world_from_rig, q_imu, yaw_now, lists, out, res );
+		ok = Boot( hand, h, frame_us, world_from_rig, q_imu, yaw_now, lists, out, res );
 		if ( ok )
 		{
 			h.tracking = true;
@@ -446,18 +473,17 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 	}
 }
 
-bool OpticalPose::Boot( int hand, Hand &h, const vrmath::Pose &world_from_rig, const vr::HmdQuaternion_t &q_imu,
+bool OpticalPose::Boot( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const vr::HmdQuaternion_t &q_imu,
                         double yaw_now, const psvr2_blob_list lists[PSVR2_SOLVER_CAMS], psvr2_pose3 &out,
                         psvr2_solve_result &res )
 {
 	// Hypotheses: heading (the controller's current one first when the
 	// remap is known, then 12 steps of 30 deg, offset 15 deg every other
-	// sweep) x remap x mirror while those are unknown.
+	// sweep) x remap while it is unknown.
 	const bool known = h.remap >= 0;
-	const int nmirror = known ? 1 : ( hand == 0 ? 2 : 1 );
 	const int nremap = known ? 1 : 24;
 	const int nyaw = known ? 13 : 12;
-	const unsigned total = unsigned( nyaw * nremap * nmirror );
+	const unsigned total = unsigned( nyaw * nremap );
 
 	double Rrw[9];
 	const Rt rig_from_world = Inv( ToRt( world_from_rig ) );
@@ -465,22 +491,33 @@ bool OpticalPose::Boot( int hand, Hand &h, const vrmath::Pose &world_from_rig, c
 	double Rimu[9];
 	vrmath::ToMatrix( q_imu, Rimu );
 
+	// Known remap: wrong headings still match 12-15 of the ring's LEDs
+	// (hardware, 2026-11-18), right ones 18-30. So try every heading in
+	// this frame and keep the best; boot only near the controller's
+	// heading while its fixes are recent, else need 18 LEDs.
+	const bool locked = known && h.fix_us && frame_us - h.fix_us < 5000000;
+	psvr2_pose3 best_out{};
+	psvr2_solve_result best_res{};
+	double best_yaw = 0;
+	bool have_best = false;
+
 	const uint64_t start = NowMicros();
 	int tried = 0;
-	while ( tried < int( total ) && ( tried == 0 || NowMicros() - start < 3000 ) )
+	while ( tried < int( total ) && ( known || tried == 0 || NowMicros() - start < 3000 ) )
 	{
 		const unsigned k = h.hyp++;
 		tried++;
 		const unsigned sweep = k / total, i = k % total;
-		const int y = int( i % nyaw ), r = int( ( i / nyaw ) % nremap ), m = int( i / ( nyaw * nremap ) );
+		const int y = int( i % nyaw ), r = int( i / nyaw );
 		const int remap = known ? h.remap : r;
-		// Sony's mirror for the left hand first.
-		const int mirror = known ? h.mirror : ( hand == 0 ? 1 - m : 0 );
 		double yaw;
 		if ( known && y == 0 )
 			yaw = yaw_now;
 		else
 			yaw = ( ( known ? y - 1 : y ) * 30.0 + ( sweep & 1 ? 15.0 : 0.0 ) ) * kDeg;
+
+		if ( locked && std::fabs( vrmath::WrapPi( yaw - yaw_now ) ) > 30.0 * kDeg )
+			continue;
 
 		double Ry[9], A[9], B[9], prior[9];
 		vrmath::ToMatrix( vrmath::AxisAngle( 0, 1, 0, yaw ), Ry );
@@ -490,17 +527,38 @@ bool OpticalPose::Boot( int hand, Hand &h, const vrmath::Pose &world_from_rig, c
 		h.boots++;
 		// The solver accepts a boot from 4 matches; on a recorded frame those
 		// were wrong poses (4-9 matches), the right one had 22-30. Own floor.
-		if ( psvr2_led_boot_oriented( &cfg_, cams_, lists, &h.model[mirror], prior, &out, &res ) == 0 &&
+		if ( known )
+		{
+			psvr2_pose3 o{};
+			psvr2_solve_result r{};
+			if ( psvr2_led_boot_oriented( &cfg_, cams_, lists, &h.model[h.mirror], prior, &o, &r ) == 0 &&
+			     ( !have_best || r.matched > best_res.matched ||
+			       ( r.matched == best_res.matched && r.rms_px < best_res.rms_px ) ) )
+			{
+				best_out = o;
+				best_res = r;
+				best_yaw = yaw;
+				have_best = true;
+			}
+			continue;
+		}
+		if ( psvr2_led_boot_oriented( &cfg_, cams_, lists, &h.model[h.mirror], prior, &out, &res ) == 0 &&
 		     res.matched >= 12 )
 		{
 			h.cand_remap = remap;
-			h.cand_mirror = mirror;
-			DriverLog( "psvr2: optical pose: %s: boot ok (heading %.0f deg, remap %d, mirror %d, %d LEDs, %.2f px)",
-			           HandName( hand ), yaw / kDeg, remap, mirror, res.matched, res.rms_px );
+			DriverLog( "psvr2: optical pose: %s: boot ok (heading %.0f deg, remap %d, %d LEDs, %.2f px)",
+			           HandName( hand ), yaw / kDeg, remap, res.matched, res.rms_px );
 			return true;
 		}
 	}
-	return false;
+	if ( !have_best || best_res.matched < ( locked ? 12 : 18 ) )
+		return false;
+	out = best_out;
+	res = best_res;
+	h.cand_remap = h.remap;
+	DriverLog( "psvr2: optical pose: %s: boot ok (heading %.0f deg%s, %d LEDs, %.2f px)", HandName( hand ),
+	           best_yaw / kDeg, locked ? ", near the current heading" : "", res.matched, res.rms_px );
+	return true;
 }
 
 void OpticalPose::Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig,
@@ -587,18 +645,18 @@ void OpticalPose::Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Po
 	const vrmath::Vec3 imu_pos = vrmath::Add(
 		world_model.pos, vrmath::Rotate( world_model.rot, { v[0] * 1e-3, v[1] * 1e-3, v[2] * 1e-3 } ) );
 	if ( controllers_[hand]->OpticalFix( frame_us, imu_pos, world_imu ) )
+	{
 		h.fixes++;
+		h.fix_us = frame_us;
+	}
 }
 
 void OpticalPose::Confirm( int hand, Hand &h )
 {
 	h.remap = h.cand_remap;
-	h.mirror = h.cand_mirror;
 	vr::VRSettings()->SetInt32( kSection, hand == 0 ? "optical_remap_left" : "optical_remap_right", h.remap );
-	if ( hand == 0 )
-		vr::VRSettings()->SetInt32( kSection, "optical_mirror_left", h.mirror );
 	const double *R = kRemap.R[h.remap];
 	DriverLog( "psvr2: optical pose: %s: IMU -> LED model rotation learned: remap %d [%g %g %g / %g %g %g / %g %g %g], "
-	           "mirror %d (saved)",
-	           HandName( hand ), h.remap, R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], h.mirror );
+	           "(saved)",
+	           HandName( hand ), h.remap, R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8] );
 }

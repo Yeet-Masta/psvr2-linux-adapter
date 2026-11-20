@@ -18,10 +18,10 @@
 //
 // Own method, not Sony's (not traced): the rotation between the IMU frame
 // our fusion uses and the LED-model frame is not known for sure, so until it
-// is learned the boot also tries all 24 axis-aligned rotations (and, for the
-// left hand, the model with and without Sony's x mirror). A guess is kept
-// once 30 tracked frames over 30 deg of controller rotation agree with
-// gravity; it is then saved in the settings.
+// is learned the boot also tries all 24 axis-aligned rotations. A guess is
+// kept once 30 tracked frames over 30 deg of controller rotation agree with
+// gravity; it is then saved in the settings. The right hand defaults to the
+// rotation fitted on hardware; the left hand uses Sony's x-mirrored model.
 #pragma once
 
 #include <cstdint>
@@ -54,17 +54,19 @@ private:
 	{
 		int rev = -1;
 		psvr2_led_model model[2];  // [0] as stored, [1] mirrored in x
-		// Learned IMU -> model rotation (index into the 24) and mirror; -1 = unknown.
-		int remap = -1, mirror = -1;
+		// Learned IMU -> model rotation (index into the 24); -1 = unknown.
+		// mirror: model index, 1 (x-mirrored) for the left hand.
+		int remap = -1, mirror = 0;
 		unsigned hyp = 0;  // next boot hypothesis
-		// Tracking state. Candidate remap/mirror while not yet confirmed.
+		// Tracking state. Candidate remap while not yet confirmed.
 		bool tracking = false;
-		int cand_remap = 0, cand_mirror = 0;
+		int cand_remap = 0;
 		vrmath::Pose last;  // world <- model, metres
 		uint64_t last_us = 0;
 		vrmath::Vec3 vel;
 		vr::HmdQuaternion_t q_last = vrmath::Identity();  // fused IMU at last
 		int fails = 0, good = 0;
+		uint64_t fix_us = 0;  // frame time of the last fix handed to the controller
 		vr::HmdQuaternion_t span_ref = vrmath::Identity();
 		double span = 0;
 		// Stats for the periodic log.
@@ -74,7 +76,7 @@ private:
 
 	void SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &world_from_rig,
 	                psvr2_blob_list lists[PSVR2_SOLVER_CAMS] );
-	bool Boot( int hand, Hand &h, const vrmath::Pose &world_from_rig, const vr::HmdQuaternion_t &q_imu, double yaw_now,
+	bool Boot( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const vr::HmdQuaternion_t &q_imu, double yaw_now,
 	           const psvr2_blob_list lists[PSVR2_SOLVER_CAMS], psvr2_pose3 &out, psvr2_solve_result &res );
 	void Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const psvr2_pose3 &rig_pose,
 	             const vr::HmdQuaternion_t &q_imu, const psvr2_solve_result &res );

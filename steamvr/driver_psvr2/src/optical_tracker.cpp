@@ -11,6 +11,7 @@
 #include <poll.h>
 
 #include "controller_device.h"
+#include "hmd_device_driver.h"
 #include "driverlog.h"
 
 namespace
@@ -157,7 +158,7 @@ void OpticalTracker::TraceFrame( const Header &h, int period )
 {
 	if ( !trace_ )
 		return;
-	if ( ++trace_frames_ > 60 * 60 )
+	if ( ++trace_frames_ > 60 * 180 )  // 3 min
 	{
 		std::fclose( trace_ );
 		trace_ = nullptr;
@@ -557,7 +558,34 @@ void OpticalTracker::SolvePoses( uint64_t now_us )
 		return p == LedSyncer::kStable || ( !full_sync_ && p == LedSyncer::kPrescan && now_us - lit_at_us_ < 500000 );
 	};
 	const bool synced[2] = { !see_through_ && !led_test_ && lit( 0 ), !see_through_ && !led_test_ && lit( 1 ) };
+	TraceInputs( synced );
 	pose_->Frame( frame_us_, blobs_, blob_count_, synced );
+}
+
+// What OpticalPose reads besides the blobs, so a trace can be replayed
+// offline: P frame_us synced0 synced1 | head ok pos q(wxyz) driver_from_head
+// | per hand: ok q_imu(wxyz) yaw rev.
+void OpticalTracker::TraceInputs( const bool synced[2] )
+{
+	if ( !trace_ )
+		return;
+	const uint64_t fu = frame_us_;
+	vr::DriverPose_t head{};
+	const bool hok = controllers_[0]->Hmd() && controllers_[0]->Hmd()->PoseAt( fu, head );
+	std::fprintf( trace_, "P %llu %d %d | %d %.6f %.6f %.6f %.7f %.7f %.7f %.7f %.5f %.5f %.5f", (unsigned long long)fu,
+	              synced[0], synced[1], hok, head.vecPosition[0], head.vecPosition[1], head.vecPosition[2],
+	              head.qRotation.w, head.qRotation.x, head.qRotation.y, head.qRotation.z,
+	              head.vecDriverFromHeadTranslation[0], head.vecDriverFromHeadTranslation[1],
+	              head.vecDriverFromHeadTranslation[2] );
+	for ( int i = 0; i < 2; i++ )
+	{
+		vr::HmdQuaternion_t q = vrmath::Identity();
+		double yaw = 0;
+		const bool ok = controllers_[i]->ImuOrientation( q, yaw );
+		std::fprintf( trace_, " | %d %.7f %.7f %.7f %.7f %.6f %x", ok, q.w, q.x, q.y, q.z, yaw,
+		              controllers_[i]->HardwareRevision() );
+	}
+	std::fputc( '\n', trace_ );
 }
 
 LedObservation OpticalTracker::Observe( int hand, int phase_owner )

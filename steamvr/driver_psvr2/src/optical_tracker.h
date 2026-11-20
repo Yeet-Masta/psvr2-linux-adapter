@@ -111,6 +111,7 @@ private:
 	bool log_blobs_ = false;
 	// Opt-in per-frame trace for bring-up (setting optical_trace): every
 	// blob and every LED-sync command, to ~/psvr2-ld-trace.txt, first minute.
+	void TraceInputs( const bool synced[2] );
 	void TraceFrame( const Header &h, int period );
 	void TraceCommand( int hand, const uint8_t *cmd, uint8_t len );
 	FILE *trace_ = nullptr;

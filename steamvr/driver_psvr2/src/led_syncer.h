@@ -56,6 +56,11 @@ public:
 	// Stay in PRESCAN (all LEDs lit, base re-synced every 1 s) instead of
 	// going on to BROAD. Own method, see OpticalTracker.
 	void HoldPrescan( bool on ) { hold_prescan_ = on; }
+	// BROAD code frame divider: 1 = one code frame per LD frame (Sony);
+	// 3 = one per three LD frames (hypothesis for firmware 0x0306, which
+	// lights the sync LED on every third LD frame in BROAD; DEV-NOTES).
+	// Both are always decoded for the log; this picks the one acted on.
+	void SetBroadDivider( int d ) { broad_div_ = d == 3 ? 3 : 1; }
 	static const char *Name( Phase p );
 
 private:
@@ -103,7 +108,7 @@ private:
 	uint8_t leds_[4] = { 0xff, 0xff, 0xff, 0xff };
 
 	// Per-camera frame history (newest last), RESEARCH.md §7.8.
-	static constexpr int kHist = 20;
+	static constexpr int kHist = 33;  // BG 20, BROAD 11 (33 with divider 3)
 	float w_[kLedCameras][kHist] = {};
 	uint16_t n_[kLedCameras][kHist] = {};
 	int hist_len_ = 0;
@@ -111,6 +116,15 @@ private:
 	// Lit (2) / dark (0) states of the newest L frames, oldest first.
 	// Returns false (no states) for the doc's statuses 4, 9 and 10.
 	bool States( int cam, int L, uint8_t *state, float *max_w ) const;
+	// The same over every div-th frame of the newest 11·div, starting at
+	// frame phase (0..div-1) of that span.
+	bool StatesEvery( int cam, int div, int phase, uint8_t *state ) const;
+	int DecodeBest( int div, int *phase_hits ) const;
+	int broad_div_ = 1;
+	// BROAD decode statistics for the 1 s log.
+	int dec_hits_[4] = {};  // [0] divider 1, [1..3] divider 3 phases
+	int dec_frames_ = 0;
+	uint64_t dec_log_at_ = 0;
 
 	// BROAD: last three accepted decodes, grid skips, accumulated slots.
 	int slot_hist_[3] = { -1, -1, -1 };

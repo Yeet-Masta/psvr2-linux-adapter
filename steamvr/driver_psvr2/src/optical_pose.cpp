@@ -644,7 +644,18 @@ void OpticalPose::Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Po
 	const double *v = kImuInModel[hand];
 	const vrmath::Vec3 imu_pos = vrmath::Add(
 		world_model.pos, vrmath::Rotate( world_model.rot, { v[0] * 1e-3, v[1] * 1e-3, v[2] * 1e-3 } ) );
-	if ( controllers_[hand]->OpticalFix( frame_us, imu_pos, world_imu ) )
+	// Noise-zone inputs for the controller filter (docs/sony-re/ukf.md 4):
+	// the IMU in the head frame, and the distance from the camera rig.
+	vrmath::Vec3 head_rel{ 0.0, -0.3, -0.4 };
+	vr::DriverPose_t head_at;
+	if ( hmd_->PoseAt( frame_us, head_at ) )
+	{
+		const vrmath::Vec3 hp{ head_at.vecPosition[0], head_at.vecPosition[1], head_at.vecPosition[2] };
+		head_rel = vrmath::Rotate( vrmath::Conj( head_at.qRotation ), vrmath::Add( imu_pos, vrmath::Scale( hp, -1.0 ) ) );
+	}
+	const double cam_dist =
+		std::sqrt( rig_pose.t[0] * rig_pose.t[0] + rig_pose.t[1] * rig_pose.t[1] + rig_pose.t[2] * rig_pose.t[2] ) * 1e-3;
+	if ( controllers_[hand]->OpticalFix( frame_us, imu_pos, world_imu, head_rel, cam_dist ) )
 	{
 		h.fixes++;
 		h.fix_us = frame_us;

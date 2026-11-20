@@ -69,6 +69,17 @@
 		"//optical2": "(LED sync only; no optical pose yet). Needs the dev kernel module.",
 		"optical_tracking": false,
 		"optical_log_blobs": false,
-		"optical_trace": false
+		"optical_trace": false,
+
+		"//ukf": "Fuse optical fixes with the controller IMU (docs/sony-re/ukf.md); false = raw optical position.",
+		"//ukf2": "hold_ms: hold the last fix position once fixes are this old (Sony 300). sigma floors in mm.",
+		"//broaddiv": "BROAD code frame divider: 1 = Sony (one code frame per LD frame), 3 = every third LD frame.",
+		"//broaddiv2": "Both are decoded and logged ('ledsync: BROAD decodes'); this picks the one acted on.",
+		"optical_broad_divider": 1,
+
+		"optical_ukf": true,
+		"optical_ukf_hold_ms": 300,
+		"optical_ukf_rot_sigma_mm": 1.0,
+		"optical_ukf_pos_sigma_mm": 0.0
 	}
 }

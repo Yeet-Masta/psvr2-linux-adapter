@@ -117,8 +117,14 @@ OpticalTracker::OpticalTracker( Psvr2ControllerDriver *const controllers[2] )
 	err = vr::VRSettingsError_None;
 	full_sync_ = vr::VRSettings()->GetBool( "driver_psvr2", "optical_sync_broad", &err ) &&
 	             err == vr::VRSettingsError_None;
-	DriverLog( "psvr2: optical: sync offset %d us, %s", int( g_offset_us ),
-	           full_sync_ ? "full sync (BROAD/BG/STABLE)" : "tracking in PRESCAN" );
+	// BROAD code frame divider (LedSyncer::SetBroadDivider): 1 Sony, 3 the
+	// every-third-frame hypothesis. Both are decoded and logged either way.
+	err = vr::VRSettingsError_None;
+	int broad_div = vr::VRSettings()->GetInt32( "driver_psvr2", "optical_broad_divider", &err );
+	if ( err != vr::VRSettingsError_None )
+		broad_div = 1;
+	DriverLog( "psvr2: optical: sync offset %d us, %s, BROAD divider %d", int( g_offset_us ),
+	           full_sync_ ? "full sync (BROAD/BG/STABLE)" : "tracking in PRESCAN", broad_div == 3 ? 3 : 1 );
 	pose_ = std::make_unique<OpticalPose>( controllers[0]->Hmd(), controllers );
 	for ( int i = 0; i < 2; i++ )
 	{
@@ -129,6 +135,7 @@ OpticalTracker::OpticalTracker( Psvr2ControllerDriver *const controllers[2] )
 			TraceStatus( trace_, i, controllers_[i] );
 		} );
 		syncers_[i]->HoldPrescan( !full_sync_ );
+		syncers_[i]->SetBroadDivider( broad_div );
 	}
 }
 

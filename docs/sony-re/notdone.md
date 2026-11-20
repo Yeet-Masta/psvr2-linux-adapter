@@ -473,7 +473,8 @@ See §1.8 (`FUN_1800db690`). Distances are in mm:
 
 ### 2.7 UKF
 
-Nothing new beyond `tracking.md` §5.5 and `ctrltracker.md`.
+Filter structure, measurement model and noise: [ukf.md](ukf.md)
+(2026-11-20). Before that, `tracking.md` §5.5 and `ctrltracker.md`.
 
 - The limits at UKF `+0x798..+0x7a0`, `+0x784` and `+0x864` come from
   config and were not read.

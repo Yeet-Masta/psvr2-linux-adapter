@@ -16,6 +16,7 @@
 #include <thread>
 #include <vector>
 
+#include "controller_ukf.h"
 #include "imu_fusion.h"
 #include "openvr_driver.h"
 #include "sense_hid.h"
@@ -59,7 +60,10 @@ public:
 	// An optical fix for the LED frame at host time frame_us: the IMU's
 	// position (m) and orientation in the world. Returns false when the
 	// innovation gate rejects it (docs/sony-re/opticalpose.md §4.1).
-	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu );
+	// head_rel: the IMU position in the head frame (m); cam_dist: distance
+	// from the camera rig (m). Both select the filter's measurement noise.
+	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu,
+	                 const vrmath::Vec3 &head_rel, double cam_dist );
 
 	// SteamVR haptic event for our haptic component.
 	void OnHaptic( const vr::VREvent_HapticVibration_t &h );
@@ -76,6 +80,7 @@ public:
 private:
 	void IoThread();
 	void HandleState( const SenseState &s );
+	void FeedUkf( const SenseState &s, double dt );
 	void FillOutput( SenseOutput &out );
 	vr::DriverPose_t BuildPose();
 	// Queue an alert buzz: alternating on/off durations in seconds.
@@ -162,11 +167,21 @@ private:
 		uint64_t us = 0, seq = 0;
 		vrmath::Vec3 pos, vel;
 		vr::HmdQuaternion_t rot = vrmath::Identity();
+		vrmath::Vec3 head_rel;
+		double cam_dist = 0.0;
 		int rejects = 0;
 	};
 	std::mutex optical_mutex_;
 	Optical optical_;
 	uint64_t optical_seq_used_ = 0;  // IoThread
+
+	// Optical + IMU filter (IoThread). Setting optical_ukf (default on);
+	// off falls back to the plain optical position above.
+	ControllerUkf ukf_;
+	bool ukf_enabled_ = true;
+	uint64_t ukf_hold_us_ = 300000;  // Sony: optical position held after 0.3 s
+	uint64_t ukf_seq_used_ = 0;
+	uint64_t imu_host_us_ = 0;       // IMU sample time on the host clock
 	std::mutex imu_mutex_;
 	vr::HmdQuaternion_t imu_q_ = vrmath::Identity();
 	bool imu_valid_ = false;

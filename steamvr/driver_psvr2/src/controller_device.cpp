@@ -350,6 +350,10 @@ void Psvr2ControllerDriver::LoadSettings()
 	vibration_strength_ = std::clamp( GetIntSetting( "vibration_strength", 1 ), 0, 3 );
 	SenseHid::SetSonyFraming( GetBoolSetting( "sony_bt_framing", true ) );
 	SenseHid::SetLedSync( GetBoolSetting( "optical_tracking", false ) );
+	ukf_enabled_ = GetBoolSetting( "optical_ukf", true );
+	ukf_hold_us_ = uint64_t( std::clamp( GetFloatSetting( "optical_ukf_hold_ms", 300.0f ), 0.0f, 5000.0f ) * 1000.0f );
+	ukf_.SetRotSigmaFloor( std::clamp( GetFloatSetting( "optical_ukf_rot_sigma_mm", 1.0f ), 0.01f, 100.0f ) * 1e-3 );
+	ukf_.SetPosSigmaFloor( std::clamp( GetFloatSetting( "optical_ukf_pos_sigma_mm", 0.0f ), 0.0f, 100.0f ) * 1e-3 );
 	default_trigger_ = DefaultTriggerEffect();
 	trigger_ = default_trigger_;
 	trigger_dirty_ = true;
@@ -543,6 +547,43 @@ void Psvr2ControllerDriver::FillOutput( SenseOutput &out )
 	}
 }
 
+void Psvr2ControllerDriver::FeedUkf( const SenseState &s, double dt )
+{
+	// IMU sample time on the host clock: the controller clock's steps,
+	// pulled slowly toward arrival time minus the Bluetooth latency (the
+	// same latency the pose prediction assumes). The optical frames are
+	// stamped on the host clock already.
+	const uint64_t now_us = uint64_t(
+		std::chrono::duration_cast<std::chrono::microseconds>( Clock::now().time_since_epoch() ).count() );
+	const double target = double( now_us ) - prediction_s_ * 1e6;
+	double est = double( imu_host_us_ ) + dt * 1e6;
+	if ( !imu_host_us_ || dt <= 0.0 || std::fabs( est - target ) > 50000.0 )
+		est = target;
+	else
+		est += ( target - est ) * 0.01;
+	imu_host_us_ = std::max<uint64_t>( imu_host_us_ + 1, uint64_t( est ) );
+	ukf_.SetGyroBiasHint( fusion_.Bias() );
+	ukf_.AddImu( imu_host_us_, s.gyro, s.accel );
+
+	Optical o;
+	{
+		std::lock_guard<std::mutex> lock( optical_mutex_ );
+		o = optical_;
+	}
+	if ( !o.have || o.seq == ukf_seq_used_ )
+		return;
+	ukf_seq_used_ = o.seq;
+	ControllerUkf::Fix f;
+	f.us = o.us;
+	f.pos = o.pos;
+	f.rot = o.rot;
+	f.head_rel = o.head_rel;
+	f.cam_dist = o.cam_dist;
+	const ControllerUkf::Result r = ukf_.AddFix( f );
+	if ( r == ControllerUkf::kInitialized )
+		DriverLog( "psvr2: %s controller: optical filter (re)started", left_ ? "left" : "right" );
+}
+
 void Psvr2ControllerDriver::HandleState( const SenseState &s )
 {
 	// --- orientation ---
@@ -554,6 +595,8 @@ void Psvr2ControllerDriver::HandleState( const SenseState &s )
 		imu_q_ = fusion_.Orientation();
 		imu_valid_ = fusion_.Initialized();
 	}
+	if ( ukf_enabled_ )
+		FeedUkf( s, dt );
 
 	// --- inputs ---
 	SetBool( system_click_, s.ps_click );
@@ -674,7 +717,16 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	const uint64_t now_us = uint64_t(
 		std::chrono::duration_cast<std::chrono::microseconds>( now.time_since_epoch() ).count() );
 	const bool optical_recent = o.have && now_us - o.us < 5000000;
-	if ( o.have && o.seq != optical_seq_used_ )
+	// With the filter running, orientation and position come from it; the
+	// heading offset follows it so the arm-model fallback stays continuous.
+	const bool ukf_active = ukf_enabled_ && ukf_.Initialized() && now_us < ukf_.LastFixUs() + 5000000;
+	if ( ukf_active )
+	{
+		yaw_offset_ = vrmath::Yaw( vrmath::Mul( ukf_.Orientation(), vrmath::Conj( fusion_.Orientation() ) ) );
+		yaw_anchored_ = true;
+		optical_seq_used_ = o.seq;
+	}
+	else if ( o.have && o.seq != optical_seq_used_ )
 	{
 		const bool first = optical_seq_used_ == 0 || !yaw_anchored_;
 		optical_seq_used_ = o.seq;
@@ -705,7 +757,8 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	}
 	yaw_pub_ = yaw_offset_;
 	const vr::HmdQuaternion_t yaw_fix = vrmath::AxisAngle( 0, 1, 0, yaw_offset_ );
-	const vr::HmdQuaternion_t grip = vrmath::Mul( yaw_fix, raw_grip );
+	const vr::HmdQuaternion_t grip =
+		ukf_active ? vrmath::Mul( vrmath::Mul( ukf_.Orientation(), kImuToGrip ), calibration_ ) : vrmath::Mul( yaw_fix, raw_grip );
 
 	// Arm model.
 	const vr::HmdQuaternion_t head_yaw_q = vrmath::AxisAngle( 0, 1, 0, head_yaw );
@@ -734,7 +787,24 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 
 	p.qRotation = grip;
 	vrmath::Vec3 out_pos = hand, out_vel = hand_velocity_;
-	if ( o.have )
+	double time_offset = -prediction_s_;
+	if ( ukf_active )
+	{
+		// Sony (opticalpose.md 5): the filter while fixes are fresh, then the
+		// last fix position held; the rotation stays filter-driven.
+		if ( now_us < ukf_.LastFixUs() + ukf_hold_us_ )
+		{
+			out_pos = ukf_.Position();
+			out_vel = ukf_.Velocity();
+			time_offset = -double( int64_t( now_us - ukf_.TimeUs() ) ) * 1e-6;
+		}
+		else
+		{
+			out_pos = ukf_.FixPosition();
+			out_vel = {};
+		}
+	}
+	else if ( o.have )
 	{
 		// Sony (opticalpose.md §5): extrapolate the newest optical position
 		// for up to 0.3 s, then hold it; the rotation stays IMU-driven.
@@ -760,7 +830,7 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	p.vecAngularVelocity[0] = smoothed_gyro_world_.x;
 	p.vecAngularVelocity[1] = smoothed_gyro_world_.y;
 	p.vecAngularVelocity[2] = smoothed_gyro_world_.z;
-	p.poseTimeOffset = -prediction_s_;
+	p.poseTimeOffset = time_offset;
 	p.poseIsValid = true;
 	p.result = vr::TrackingResult_Running_OK;
 	return p;
@@ -781,14 +851,19 @@ bool Psvr2ControllerDriver::ImuOrientation( vr::HmdQuaternion_t &q, double &yaw 
 }
 
 bool Psvr2ControllerDriver::OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos,
-                                        const vr::HmdQuaternion_t &world_from_imu )
+                                        const vr::HmdQuaternion_t &world_from_imu, const vrmath::Vec3 &head_rel,
+                                        double cam_dist )
 {
 	std::lock_guard<std::mutex> lock( optical_mutex_ );
 	Optical &o = optical_;
 	if ( o.have && frame_us <= o.us )
 		return false;
 	const double dt = o.have ? double( frame_us - o.us ) * 1e-6 : 1e9;
-	if ( dt < 0.3 )
+	o.head_rel = head_rel;
+	o.cam_dist = cam_dist;
+	if ( ukf_enabled_ )
+		o.vel = {};  // the filter gates and estimates velocity (HandleState)
+	else if ( dt < 0.3 )
 	{
 		// Innovation gate (Sony's defaults): 5 cm below 1 m/s, else 20 cm.
 		// After ten rejects in a row, start over from the measurement.

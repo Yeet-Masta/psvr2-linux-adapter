@@ -20,7 +20,8 @@ public:
 		return ok_;
 	}
 	int HardwareRevision() const { return rev_; }
-	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu );
+	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu,
+	                 const vrmath::Vec3 &head_rel, double cam_dist );
 	Psvr2HmdDriver *Hmd() const { return hmd_; }
 
 	// Replay side.

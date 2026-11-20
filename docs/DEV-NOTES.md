@@ -110,7 +110,7 @@ off. At 90 Hz the 90.0 default stays (0.1 % off
 
 | Item | Why |
 |------|-----|
-| Controller **optical pose**: Sony's UKF | Wired without a UKF (`optical_pose.cpp`, 2026-11-18, not yet run on hardware): the optical position is used as is (extrapolated 0.3 s, then held, as Sony), and each fix pulls the IMU heading. See "Optical controller pose" below. |
+| Controller **optical pose**: Sony's UKF | Done in simulation, not yet run on hardware (2026-11-20): `controller_ukf.cpp`, see "Controller filter" below. Setting `optical_ukf` false restores the plain optical position. |
 | Blob association in LED sync | Sony associates blobs by predicted pose. Without a pose, the tracker syncs **one controller at a time** and `BlinkFinder` picks, per camera, the blob whose on/off pattern repeats every 11 (BROAD) or 20 (BG) frames; steady room lights and random flicker are rejected (simulated: 70 lights, 3 flickering lamps, 0 wrong picks). The first hardware run had 50–80 room blobs per camera, which the old "≤ 4 blobs" rule could never decode (stuck in BROAD). Hardware, 2026-11-18 (dark room): PRESCAN → BROAD → BG reached. A dark sync LED often still shows a dim blob (weight ~4 vs ~13 lit), so lit/dark is judged by weight against the site's own range; in BG the BROAD pick is kept while seen. First STABLE on hardware 2026-11-18 (17.7 s in BG, held 44 s). Two own changes made it lock: the drift fit slope is sent as a dimensionless rate (BG: −slope·step, BROAD: slope·2.5·step; raw it changed the cycle by 0.14 ppm against an 11 ppm drift), and every BG fit needs 10 samples (Sony: 40 after the first; BG gives ~1.3 samples/s). Open: PRESCAN → BROAD took 3.5–44 s with the controller in view. |
 | Drift-fit units | Sent as a dimensionless rate, not Sony's raw slope; see the blob-association row. |
 | Controller preset | Sony reads it from libpad's info block (+0x10). Here libpad's sync mode (1 / 2) stands in, since it has the same timing values. |
@@ -160,6 +160,19 @@ From a 47 s LD trace (one controller, firmware 0x0306, preset 2):
   the 11-frame codes (RESEARCH.md §7.9). Cameras show no third-frame pattern
   in PRESCAN, so it is the controller. Open: what this firmware's BROAD
   emits.
+- **BROAD divider test (2026-11-20, not yet run).** Sony's side has no
+  frame divider: the decoder reads one code frame per LD packet whose
+  sequence changed (ledsync.md §2.8, §5.2; checked again in IDA, no
+  frame-counter skip in `0x18018aaf0`). So the PC cannot explain the
+  third-frame pattern; it is controller behaviour. Hypothesis: this
+  firmware holds each BROAD code frame for three LD frames. With
+  `optical_sync_broad` on, `LedSyncer` now decodes the code both per frame
+  and over every third frame (three phases) and logs both once a second
+  (`psvr2: ledsync: BROAD decodes in N frames: every frame a, every 3rd
+  b/c/d`). If one phase decodes steadily, set `optical_broad_divider` 3 to
+  act on it. Offline check: both dividers decode all 7 codes at all 33
+  phase shifts. If neither decodes, capture the LD trace at a few fixed
+  offsets (the PRESCAN sweep tool) to see what the pattern carries.
 - **So tracking runs in PRESCAN** (default; `optical_sync_broad` true for
   Sony's full sequence): all LEDs lit in a 2 ms window, libpad re-centres it
   every 1 s, both controllers at once, and the pose solve runs while LEDs are
@@ -200,6 +213,38 @@ STABLE (`optical_tracking` must be on).
 - Open: one controller syncs at a time, so the second is only tracked
   after the first reached STABLE; boot costs ~5 ms, one hypothesis per
   frame (up to ~10 s to learn the remap); no UKF.
+
+## Controller filter (steamvr/driver_psvr2/src/controller_ukf.cpp)
+
+Our own filter with Sony's behaviour (`docs/sony-re/ukf.md`), replacing the
+plain optical position and the heading pull when `optical_ukf` is on
+(default).
+
+- 15-dim error state; per IMU sample the nominal state is integrated; one
+  covariance step per fix over the interval since the last, with the mean
+  IMU sample and Sony's rate-dependent noise; sigma-point update (2n points,
+  α 1, κ 0) on position + 10 cm axis tips; Sony's P0, gate, noise zones,
+  divergence limits; fixes applied at their frame time, IMU replayed.
+- Own changes, each from the simulator (`tools/ukf_sim`):
+  - rotation noise floor 1 mm (Sony's is 0: with 0 the filter diverged,
+    66 mm rms);
+  - gate widened to 3σ of the predicted position, and a far fix after a
+    stale gap (> 0.3 s) restarts the filter at once (with Sony's fixed gate
+    every fix after a 1 s dropout was rejected);
+  - stationary damping only while fixes are stale (applied per fix it
+    halved the accuracy in smooth motion).
+- IMU samples are stamped on the host clock: controller-clock steps pulled
+  toward arrival minus `controller_prediction_ms`. The pose is reported at
+  the filter's time with `poseTimeOffset` set from it.
+- Output: filter pose while the last fix is < `optical_ukf_hold_ms` (300)
+  old, then that fix's position held, rotation from the filter (Sony).
+- Simulator (1 kHz IMU with bias, 60 Hz fixes with 1 mm / 0.5° noise,
+  25 ms latency, 5 % 10 cm outliers, 1 s dropout): 0.95 mm / 0.15° rms
+  against 29.5 mm for the newest fix held; biases learned to < 2 %; all
+  outliers gated.
+- Open: real measurement noise of our LED solver (the sigma floors are
+  settings), the IMU host-time mapping and the head-frame axes of Sony's
+  noise ellipsoid need a hardware run.
 
 ## Controller LED pose solver (userspace/lib/psvr2_led_solver.c)
 

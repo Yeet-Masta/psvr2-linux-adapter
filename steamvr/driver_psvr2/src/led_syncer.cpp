@@ -314,6 +314,60 @@ int LedSyncer::DecodeSlot( const uint8_t *state )
 	return -1;
 }
 
+bool LedSyncer::StatesEvery( int cam, int div, int phase, uint8_t *state ) const
+{
+	const int span = 11 * div;
+	if ( hist_len_ < span )
+		return false;
+	const float *w = w_[cam] + kHist - span;
+	const uint16_t *n = n_[cam] + kHist - span;
+	float hi = 0, lo = FLT_MAX;
+	for ( int f = 0; f < 11; f++ )
+	{
+		const int k = phase + f * div;
+		if ( std::fabs( w[k] ) <= FLT_EPSILON )
+			return false;
+		if ( n[k] > 0 )
+		{
+			hi = std::fmax( hi, w[k] );
+			lo = std::fmin( lo, w[k] );
+		}
+	}
+	if ( hi <= FLT_EPSILON || lo == FLT_MAX || hi - lo < 0.1f )
+		return false;
+	const float thr = ( hi + lo ) * 0.5f;
+	for ( int f = 0; f < 11; f++ )
+	{
+		const int k = phase + f * div;
+		state[f] = n[k] > 0 && w[k] > thr ? 2 : 0;
+	}
+	return true;
+}
+
+// Across cameras (and, with div 3, the three frame phases) the slot closest
+// to the previous accepted one; -1 if none decodes. phase_hits[p] counts the
+// cameras that decoded in phase p.
+int LedSyncer::DecodeBest( int div, int *phase_hits ) const
+{
+	int best = -1;
+	for ( int p = 0; p < div; p++ )
+		for ( int c = 0; c < kLedCameras; c++ )
+		{
+			uint8_t st[11];
+			if ( !( div == 1 ? States( c, 11, st, nullptr ) : StatesEvery( c, div, p, st ) ) )
+				continue;
+			const int s = DecodeSlot( st );
+			if ( s < 0 )
+				continue;
+			if ( phase_hits )
+				phase_hits[p]++;
+			if ( std::abs( s - prev_slot_ ) <= 32 &&
+			     ( best < 0 || std::abs( s - prev_slot_ ) < std::abs( best - prev_slot_ ) ) )
+				best = s;
+		}
+	return best;
+}
+
 void LedSyncer::Broad( uint64_t now_us, const Preset &ps, const LedObservation &obs )
 {
 	if ( std::memcmp( leds_, obs.sync_leds, 4 ) != 0 )
@@ -326,17 +380,25 @@ void LedSyncer::Broad( uint64_t now_us, const Preset &ps, const LedObservation &
 	}
 	SetGood( obs.visible, now_us );
 
-	// Across cameras, the slot closest to the previous accepted one.
-	int best = -1;
-	for ( int c = 0; c < kLedCameras; c++ )
+	// Across cameras, the slot closest to the previous accepted one. Both
+	// dividers are decoded for the log; broad_div_ selects the one used.
+	int h1[1] = {}, h3[3] = {};
+	const int best1 = DecodeBest( 1, h1 ), best3 = DecodeBest( 3, h3 );
+	const int best = broad_div_ == 3 ? best3 : best1;
+	dec_frames_++;
+	dec_hits_[0] += h1[0] > 0;
+	for ( int p = 0; p < 3; p++ )
+		dec_hits_[1 + p] += h3[p] > 0;
+	if ( now_us >= dec_log_at_ )
 	{
-		uint8_t st[11];
-		if ( !States( c, 11, st, nullptr ) )
-			continue;
-		const int s = DecodeSlot( st );
-		if ( s >= 0 && std::abs( s - prev_slot_ ) <= 32 &&
-		     ( best < 0 || std::abs( s - prev_slot_ ) < std::abs( best - prev_slot_ ) ) )
-			best = s;
+		if ( dec_log_at_ )
+			DriverLog( "psvr2: ledsync: BROAD decodes in %d frames: every frame %d, every 3rd %d/%d/%d (phase 0/1/2); "
+			           "divider %d, slot %d",
+			           dec_frames_, dec_hits_[0], dec_hits_[1], dec_hits_[2], dec_hits_[3], broad_div_, best );
+		dec_log_at_ = now_us + kSec;
+		dec_frames_ = 0;
+		for ( int &v : dec_hits_ )
+			v = 0;
 	}
 
 	// "3 consecutive" counts decodes that reached the test, not frames: the

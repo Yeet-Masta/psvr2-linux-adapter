@@ -157,3 +157,52 @@ vector by the sigma point's attitude (`0x180058720`). `0x180097110` and
 | `0x18007e8f0` | 74 | wrapper over `0x180079e10`, `0x180081bb0` and `0x1800821a0`; no caller |
 | `0x18007cde0` | 259 | a second copy of the sample feed (log "drop sample due to large gap"); no caller [sure for reachability] |
 | `0x18007dc60` | 418 | "correct(tilt)" step of an IMU-only tilt filter (logs "correct(tilt): num of sensor data is larger than internal buffer" and "(i) %p: BadState"); runs its own sigma-point update (`0x180097110` → `0x180097990`, `0x1800975f0` → `0x180097d90`) — **no caller in this build**, so the PC driver never runs a tilt-only correction [sure for reachability] |
+
+## 5. Helpers of the IMU path and the filter object
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x18007a6a0` | 52 | free the per-hand filter's buffers through the allocator; −1 if the "initialised" byte `+0x448` is clear [sure] |
+| `0x18007a860` | 82 | under the filter mutex (`+0x3a8`) copy two 128-byte blocks between the caller's buffer and the filter at `+0x48` (caller `0x180063f50`) [sure for the copy; direction not checked] |
+| `0x18007d930` | 28 | NaN check of a state entry (attitude doubles `+0x60..+0x78`, then the float fields up to `+0xb0`): true if any is NaN, the "BadState" test [sure] |
+| `0x18007db00` | 56 | bias limit check: if any gyro-bias (`+0xd0`) or accel-bias (`+0xc0`) component exceeds the config limits (`+0x148`, `+0x144`) the bias is reset; no caller [likely] |
+| `0x18007bf50` | 59 | per-axis test \|a − b\| > threshold for a float3; no caller [sure] |
+| `0x18007eb70` | 126 | add one IMU sample to running sums kept as fixed-point integers (scale 2²³), after rotating it by the current attitude (`0x180061fa0`); from `0x18007c080` [likely] |
+| `0x18007f950` | 25 | mean of those sums once the window is full (sum × 2⁻²³ / count, plus an offset) [sure] |
+| `0x18007f370` | 99 | the same for an accumulated 3 × 3 rotation sum, then a 3 × 3 product (`0x1800621a0`) [likely] |
+| `0x18007f180` | 39 | 3 × 3 rotation matrix from a quaternion (1 − 2(y² + z²) form), written to the slot chosen by the count at `+0x78` [likely] |
+| `0x18007ef30`, `0x18007f740` | 129, 115 | callers of the window means from `kalmanFilterStep` (`0x180065b70`) [sure for the calls; use not read] |
+| `0x180079a80` | 108 | attitude from the gravity direction: compares the accelerometer vector with 9.80665 m/s² and builds the tilt quaternion (used by the replay `0x18007add0`) [likely] |
+| `0x180079370` | 70 | tilt rotation that turns the measured gravity vector onto +y (cross product with (0, 1, 0)); no caller [likely] |
+| `0x180079880` | 96 | copy a sample's pose into a ring entry and form differences to the previous entry; no caller [guess] |
+| `0x1800795a0`, `0x180081750`, `0x180082740`, `0x180095f90` | 55, 54, 54, 54 | exp map rotation vector → quaternion, with the Taylor form below √ε (ε = 2⁻²³) computed once into a static; double / float variants [sure] |
+| `0x1800818d0`, `0x180096110` | 74, 81 | integrate an attitude by ω·dt with that exp map (sin/cos of the half angle, series `0.5 − θ²/48` below the threshold); float / double [sure] |
+| `0x1800828c0` | 40 | q ⊗ exp(ω·dt) then renormalise (`0x180082740`, `0x180061fa0`) [sure] |
+| `0x180082980`, `0x180082c90` | 58, 13 | closed-form integral of a cubic time polynomial (coefficients with the 12, 6, 4 terms of a Hermite form) and its difference between two times; used by the IMU interval reduction `0x180082e90` [likely] |
+| `0x180082ce0` | 67 | builds the cubic's coefficients from a sample pair, then integrates it (`0x180082740`, `0x180082980`) [likely] |
+| `0x1800812c0` | 22 | linear interpolation of a float3 [sure] |
+| `0x180081600` | 39 | p + dt·v for a float3, optionally also the second vector [sure] |
+| `0x180081280` | 16 | divide a float3 by a scalar [sure] |
+| `0x1800791f0` | 34 | per-component square root of a float3 (σ from variances) [sure] |
+| `0x180099320`, `0x1800993c0` | 27, 17 | normalise a float3; scalar square root [sure] |
+| `0x18009abf0` | 30 | determinant of a 3 × 3 matrix (triple product) [sure] |
+| `0x18009a930` | 33 | monotonic time in ns from `QueryPerformanceCounter` (first call caches a start value) [sure] |
+| `0x1800790d0` | 32 | `memcpy_s` [sure] |
+| `0x1800792e0`, `0x1800804b0`, `0x180080530`, `0x1800805e0`, `0x180080660`, `0x180080700`, `0x1800807b0`, `0x180080850`, `0x180080900` | 14–16 | allocate one ring or array of the filter object through the allocator (fixed sizes 128 × 60 B, 128 × 456 B (the 0x1c8 state entries), 32 × 64 B, or n × 1, 8, 16, 24, 96 B) [sure] |
+| `0x180092750` | 60 | free the noise blocks of §1 [sure] |
+| `0x18007faf0`, `0x18007fc90`, `0x18007fe60`, `0x18007ff50`, `0x1800801c0`, `0x180080310` | 16–24 | in-place XOR decoders for obfuscated log strings (shared key table); no caller [sure] |
+| `0x180074db0` | 65 | copy a 6 × 6 packed block into a packed 21 × 21 matrix at offset 15 (the IMU noise into the augmented covariance of the n = 21 transform); no caller [sure] |
+| `0x180098eb0` | 26 | 3-wide cross-covariance accumulate (tilt filter); no caller [sure] |
+
+### Still / calibration path from `0x18007c080` [guess unless tagged]
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x180099860` | 25 | still test wrapper: threshold 6·√\|v\|, then `0x180099400` with 0.1 [sure for the call] |
+| `0x180095760`, `0x180095b00` | 156, 44 | sample acceptance tests with 100.0 and 1.5 limits; the wrapper adds a √ / 4.0 check |
+| `0x180095c30` | 106 | windowed consistency check of the collected samples |
+| `0x180095e50` | 38 | double-precision normalise and scale of a float3 |
+| `0x1800963c0`, `0x180096570`, `0x180096740`, `0x180096d90` | 44–162 | rotation conversions for the tilt filter: matrix → quaternion (Shepperd form with 0.25 / 4.0 / 16.0 terms) [likely], composed with the gravity attitude `0x180079a80` and the exp map `0x180096110` |
+| `0x18009aa00`, `0x18009aca0` | 70, 49 | normal-equation accumulators for a 4-parameter fit |
+| `0x18009b420`, `0x18009b7c0`, `0x18009bf60`, `0x18009c400` | 163–302 | 4-parameter least-squares fits solved with the 4 × 4 inverse `0x180059000` (centre and radius of a sphere through accelerometer samples, i.e. an accelerometer offset calibration); only `0x18009b7c0` is reached (from `0x18009a1a0`) |
+| `0x18009aea0`, `0x18009b080` | 78, 119 | per-axis acceptance flags for that fit (fabs tests); no caller |

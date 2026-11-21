@@ -110,6 +110,44 @@ Marked `ref` in `triage.tsv`.
   `0x1800ed6f0`, `0x1800ed830`, thunks `0x1800a4f40`, `0x1800cca50`,
   `0x1800ebfc0`.
 
+## Cross boot (worker job type 2) [sure unless tagged]
+
+Per camera manager, after that camera's own boot/track (`0x1800a5ac0`):
+controllers in distance order (`0x1800a5e30`), and for each:
+
+1. `0x1800dde10`: try to start this camera's controller from another
+   camera's pose (the snapshots in `out +0xa430`, see `0x180048690`
+   step 7). Skipped when the controller already has a pose that passes the
+   pose check `0x1800e1d50` with score `+0x1f94` > 0.5
+   (`0x1803517ac`), and in "near" mode when more than 2 cameras already
+   have it. Candidate: the other camera with the best snapshot score
+   (`+0x4a4`), taken when it beats this camera's score by 0.1 or this
+   camera has ≤ 3 inliers; its pose is mapped into this camera.
+   - Depth > 150 mm: refine from the transferred pose (`0x1800dea50`:
+     association `0x1800dd5d0`, gated match `0x1800df5b0`, refine
+     `0x1800d9de0`, accept test `0x1800e2330`). On success the result
+     becomes the pose state (`0x1800a0bf0`), its distance class is set
+     (`0x1800db5f0`) and `0x1800e4df0` updates the history.
+   - Depth ≤ 150 mm: close-range solve with few LEDs (`0x1800dee40`:
+     `0x1800d89f0`, `0x1800ddb90`, few-LED solve `0x1800e0d20`,
+     `0x1800e27a0`, `0x1800e2330`).
+2. If the controller now has a pose: `0x1800a8770` post-processing.
+   Otherwise, with setting `0x1803517b6` = 1 (this build) and a predicted
+   pose (`out +0x9200`), the predicted pose is mapped into this camera
+   (extrinsic `frame +0x10a40 + 0x40·cam`, camera index at manager
+   `+0x182c8`) and handed to `0x1800d9800` as a tracking seed.
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x1800a5ac0` | 120 | cross-boot entry (above) |
+| `0x1800dde10` | 619 | cross boot of one controller (above) |
+| `0x1800dea50` | 227 | refine from a transferred pose |
+| `0x1800dee40` | 396 | close-range transferred-pose solve |
+| `0x1800e53f0` | 465 | at the start of each boot (`0x1800d8b60`): projects the model centre (`+0x19a0/+0x19b0` box) under the previous pose and the IMU prior (`+0x33c0`, `+0x3380`) into the image (`0x180046240`), result at `+0x1870` [guess: an image-space hint for the boot] |
+| `0x1800efd70` | 434 | per LED: project into the camera (z ≥ 0, camera model `0x180045650`), find the nearest blob, mean distance; start value 9999 [likely] |
+| `0x1800d1c80` | 254 | RnD::Vector of 8-byte items: resize with fill [sure] |
+| `0x1800e3e80` | 477 | copy-construct a blob store (11 RnD::Vectors, as `0x1800a0480`) [sure] |
+
 ## Multi-camera frame step (`0x180048690`, tracking frontend) [sure unless tagged]
 
 Called by the per-frame core `0x18004b0a0`. Order of work:

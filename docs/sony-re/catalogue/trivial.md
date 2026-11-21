@@ -32,10 +32,18 @@ caller does with the value is in the caller's own entry.
 | `0x18015e340` | core | const_ret | wrapper around `SetEvent` | none (vtable/callback) |
 | `0x18015e480` | core | const_ret | wrapper around `ReleaseMutex` | none (vtable/callback) |
 
-## ctrl-boot (126)
+## ctrl-boot (134)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
+| `0x18009db00` | fluff | const_ret | returns a constant | `0x18009db10`, `0x18009db70` +1 |
+| `0x18009db10` | core | setter | wrapper around `_local_stdio_scanf_options` | none (vtable/callback) |
+| `0x18009e100` | core | thunk | forwards to `0x18009e170` | none (vtable/callback) |
+| `0x18009e120` | core | thunk | forwards to `0x18009e2a0` | none (vtable/callback) |
+| `0x18009e430` | core | thunk | forwards to `0x18009e2a0` | none (vtable/callback) |
+| `0x18009f500` | core | thunk | forwards to `0x18009f530` with extra constant arguments | none (vtable/callback) |
+| `0x18009f770` | ref | dtor | destructor (frees itself when the flag argument is set) | none (vtable/callback) |
+| `0x18009fd80` | core | zero_init | constructor/reset: sets about 44 fields to zero or defaults | `0x1800474f0`, `0x18004a9d0` +14 |
 | `0x1800a1130` | core | eh_ctor | constructs an array of 6 × 0x40-byte elements (no-op element function) | none (vtable/callback) |
 | `0x1800a1170` | core | eh_ctor | constructs an array of 6 × 0x40-byte elements (no-op element function) | none (vtable/callback) |
 | `0x1800a1670` | core | zero_init | constructor/reset: sets about 7 fields to zero or defaults | none (vtable/callback) |
@@ -163,7 +171,7 @@ caller does with the value is in the caller's own entry.
 | `0x180109d40` | core | const_ret | returns the constant 0 | none (vtable/callback) |
 | `0x180109d60` | core | dtor | destructor of `RnD::Robustifier` (frees itself when the flag argument is set) | none (vtable/callback) |
 
-## ctrl-tracker (68)
+## ctrl-tracker (73)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -235,6 +243,11 @@ caller does with the value is in the caller's own entry.
 | `0x18006e540` | core | thunk | forwards to `0x18006dbd0` with extra constant arguments | `0x180072a00` |
 | `0x18006e560` | core | thunk | forwards to `0x18006dbd0` with extra constant arguments | `0x180073110` |
 | `0x18006e580` | core | thunk | forwards to `0x18006dbd0` with extra constant arguments | `0x180073110` |
+| `0x180070d10` | core | thunk | forwards to `0x180070950` with extra constant arguments | `0x180073c10` |
+| `0x180070d30` | core | thunk | forwards to `0x180070950` with extra constant arguments | `0x180074540` |
+| `0x18007fa20` | core | xordec | decodes an obfuscated log string (XOR with fixed 64-bit keys) | none (vtable/callback) |
+| `0x1800800f0` | core | xordec | decodes an obfuscated log string (XOR with fixed 64-bit keys) | none (vtable/callback) |
+| `0x180097100` | core | thunk | forwards to `0x180096d90` with extra constant arguments | `0x180097990` |
 
 ## debug:trace (69)
 
@@ -581,24 +594,6 @@ caller does with the value is in the caller's own entry.
 | `0x180150090` | fluff | thunk | forwards to `0x180150240` | none (vtable/callback) |
 | `0x1801500b0` | fluff | thunk | forwards to `0x180150390` | none (vtable/callback) |
 | `0x1801500d0` | fluff | thunk | forwards to `0x1801500f0` | none (vtable/callback) |
-
-## lib:linalg (13)
-
-| Function | Verdict | Shape | Role | Callers |
-|----------|---------|-------|------|---------|
-| `0x180070d10` | fluff | thunk | forwards to `0x180070950` with extra constant arguments | `0x180073c10` |
-| `0x180070d30` | fluff | thunk | forwards to `0x180070950` with extra constant arguments | `0x180074540` |
-| `0x18007fa20` | fluff | xordec | decodes an obfuscated log string (XOR with fixed 64-bit keys) | none (vtable/callback) |
-| `0x1800800f0` | fluff | xordec | decodes an obfuscated log string (XOR with fixed 64-bit keys) | none (vtable/callback) |
-| `0x180097100` | fluff | thunk | forwards to `0x180096d90` with extra constant arguments | `0x180097990` |
-| `0x18009db00` | fluff | const_ret | returns a constant | `0x18009db10`, `0x18009db70` +1 |
-| `0x18009db10` | fluff | setter | wrapper around `_local_stdio_scanf_options` | none (vtable/callback) |
-| `0x18009e100` | fluff | thunk | forwards to `0x18009e170` | none (vtable/callback) |
-| `0x18009e120` | fluff | thunk | forwards to `0x18009e2a0` | none (vtable/callback) |
-| `0x18009e430` | fluff | thunk | forwards to `0x18009e2a0` | none (vtable/callback) |
-| `0x18009f500` | fluff | thunk | forwards to `0x18009f530` with extra constant arguments | none (vtable/callback) |
-| `0x18009f770` | ref | dtor | destructor (frees itself when the flag argument is set) | none (vtable/callback) |
-| `0x18009fd80` | fluff | zero_init | constructor/reset: sets about 44 fields to zero or defaults | `0x1800474f0`, `0x18004a9d0` +14 |
 
 ## lib:misc (25)
 

@@ -11,13 +11,10 @@ families are Sony fluff (VrTrace dumpers, companion-app dialogs)
 named by their log text. None of this code needs porting: the Linux
 driver uses the system's C++ library, jsoncpp and LAPACK.
 
-`lib:linalg` (`0x180070950`–`0x18009ffe0`) is an f2c translation of
-CLAPACK/BLAS in single precision: it passes the Fortran option strings
-('No transpose', 'Lower', 'Non-unit', 'Right') and calls the error
-handler with routine names such as SGETRF and SGETRI. The tracker
-uses it for small matrix factorisations and inverses [likely].
+The f2c CLAPACK block (`lib:linalg`) has its own hand-written page,
+`catalogue/lapack.md`.
 
-385 functions: flirt 155, string 122, vtable 108.
+370 functions: flirt 154, string 108, vtable 108.
 
 ## app:dialog (23)
 
@@ -380,26 +377,6 @@ uses it for small matrix factorisations and inverses [likely].
 | `0x1801534e0` | fluff | string | uses '%%.%dg', '-1e+9999' | jsoncpp |
 | `0x180153d70` | fluff | string | uses '%%.%dg', '-1e+9999' | jsoncpp |
 | `0x180154760` | fluff | flirt | `fwprintf` | MSVC C runtime |
-
-## lib:linalg (15)
-
-| Function | Verdict | Evidence | Identity / role | Library |
-|----------|---------|----------|-----------------|---------|
-| `0x180070950` | fluff | flirt | `FH4::DecompFuncInfo(uchar *,FH4::FuncInfo4 &,unsigned __int64,int,bool)` | MSVC C runtime |
-| `0x180074f10` | fluff | string | uses 'Lower' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x180076090` | fluff | string | uses 'Lower' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x180076b00` | fluff | string | uses 'Lower' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x1800773a0` | fluff | string | uses 'Lower' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x180079e10` | fluff | string | uses 'LIT::searchOffsetByTimestamp' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x1800865a0` | fluff | string | uses 'Transpose' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x180087b30` | fluff | string | uses 'SGETRF', 'No transpose' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x18008c920` | fluff | string | uses 'SGETRI', 'No transpose' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x18008cfa0` | fluff | string | uses 'Upper', 'Non-unit' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x18008d910` | fluff | string | uses 'Lower' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x18008daa0` | fluff | string | uses 'No transpose', 'Non-unit' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x18008dd70` | fluff | string | uses 'Non-unit', 'No transpose' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x18008f530` | fluff | string | uses 'Lower' | CLAPACK / BLAS (f2c translation, single precision) |
-| `0x1800985e0` | fluff | string | uses 'Lower' | CLAPACK / BLAS (f2c translation, single precision) |
 
 ## lib:misc (4)
 

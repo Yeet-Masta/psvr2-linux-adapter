@@ -7,9 +7,9 @@ Every function in [`scripts/sony-re/inventory.tsv`](../../scripts/sony-re/invent
 
 | Verdict | Meaning | Functions | Decompiled lines |
 |---------|---------|----------:|-----------------:|
-| **core** | Behaviour the Linux driver needs: already ported, or still to port. | 2207 | ~182 k |
+| **core** | Behaviour the Linux driver needs: already ported, or still to port. | 2435 | ~206 k |
 | **ref** | Worth reading to understand the device or Sony's design, or an optional feature (relocaliser). Nothing to port now. | 1025 | ~96 k |
-| **fluff** | Library code, Windows glue, Sony's companion-app UI, VrTrace debug capture, initialisers. Skip. | 1943 | ~105 k |
+| **fluff** | Library code, Windows glue, Sony's companion-app UI, VrTrace debug capture, initialisers. Skip. | 1715 | ~80 k |
 
 Columns of `triage.tsv`: `va`, `lines` (Ghidra line count from the
 inventory), `subsystem` (inventory label), `verdict`, `area` (what part of
@@ -63,16 +63,16 @@ what is still missing.
 
 | Area | Verdict | Functions | Lines | Done in `userspace/lib/sie` | What it is | Linux driver today |
 |------|---------|----------:|------:|----:|-----------|-------------------|
-| ctrlboot | core | 772 | 71 k | 42 | Controller boot: multi-camera pose search, RANSAC/P3P, LM pose solve, robust losses, background model, connected components | Ported in large parts (`optical_pose.cpp`, `sie/ctrlboot`): RANSAC boot, P3P, sampler, MSAC, few-LED mode |
-| tracking | core | 334 | 33 k | 0 | IR tracker thread stages, UKF manager, TrackerManager, INS feed, occlusion queries | UKF in simulation (`controller_ukf.cpp`); IR-thread stages in section 3.2 not described |
-| sense | core | 194 | 17 k | 0 | Controller manager over libpad: open/close, per-frame poll, input, vibration mode | `sense_hid.cpp`, `controller_device.cpp` |
+| ctrlboot | core | 800 | 74 k | 42 | Controller boot: multi-camera pose search, RANSAC/P3P, LM pose solve, robust losses, background model, connected components | Ported in large parts (`optical_pose.cpp`, `sie/ctrlboot`): RANSAC boot, P3P, sampler, MSAC, few-LED mode |
+| tracking | core | 322 | 32 k | 0 | IR tracker thread stages, UKF manager, TrackerManager, INS feed, occlusion queries | UKF in simulation (`controller_ukf.cpp`); IR-thread stages in section 3.2 not described |
+| sense | core | 175 | 15 k | 0 | Controller manager over libpad: open/close, per-frame poll, input, vibration mode | `sense_hid.cpp`, `controller_device.cpp` |
 | headset-usb | core | 205 | 9 k | 0 | `CaesarManager` and the per-interface `CaesarUsbThread*` readers: enumeration, alt settings, control reports, init order, restart | Kernel module: init sequence, `0xde` clock map, firmware gate, see-through, quit/restart, per-interface recovery |
 | libpad | core | 142 | 14 k | 73 | HID transport, `HID_SYNC`, calibration, output reports, clock fit | `sense_hid.cpp`, `sie/libpad` |
 | steamvr | core | 200 | 14 k | 38 | `ServerDriver`, `HmdDevice`, `SenseDevice`, display, lens, hidden area, skeleton, properties | `driver_psvr2` (see `steamvr.md` "Project driver vs Sony") |
 | irtracker | core | 104 | 7 k | 41 | Headset INS helpers (quaternion, filters) | `psvr2_ins.c` (strapdown + mode-1 blender) |
 | room | core | 105 | 6 k | 14 | Map-state singleton, universe/chaperone file, default play area | Own chaperone file in `hmd_device_driver.cpp` (`provide_chaperone`) |
 | io | core | 30 | 5 k | 0 | Low-level HID/USB I/O wrappers (libpad device threads, overlapped reads) | Replaced by hidraw / usbfs |
-| ctrltracker | core | 117 | 6 k | 36 | UKF kernels, process noise, quaternion maths | `sie/ctrltracker`, `controller_ukf.cpp` |
+| ctrltracker | core | 347 | 31 k | 36 | UKF kernels, process noise, quaternion maths; the UKF predict / correct / replay code and its double-precision matrix kernels at `0x180070950`–`0x18009cfff` (first mislabelled as a library, see `catalogue/lapack.md`) | `sie/ctrltracker`, `controller_ukf.cpp` |
 | ledsync | core | 4 | 0.1 k | 0 | Few helpers; the LedSyncer itself is under tracking/steamvr | `led_syncer.cpp` |
 | reloc | ref | 874 | 84 k | 0 | Relocaliser: keyframes, pose graph, map DB, RP frame unpack | Not done (optional, `DEV-NOTES.md`); RP data exposed on `/dev/psvr2-rp` |
 | config | ref | 35 | 2 k | 0 | `ConfigManager`: `config.ini`, change notifications | Settings in `steamvr.vrsettings` instead |
@@ -80,7 +80,7 @@ what is still missing.
 | status | ref | 5 | 0.7 k | 0 | Status-info dispatcher (mode, proximity, thermal warning) to UI prompts | Field meanings only |
 | firmware | ref | 6 | 0.7 k | 0 | `HMD2_FIRMWARE.CUP` version check beside the app | Not needed |
 | trace-format | ref | 9 | 0.8 k | 9 | VrTrace parsers that document wire formats (image header V0200, `ST` frame TOC) | Formats in `trace.md` §4 |
-| lib | fluff | 1283 | 66 k | – | CRT, STL, jsoncpp, dense linear algebra, Eigen, OpenCV-derived SVD/Rodrigues, thunks, CRT startup | Use libc / Eigen / OpenCV |
+| lib | fluff | 1055 | 41 k | – | CRT, STL, jsoncpp, dense linear algebra, Eigen, OpenCV-derived SVD/Rodrigues, thunks, CRT startup | Use libc / Eigen / OpenCV |
 | debug | fluff | 363 | 20 k | 316 | VrTrace capture tool, IR recording writer, debug status text | – |
 | trace | fluff | 105 | 9 k | – | Remaining VrTrace helpers | – |
 | app | fluff | 74 | 6 k | – | `VrDialogManager` (dialogs, desktop/see-through guides, safety notice, locale), companion-app launch and Authenticode checks | – |
@@ -134,8 +134,8 @@ tracker most likely still approximates.
 
 ## 4. What is fluff, and why
 
-- **Libraries (1346).** MSVC CRT/STL, jsoncpp, the BLAS/LAPACK-style
-  linear algebra (`0x180070000–0x18009ffff`), Eigen integrators,
+- **Libraries (1055 in area `lib`).** MSVC CRT/STL, jsoncpp, an f2c CLAPACK
+  (`0x180083700–0x18008d3ff`, `catalogue/lapack.md`), Eigen integrators,
   OpenCV-derived SVD / Jacobi / Rodrigues / fisheye projection, import
   thunks, CRT startup and exception funclets. Linux uses its own libraries.
   The camera model those projection helpers implement is already written

@@ -20,7 +20,7 @@ DST = os.path.join(ADAPTER, "docs", "sony-re", "catalogue", "library.md")
 GEN = ("trivial.md", "library.md")
 
 FAMILY = {
-    "lib:linalg": "CLAPACK / BLAS (f2c translation, single precision)",
+    "lib:linalg": "f2c CLAPACK (single precision)",
     "lib:json+config": "jsoncpp",
     "lib:crt": "MSVC C runtime",
     "lib:misc": "MSVC C++ standard library and `RnD` allocator",
@@ -112,11 +112,8 @@ o = ["# Function catalogue: library and runtime code", "",
      "families are Sony fluff (VrTrace dumpers, companion-app dialogs)",
      "named by their log text. None of this code needs porting: the Linux",
      "driver uses the system's C++ library, jsoncpp and LAPACK.", "",
-     "`lib:linalg` (`0x180070950`–`0x18009ffe0`) is an f2c translation of",
-     "CLAPACK/BLAS in single precision: it passes the Fortran option strings",
-     "('No transpose', 'Lower', 'Non-unit', 'Right') and calls the error",
-     "handler with routine names such as SGETRF and SGETRI. The tracker",
-     "uses it for small matrix factorisations and inverses [likely].", "",
+     "The f2c CLAPACK block (`lib:linalg`) has its own hand-written page,",
+     "`catalogue/lapack.md`.", "",
      f"{n} functions: " + ", ".join(f"{k} {c}" for k, c in cnt.most_common()) + ".", ""]
 for sub in sorted(rows):
     o += [f"## {sub} ({len(rows[sub])})", "",

@@ -9,6 +9,12 @@ Callers/callees named in a doc get '*'. Library/CRT callees are dropped.
 """
 import argparse, glob, json, os, re, sys
 
+def _txt(path, t):
+    """Doc text to scan for VAs; generated tables count their first column only."""
+    if path.replace("\\", "/").endswith("catalogue/trivial.md"):
+        return chr(10).join(l.split("|")[1] for l in t.splitlines() if l.startswith("| `0x"))
+    return t
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "out")
 ADAPTER = r"C:\Users\Yeet Masta\Claude\psvr2-linux-adapter"
@@ -37,7 +43,7 @@ rx = re.compile(r"(?:0x|FUN_|sub_)(18[0-9a-fA-F]{7})\b")
 for d in glob.glob(os.path.join(ADAPTER, "docs", "**", "*.md"), recursive=True):
     base = os.path.basename(d)[:-3]
     with open(d, encoding="utf-8", errors="replace") as f:
-        for m in rx.finditer(f.read()):
+        for m in rx.finditer(_txt(d, f.read())):
             named.setdefault(int(m.group(1), 16), base)
 
 def lib(v):

@@ -6,6 +6,12 @@ how many triaged functions no doc names yet.
 """
 import argparse, glob, os, re, collections
 
+def _txt(path, t):
+    """Doc text to scan for VAs; generated tables count their first column only."""
+    if path.replace("\\", "/").endswith("catalogue/trivial.md"):
+        return chr(10).join(l.split("|")[1] for l in t.splitlines() if l.startswith("| `0x"))
+    return t
+
 ADAPTER = r"C:\Users\Yeet Masta\Claude\psvr2-linux-adapter"
 TRIAGE = os.path.join(os.path.dirname(__file__), "..", "out", "triage.tsv")
 
@@ -22,7 +28,7 @@ docs += glob.glob(os.path.join(ADAPTER, "**", "RESEARCH*.md"), recursive=True)
 rx = re.compile(r"(?:0x|FUN_|sub_)(18[0-9a-fA-F]{7})\b")
 for d in set(docs):
     with open(d, encoding="utf-8", errors="replace") as f:
-        for m in rx.finditer(f.read()):
+        for m in rx.finditer(_txt(d, f.read())):
             named.add(int(m.group(1), 16))
 
 rows = []

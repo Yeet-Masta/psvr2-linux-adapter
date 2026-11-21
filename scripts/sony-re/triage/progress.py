@@ -14,6 +14,12 @@ Writes:
 """
 import collections, glob, os, re, sys
 
+def _txt(path, t):
+    """Doc text to scan for VAs; generated tables count their first column only."""
+    if path.replace("\\", "/").endswith("catalogue/trivial.md"):
+        return chr(10).join(l.split("|")[1] for l in t.splitlines() if l.startswith("| `0x"))
+    return t
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 TRIAGE = os.path.join(ROOT, "scripts", "sony-re", "triage.tsv")
 SVG = os.path.join(ROOT, "docs", "sony-re", "progress.svg")
@@ -27,7 +33,7 @@ def documented_vas():
     named = set()
     for d in glob.glob(os.path.join(ROOT, "docs", "**", "*.md"), recursive=True):
         with open(d, encoding="utf-8", errors="replace") as f:
-            named.update(int(m.group(1), 16) for m in rx.finditer(f.read()))
+            named.update(int(m.group(1), 16) for m in rx.finditer(_txt(d, f.read())))
     return named
 
 

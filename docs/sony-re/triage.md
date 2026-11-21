@@ -153,7 +153,7 @@ tracker most likely still approximates.
 - **Debug output.** IR recording file writer (`0x1801adf50–0x1801ae260`),
   the debug status text (`0x180185ef0`).
 
-## 5. Inventory label corrections
+## 5. Inventory label corrections (applied to `inventory.tsv` 2026-11-21)
 
 | Range | Inventory says | Actually |
 |-------|----------------|----------|

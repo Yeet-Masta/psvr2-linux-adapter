@@ -40,6 +40,9 @@ struct psvr2 {
 	char	cam_path[300];		/* "/dev/videoN", "" if none */
 	int	controls_fd;
 	char	sysfs_dir[300];		/* a bound interface dir, "" if none */
+	int	imu_fd;			/* /dev/iio:deviceN buffer, -1 if closed */
+	unsigned char imu_buf[24 * 64];
+	unsigned int imu_have;		/* bytes of a partial scan in imu_buf */
 };
 
 /* ---- small sysfs helpers ------------------------------------------------ */
@@ -78,6 +81,14 @@ static float f_from_le(uint32_t le)
 
 	memcpy(&f, &host, sizeof(f));
 	return f;
+}
+
+static int read_file_str_dir(const char *dir, const char *attr, char *buf, size_t len)
+{
+	char path[400];
+
+	snprintf(path, sizeof(path), "%s/%s", dir, attr);
+	return read_file_str(path, buf, len);
 }
 
 /* ---- discovery ---------------------------------------------------------- */
@@ -209,6 +220,7 @@ psvr2_t *psvr2_open(void)
 	p->gaze_fd = open(GAZE_DEV, O_RDONLY | O_NONBLOCK);
 	p->ctrl_fd = open(CTRL_DEV, O_RDWR | O_CLOEXEC);
 	p->ld_fd = open(LD_DEV, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	p->imu_fd = -1;
 	find_imu(p);
 	find_camera(p);
 	find_sysfs(p);
@@ -230,6 +242,7 @@ void psvr2_close(psvr2_t *p)
 		close(p->ctrl_fd);
 	if (p->ld_fd >= 0)
 		close(p->ld_fd);
+	psvr2_imu_stream_close(p);
 	free(p);
 }
 
@@ -371,6 +384,126 @@ int psvr2_read_imu(psvr2_t *p, struct psvr2_imu *out)
 		out->gyro_rad_s[i] = strtol(val, NULL, 10) * p->gyro_scale;
 	}
 	return 0;
+}
+
+/* ---- buffered IMU stream (IIO kfifo) ----------------------------------- */
+
+/*
+ * Scan layout with every channel enabled: accel xyz, gyro xyz (s16 each),
+ * then the s64 timestamp aligned to 8: 24 bytes (kernel/psvr2_imu.c).
+ */
+#define IMU_SCAN 24
+
+static int write_path_str(const char *dir, const char *attr, const char *val)
+{
+	char path[400];
+	int fd, n = (int)strlen(val), ret;
+
+	snprintf(path, sizeof(path), "%s/%s", dir, attr);
+	fd = open(path, O_WRONLY);
+	if (fd < 0)
+		return -1;
+	ret = write(fd, val, n) == n ? 0 : -1;
+	close(fd);
+	return ret;
+}
+
+int psvr2_imu_stream_open(psvr2_t *p)
+{
+	static const char *en[] = {
+		"scan_elements/in_accel_x_en", "scan_elements/in_accel_y_en",
+		"scan_elements/in_accel_z_en", "scan_elements/in_anglvel_x_en",
+		"scan_elements/in_anglvel_y_en", "scan_elements/in_anglvel_z_en",
+		"scan_elements/in_timestamp_en" };
+	char val[16], node[64];
+	const char *base;
+
+	if (!p || !p->imu_dir[0])
+		return -1;
+	if (p->imu_fd >= 0)
+		return p->imu_fd;
+	base = strrchr(p->imu_dir, '/');
+	if (!base)
+		return -1;
+	/*
+	 * The scan setup is only writable while the buffer is off. If it is
+	 * already on (another reader, or root enabled it), keep its setup but
+	 * check that it is the full 24-byte scan.
+	 */
+	if (!read_file_str_dir(p->imu_dir, "buffer/enable", val, sizeof(val)) && atoi(val) == 0) {
+		for (unsigned int i = 0; i < sizeof(en) / sizeof(en[0]); i++)
+			if (write_path_str(p->imu_dir, en[i], "1"))
+				return -1;
+		write_path_str(p->imu_dir, "buffer/length", "4096");
+		if (write_path_str(p->imu_dir, "buffer/enable", "1"))
+			return -1;
+	} else {
+		for (unsigned int i = 0; i < sizeof(en) / sizeof(en[0]); i++)
+			if (read_file_str_dir(p->imu_dir, en[i], val, sizeof(val)) || atoi(val) != 1)
+				return -1;
+	}
+	snprintf(node, sizeof(node), "/dev/%s", base + 1);
+	p->imu_fd = open(node, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	p->imu_have = 0;
+	return p->imu_fd;
+}
+
+int psvr2_imu_stream_fd(const psvr2_t *p)
+{
+	return p ? p->imu_fd : -1;
+}
+
+int psvr2_imu_stream_read(psvr2_t *p, struct psvr2_imu_raw *out, int max)
+{
+	int n = 0;
+
+	if (!p || p->imu_fd < 0 || !out || max <= 0)
+		return -1;
+	while (n < max) {
+		ssize_t r = read(p->imu_fd, p->imu_buf + p->imu_have, sizeof(p->imu_buf) - p->imu_have);
+		unsigned int off = 0;
+
+		if (r < 0)
+			return (errno == EAGAIN || errno == EINTR) ? n : (n ? n : -1);
+		if (r == 0)
+			break;
+		p->imu_have += (unsigned int)r;
+		while (p->imu_have - off >= IMU_SCAN && n < max) {
+			const unsigned char *s = p->imu_buf + off;
+			int16_t v[6];
+			int64_t ts;
+
+			memcpy(v, s, sizeof(v));
+			memcpy(&ts, s + 16, sizeof(ts));
+			for (int i = 0; i < 3; i++) {
+				out[n].accel[i] = v[i];
+				out[n].gyro[i] = v[3 + i];
+			}
+			out[n].timestamp_ns = ts;
+			n++;
+			off += IMU_SCAN;
+		}
+		memmove(p->imu_buf, p->imu_buf + off, p->imu_have - off);
+		p->imu_have -= off;
+	}
+	return n;
+}
+
+void psvr2_imu_stream_close(psvr2_t *p)
+{
+	if (!p || p->imu_fd < 0)
+		return;
+	close(p->imu_fd);
+	p->imu_fd = -1;
+	write_path_str(p->imu_dir, "buffer/enable", "0");
+}
+
+void psvr2_imu_scales(const psvr2_t *p, double *accel, double *gyro)
+{
+	if (accel)
+		*accel = p ? p->accel_scale : 0.0;
+	if (gyro)
+		*gyro = p ? p->gyro_scale : 0.0;
 }
 
 int psvr2_read_controls(psvr2_t *p, struct psvr2_controls *out)

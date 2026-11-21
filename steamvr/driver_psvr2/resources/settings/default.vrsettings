@@ -49,6 +49,10 @@
 		"//height2": "setup; set ~your eye height if the view starts at floor level.",
 		"standing_height_m": 0.0,
 
+		"//ins": "Sony's headset INS: carry the SLAM pose forward with the 2 kHz IMU to",
+		"//ins2": "the present (needs the IIO buffer rule from 99-psvr2.rules).",
+		"headset_ins": true,
+
 		"//camera": "Expose the tracking cameras to SteamVR (Room View / passthrough).",
 		"passthrough_camera": true,
 

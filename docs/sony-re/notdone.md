@@ -1484,3 +1484,19 @@ No new unknowns block it. In short:
     under 150 mm (§2.9), not config values.
 15. **Robust kernel**: Huber with c = 1.0 on a 1.483·median scale, except
     with exactly 3 LEDs, where no kernel is used (§2.10).
+
+## 2.20 Headset INS (done, not on hardware)
+
+Ported Sony's host INS for the headset (tracking.md §3.1, §5.1, §5.2):
+bit-exact kernels `psvr2_ins_core.c` (quat_mul `0x1801805a0`, rotinc
+`0x18017f2c0`, strapdown `0x18017f8e0`, predict `0x18017f500`, pose_ok
+`0x18017bac0`, blend mode 1 `0x180181a50`, IMU calibration matrix
+`0x1801733f0`; difftest `t_irtracker_inscore.c`, 0 mismatches), the
+`FUN_18017cdb0` sequence in `psvr2_ins.c`, a buffered IIO reader in
+libpsvr2 (`psvr2_imu_stream_*`), and the driver path in `pose_source.cpp`
+(setting `headset_ins`). Test `test_ins.c` (part of `make check`).
+
+Left: mode-0 adaptive blender (gains unknown), stillness and shock
+switches, Sony's 3DoF tilt correction `FUN_180171400`, the `+0x188`
+good-frame gate; the VD type 12 layout is read from code only (the
+driver rejects it if its diagonal is not within 20 % of the IIO scale).

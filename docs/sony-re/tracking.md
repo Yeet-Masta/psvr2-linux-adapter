@@ -326,12 +326,21 @@ section reader; do not commit them.
 
 ## 7. Gaps in the current Linux driver
 
-- `steamvr/driver_psvr2/src/pose_source.cpp` uses the SLAM pose directly
-  with finite-difference velocity and lets SteamVR predict. Missing: IMU
-  propagation from the SLAM timestamp to "now" (Sony integrates 2 kHz IMU
-  over the gap, §5.1), use of SLAM velocity `+0x48` and biases
-  `+0x54`/`+0x60`, the 6DoF/3DoF state machine (§4.1), SLAM reset (`+0x1e0`)
-  and map-latch (`+0x1e4`) handling, the 3DoF fallback.
+- **Headset INS: ported** (`userspace/lib/psvr2_ins.c`, kernels bit-exact
+  in `sie/irtracker/psvr2_ins_core.c`, irtracker.md "INS core kernels").
+  `pose_source.cpp` reads every IMU sample from the IIO buffer, resets the
+  VIO filter to each valid SLAM sample (pose, velocity, biases) and
+  re-integrates the IMU after it, blends the output filter (mode 1),
+  holds position in 3DoF, and reports the pose predicted to *now* with the
+  gyro rate (`poseTimeOffset` 0). Setting `headset_ins`. Differences from
+  Sony, all marked [ours] in `psvr2_ins.h`: frame check from data (below),
+  relaxed 6DoF entry, plain tilt correction in 3DoF, mode-1 blender only,
+  snap on 3DoF→6DoF. Synthetic test (`test_ins.c`): pose error at now
+  0.008° / 0.06 mm vs 0.17° / 0.6 mm for SLAM + finite-difference
+  extrapolation. Not yet run on hardware.
+- Still missing on the headset path: Sony's mode-0 adaptive blender (its
+  gains are open question 2), the stillness / shock switches (§3.1 step
+  6), tilt correction `FUN_180171400`, the SLAM `+0x188` good-frame count.
 - Validity: Sony treats `state == 3 || flag0e == 1 || substate == 5` as
   valid; check what the Linux code gates on.
 - Controllers (`controller_device.cpp`, `imu_fusion.h`) are IMU-only 3DoF
@@ -348,7 +357,14 @@ section reader; do not commit them.
    `FUN_18017f2c0` stores w last). The Linux driver reads w, x, y, z and says
    this was confirmed on hardware. Both cannot be right for the raw record:
    capture a record with the headset level and still and check which
-   component is ≈ ±1.
+   component is ≈ ±1. **The INS no longer depends on it**: `psvr2_ins.c`
+   fits the gyro integral between SLAM samples against the SLAM rotation
+   for 4 quaternion orders × 24 IMU axis maps and uses the winner (orders
+   that equal `q ⊗ k` tie with a matching axis map and give the same
+   output; the identity map is preferred). Its output goes back in the
+   reported order, so `RemapPose` is unchanged. The driver log line
+   `headset INS running (quaternion order N, ...)` answers the question on
+   hardware: order 0 = Sony's x,y,z,w, order 1 = the uapi's w,x,y,z.
 2. Blender per-axis deadband / min gain / snap thresholds (`+0x70..+0xb4`)
    are not set in `FUN_180175290`; find their writer (constructor via
    `FUN_18017c590` or config).

@@ -328,3 +328,10 @@ OpticalTracker yet.
   model needs its LED rings reversed (`psvr2_led_model_mirror_x`). Not
   validated on hardware.
 - Needs hardware before wiring: rig camera poses, blob pixel scale vs 508.
+
+- Headset INS (`userspace/lib/psvr2_ins.c`, kernels `sie/irtracker/psvr2_ins_core.c`):
+  SLAM pose carried to "now" with the 2 kHz IMU, Sony's strapdown and blender.
+  Needs the IIO buffer udev rule (`kernel/99-psvr2.rules`). Driver log:
+  `headset INS running (quaternion order N, IMU axis map M, fit F)`; if it
+  never appears, the pose path is the plain SLAM pose as before. Setting
+  `headset_ins`. Not yet tested on hardware.

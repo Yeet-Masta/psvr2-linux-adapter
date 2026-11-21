@@ -100,6 +100,30 @@ int psvr2_read_gaze(psvr2_t *p, struct psvr2_gaze *out, int block);
 /* Read the latest IMU sample (scaled). Returns 0 on success, -1 on error. */
 int psvr2_read_imu(psvr2_t *p, struct psvr2_imu *out);
 
+/*
+ * Buffered IMU stream: every 2 kHz sample with its capture time, through
+ * the IIO kfifo. Raw counts in the device-native axes (scale them with
+ * psvr2_imu_scales(), or with the factory calibration, see psvr2_ins.h).
+ */
+struct psvr2_imu_raw {
+	int16_t accel[3];
+	int16_t gyro[3];
+	int64_t timestamp_ns;		/* host CLOCK_MONOTONIC */
+};
+
+/*
+ * Enable the IIO buffer (needs write access to its sysfs attributes, see
+ * kernel/99-psvr2.rules) and open the buffer node. Returns the fd (poll it
+ * for POLLIN) or -1.
+ */
+int psvr2_imu_stream_open(psvr2_t *p);
+int psvr2_imu_stream_fd(const psvr2_t *p);
+/* Non-blocking: up to max samples; 0 if none pending, -1 on error. */
+int psvr2_imu_stream_read(psvr2_t *p, struct psvr2_imu_raw *out, int max);
+void psvr2_imu_stream_close(psvr2_t *p);
+/* IIO scales: m/s^2 and rad/s per count. */
+void psvr2_imu_scales(const psvr2_t *p, double *accel, double *gyro);
+
 /* Headset controls snapshot from the module's input device. */
 struct psvr2_controls {
 	int ipd_mm;		/* IPD dial, 59..72 */

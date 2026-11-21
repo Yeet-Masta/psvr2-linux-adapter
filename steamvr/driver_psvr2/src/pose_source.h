@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <memory>
 
 #include "openvr_driver.h"
 
@@ -21,6 +22,11 @@ public:
 	// OpenVR frame. Returns true if `out` was updated, false on timeout/EOF.
 	bool ReadPose( vr::DriverPose_t &out );
 
+	// Sony's host INS (libpsvr2 psvr2_ins.h): propagate the SLAM pose with
+	// the 2 kHz IMU to "now". Falls back to the SLAM pose until the IMU
+	// stream is open and the INS has found the frame. On by default.
+	void SetInsEnabled( bool on ) { ins_enabled_ = on; }
+
 private:
 	struct Sample
 	{
@@ -29,6 +35,10 @@ private:
 		vr::HmdQuaternion_t rot;
 	};
 	void EstimateVelocity( const Sample &now, vr::DriverPose_t &out );
+	bool ReadSlam( vr::DriverPose_t &out );
+	bool PumpImu();
+	void LoadImuCalibration();
+	bool InsPose( vr::DriverPose_t &out );
 
 	struct psvr2 *dev_;
 	// Recent samples for velocity estimation, newest last.
@@ -38,4 +48,12 @@ private:
 	uint32_t last_map_ = 0xffffffffu;
 	double device_time_ = 0.0;  // unwrapped device_vts_us
 	double vel_[3]{}, ang_vel_[3]{};
+
+	bool ins_enabled_ = true;
+	bool ins_logged_ = false;
+	bool cal_done_ = false;
+	int cal_tries_ = 0;
+	int64_t last_emit_ns_ = 0;
+	std::unique_ptr<struct psvr2_ins> ins_;
+	std::unique_ptr<struct psvr2_pose> last_slam_;
 };

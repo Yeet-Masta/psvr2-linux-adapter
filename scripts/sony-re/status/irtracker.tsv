@@ -36,7 +36,7 @@ va	lines	area	status	note
 0x1801732b0	16	ins+irtracker	bit-exact	psvr2_irtracker_cov3_small(0)
 0x1801732f0	14	ins+irtracker	bit-exact	psvr2_irtracker_vec_pair_small
 0x180173370	16	ins+irtracker	bit-exact	psvr2_irtracker_cov3_small(2)
-0x1801733f0	80	ins+irtracker	todo	
+0x1801733f0	80	ins+irtracker	bit-exact	psvr2_ins_imucal_mat (IMU calibration 4x4)
 0x1801735e0	24	ins+irtracker	todo	
 0x180173680	66	ins+irtracker	todo	
 0x180173810	9	ins+irtracker	todo	
@@ -159,7 +159,7 @@ va	lines	area	status	note
 0x18017b520	32	ins+irtracker	todo	
 0x18017b5a0	120	ins+irtracker	todo	
 0x18017b850	115	ins+irtracker	todo	
-0x18017bac0	18	ins+irtracker	todo	
+0x18017bac0	18	ins+irtracker	bit-exact	psvr2_ins_pose_ok
 0x18017bb80	20	ins+irtracker	todo	
 0x18017bc00	27	ins+irtracker	todo	
 0x18017bcc0	27	ins+irtracker	todo	
@@ -173,7 +173,7 @@ va	lines	area	status	note
 0x18017c680	105	ins+irtracker	todo	
 0x18017c990	8	ins+irtracker	todo	
 0x18017ca00	95	ins+irtracker	todo	
-0x18017cdb0	327	ins+irtracker	todo	
+0x18017cdb0	327	ins+irtracker	spec-only	sequence in psvr2_ins.c (orchestration, not bit-exact)
 0x18017d6d0	22	ins+irtracker	todo	
 0x18017d730	18	ins+irtracker	todo	
 0x18017d770	28	ins+irtracker	todo	
@@ -199,13 +199,13 @@ va	lines	area	status	note
 0x18017f200	12	ins+irtracker	todo	
 0x18017f230	12	ins+irtracker	todo	
 0x18017f260	18	ins+irtracker	todo	
-0x18017f2c0	64	ins+irtracker	todo	
-0x18017f500	131	ins+irtracker	todo	
+0x18017f2c0	64	ins+irtracker	bit-exact	psvr2_ins_rotinc (ucrt libm)
+0x18017f500	131	ins+irtracker	bit-exact	psvr2_ins_predict (ucrt libm)
 0x18017f810	26	ins+irtracker	todo	
-0x18017f8e0	300	ins+irtracker	todo	
+0x18017f8e0	300	ins+irtracker	bit-exact	psvr2_ins_strapdown (ucrt libm)
 0x180180110	14	ins+irtracker	todo	
 0x180180200	144	ins+irtracker	todo	
-0x1801805a0	38	ins+irtracker	todo	
+0x1801805a0	38	ins+irtracker	bit-exact	psvr2_ins_quat_mul
 0x180180610	37	ins+irtracker	todo	
 0x1801806a0	12	ins+irtracker	todo	
 0x180180740	51	ins+irtracker	todo	
@@ -227,7 +227,7 @@ va	lines	area	status	note
 0x180181630	12	ins+irtracker	todo	
 0x180181690	12	ins+irtracker	todo	
 0x180181700	139	ins+irtracker	todo	
-0x180181a50	125	ins+irtracker	todo	
+0x180181a50	125	ins+irtracker	bit-exact	psvr2_ins_blend1 (ucrt libm)
 0x180181dd0	415	ins+irtracker	todo	
 0x1801828f0	30	ins+irtracker	todo	
 0x180182960	14	ins+irtracker	todo	

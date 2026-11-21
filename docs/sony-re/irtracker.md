@@ -132,3 +132,67 @@ limits −10, 10, −5, 5, −10, 10; +0x34 `cov_small` 1e-7, 1e-4, 1e-5; +0x40
 
 Pattern confirmed by tests here too: where Ghidra shows `if (k <= x)` the
 NaN case behaves as `!(x < k)`.
+
+## INS core kernels — `psvr2_ins_core.c`
+
+Test: `t_irtracker_inscore.c`, 0 mismatches on every kernel (200 000 cases
+each, 10 000 for the strapdown). **Quaternions here are x, y, z, w** (w
+last), as the INS stores them; a pose is position[3] + quaternion[4].
+
+- **`0x1801805a0` quat_mul** `r = a ⊗ b` (Hamilton). Order per lane:
+  `r.x = (a.w·b.x + a.y·b.z) + (b.w·a.x − a.z·b.y)`, same pattern for y, z;
+  `r.w = −(a.y·b.y + a.z·b.z) + (b.w·a.w − a.x·b.x)`. Every quaternion
+  product in the INS uses this one form.
+- **`0x18017f2c0` rotinc(dt, w0, w1)**: `θ = (w0 + w1)·dt/2`. The
+  small-angle branch is taken when `|θ|² < sqrt(2.2888184e-5)` (≈ 0.00478:
+  Sony compares the *squared* angle with the square root of the
+  constant): `s = 0.5 − |θ|²/48`, `c = 1 − |θ|²/8`; else `s = sin(|θ|/2)/|θ|`,
+  `c = cos(|θ|/2)`. Result `(θ·s + (w0 × w1)·dt²/24, c)`, coning term first in
+  each sum. `|θ|²` is summed `(y² + x²) + z²`.
+- **`0x18017f8e0` strapdown(filter, out, dt, n, samples)**: the filter is
+  a struct of pointers (`+0x00` pose, `+0x08` velocity, `+0x10` gyro bias,
+  `+0x18` accel bias, `+0x28` gravity, `+0x30` previous accel, `+0x38`
+  previous gyro, `+0x40` delta pose; all but `+0x00` and `+0x40` through
+  two levels). Samples are 28 bytes: accel[3], gyro[3], time. With
+  `f_prev` the stored previous accel:
+  `Sa = f_prev/2 + Σ R(dq_k)·f_k` (last term halved),
+  `SSa = f_prev·n/2 + Σ_{k<n−1} R(dq_k)·f_k·(n − k − 1)`,
+  `dq_k = dq_{k−1} ⊗ rotinc(dt, w_{k−1}, w_k)` with `w_{−1}` the stored
+  previous gyro. `dq` is normalised (`(x²+z²) + (y²+w²)`, skipped when 0);
+  the new quaternion `q ⊗ dq` is **not**. `v' = ((rot + Sa·dt) + v) + T·g`,
+  `p' = ((T·v + p) + R(q)·SSa·dt²) + (g/2)·T²`, `T = n·dt`, both rotations
+  with the old `q`, `R(q)x` as `x + w·t + q×t`, `t = 2 q×x`. Output (92
+  bytes): delta pose copied, p', q', v', last `f − b_a`, last `w − b_g`.
+  `n = 0`: `dq = (0,0,0,1)`, increments 0, previous samples kept.
+- **`0x18017f500` predict(filter, dt, out)**: `dt = min(dt, 1)`; if
+  `dt > 0`: `p += v·dt`, `q = q ⊗ rotinc(dt, w, w)` with the stored previous
+  gyro. Then `out = delta ∘ (p, q)` (`delta.q ⊗ q`, `R(delta.q)·p + delta.p`).
+  Failing `pose_ok` → identity, returns 0. Callers cap dt at INS `+0x53c`
+  (0.05 s, `FUN_18017c370`).
+- **`0x18017bac0` pose_ok**: no NaN in the 7 floats and
+  `(x²+z²) + (y²+w²)` in `[0.9, 1.1]`.
+- **`0x180181a50` blend1(blender, out, out_vel, target, target_vel, dt)**:
+  target with a NaN (`FUN_180181690`) → nothing. Snap (copy target) if any
+  `|Δp_i| > gate_p` (blender `+0xa0`) or `cos(gate_r/2) > |(target.q ⊗
+  out.q⁻¹).w|` (`+0xac`; `q⁻¹ = (−x,−y,−z,w)/|q|²`). Else `α = min(4·dt, 1)`:
+  `p += Δp·α`; slerp with `d = (t.x·o.x + t.z·o.z) + (t.y·o.y + t.w·o.w)`,
+  weights `sin((1−α)θ)/sinθ`, `sin(αθ)/sinθ` for `|d| < 0.9999999` (else
+  `1−α`, `α`), `α` negated when `d < 0`; no renormalisation. Velocity is
+  copied from the target in both branches.
+- **`0x1801733f0` imucal_mat(out, {R, _, s}, off)**: row i = `R[3i..3i+2]·s_i`,
+  bias row `j = ((s1·R[3+j])·o1 + (s2·R[6+j])·o2) + (R[j]·s0)·o0`, last
+  column (0,0,0,1). Applied per sample (`FUN_180174410`) as
+  `a_j = 1·bias_j + ((x·m[j] + y·m[4+j]) + z·m[8+j])` on `(float)s16`.
+
+IMU calibration records (`FUN_180173fe0`, built when both are present and
+the type 13 generation changed):
+
+| Record | Offset | Use |
+|--------|--------|-----|
+| type 12 | `+0x00..+0x08` | accel misalignment c0, c1, c2 → `R = k·[1,0,0; c0,1,0; c1,c2,1]` |
+| type 12 | `+0x0c..+0x14` | accel scale per axis |
+| type 12 | `+0x18..+0x20` | accel offset (used negated) |
+| type 12 | `+0x24..+0x38` | gyro misalignment → `R = [1,m30,m34; m24,1,m38; m28,m2c,1]` (by offset) |
+| type 12 | `+0x3c..+0x44` | gyro scale per axis |
+| type 12 | `+0x74` | accel overall scale k |
+| type 13 | `+0x28..+0x30` | gyro offset (used negated) |

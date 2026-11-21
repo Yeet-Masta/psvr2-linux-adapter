@@ -811,9 +811,13 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
 
 ### 2.17 Few-LED solve (`FUN_1800dcf00`, `FUN_1800e0d20`, `FUN_1800d1240`) [sure unless tagged]
 
-- `FUN_1800dcf00` runs when the match count (`+0x49c`) is ≤ **3**, the IMU
-  orientation flag (`a1[822]`) is set and the predicted LED-0 position is
-  < **700** mm away. With 1 match and the consecutive-P1P counter
+- `FUN_1800dcf00` enters the few-LED mode (`+0x4c98` = 1, counter
+  `+0x4c9c` = 0) when the match count (`+0x49c`) is ≤ **3**, the IMU
+  orientation flag (`a1[822]`) is set and the pose is < **700** mm away;
+  else it refines (`FUN_1800dd2f0`). The mode **sticks**: every later
+  frame solves with the IMU rotation (pairs over all matched LEDs) until
+  the counter, raised on frames with ≥ **5** matches (never reset in the
+  mode), passes **15**, or the IMU flag goes. With 1 match and the consecutive-P1P counter
   (`+0x5dc`) > **5** it gives up. Success: method `+0x5e0` = 2 (P2P,
   counter reset) or 3 (P1P, counter + 1; at 5+ the pose z is replaced from
   `a1[529]` [unclear what that vector is]).
@@ -834,15 +838,21 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
     **0.01**; result = Σ (S/cost_l / n_l / W) · sum_l with S = Σ cost,
     W = Σ S/cost_l over LEDs with n_l > 0. None counted → fail.
 - Sony's gated match (§2.11) needs 2 supporting neighbours per LED, so 1
-  or 2 isolated blobs never reach this solve; it acts when a cleanup or
-  pass 3 leaves ≤ 3 matches, or on a patch of 3 neighbouring LEDs.
-- Our port: `few_led_solve` in `psvr2_led_track_ex` (`cfg.few_led`,
-  default on), pairs pooled over all cameras (Sony: per camera); rays
+  or 2 isolated blobs never reach this solve in state 0; it acts when a
+  cleanup or pass 3 leaves ≤ 3 matches, on a patch of 3 neighbouring LEDs,
+  or in states 1–3 via the nearest-blob fallback (§2.18).
+- State 0 order (`FUN_1800db980`): `FUN_1800d9d50` (gated match + refine
+  when ≥ 3; else it clears the valid flag, code 7, and the step goes
+  on from the prediction), then the pothole-gate match, < 3 → fail
+  (code 8), then `FUN_1800dcf00`. So state 0 never solves 1–2 LEDs.
+- Our port: `few_led_solve` via `few_or_refine` (`cfg.few_led`, default
+  on; the sticky mode and P1P count in `struct psvr2_track_mem`, kept by
+  the caller of `psvr2_led_track_state`; `psvr2_led_track_ex` has no
+  memory and decides per frame), pairs pooled over all cameras (Sony: per camera); rays
   only in different cameras use the least-squares intersection, gated at
   100 mm. Border drop: blobs carry the LD major semi-axis as the size
   (tracker list `+0x28` ← store `+0x48`; the same field is the major
-  in the `+0x48` major/minor ratio test of `FUN_1800e2330`) [likely]. The
-  driver keeps the P1P counter (`HandState::p1p`).
+  in the `+0x48` major/minor ratio test of `FUN_1800e2330`) [likely].
 - `FUN_1800e2330` (the per-frame blob filter, by camera distance of the
   prediction: ≤ 100 mm {8.5, flag 0}, ≤ 200 {8.5, 1}, ≤ 300 {3.5, 1},
   else {3.0, 0}; tables `0x180318b88/b60/bd8/bb8`): keeps a blob when its
@@ -852,9 +862,12 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
   ratio. Not ported: the flag byte's source bits were not traced (it is
   not the LD `flags` word as is) [open].
 - Test (`test_led_solver`, occlusion block): a patch of 1–3 neighbouring
-  LEDs in one camera, IMU 1° off. Sony match: 50–75 % of 3-LED patches
-  within 40 mm, ≤ 1 pose off by more; our matcher (`LED_SONY=0`): 85–95 %
-  of all patches. Two LEDs ~6 px apart at 600 mm with 0.3 px noise give
+  LEDs in the middle of one camera, IMU 1° off, through
+  `psvr2_led_track_state`. 3-LED patches within 40 mm: Sony match
+  34–59 %, our matcher (`LED_SONY=0`) 80–91 %; ≤ 1 pose off by more.
+  1–2 LEDs there stay in state 0 and fail, as in Sony. Then all LEDs
+  back for 17 frames: P2P for 15, the full refine on the 16th, in
+  92–100 % of runs. Two LEDs ~6 px apart at 600 mm with 0.3 px noise give
   20–35 mm depth error from the geometry alone.
 
 ### 2.18 Close-range and edge states (`FUN_1800db690`, `FUN_1800dbda0`, `FUN_1800dc210`, `FUN_1800dc680`, `FUN_1800db420`, `FUN_1800ddb90`, `FUN_1800f1950`, `FUN_1800e4ec0`) [sure unless tagged]
@@ -875,9 +888,12 @@ the match count in state 3 is `+0x49c` and must be > **5** to leave.
   association mode 0 and `FUN_1800ddb90`: each LED takes its nearest blob
   within the same gate (`FUN_1800f32c0`) and remembers the second
   (`FUN_1800f35c0`); `FUN_1800f1950` then splits shared blobs: a
-  squared-distance gap ≥ **400** drops the farther LED, else LEDs
-  matched in the previous frame (`+0x2128` mask, flag `+0x258c`) win, else
-  the LED whose second blob is nearer moves to it.
+  squared-distance gap ≥ **400** drops the farther LED; else, when
+  neither LED was matched in the previous frame (`+0x2128` mask, flag
+  `+0x258c`, per-LED bit `+0x58`), the later one (in the view-angle
+  order) drops; else, both with a second blob, the one whose second is
+  nearer moves to it; else the one not matched last frame drops (both
+  were: the farther).
 - Then `FUN_1800e4ec0` (flag `0x1803517c3` = 1): a matched LED with view
   angle (`+0x51c`) ≥ **140°**, ≤ **300** mm from the camera and a blob
   angle ≥ 0 (blob list `+0x88`) is dropped when the blob ellipse axis is
@@ -886,10 +902,12 @@ the match count in state 3 is `+0x49c` and must be > **5** to leave.
 - Then `FUN_1800dcf00` (few-LED, §2.17, else `FUN_1800dd2f0`: LM refine
   with ≥ 3 matches, method 1). No pose check (`FUN_1800d89f0`) in these
   states; the 25° orientation flag test after it is as in state 0.
-- Our port: `psvr2_led_track_state` (state per hand in the driver,
-  `HandState::state`; after a boot `psvr2_led_boot_state`), our joint
-  solve: d = nearest camera that matched, the inner count summed over
-  cameras. Not modelled: the previous-frame preference; Sony's state 4
+- Our port: `psvr2_led_track_state` (`struct psvr2_track_mem` per hand
+  in the driver, `HandState::mem`, reset by `psvr2_led_track_mem_boot`
+  after a boot or a boot that replaces the track), our joint solve: d =
+  nearest camera that matched, the inner count summed over cameras; last
+  frame's matched LEDs per camera for the shared-blob split. Not
+  modelled: Sony's state 4
   (re-boot at once) — the driver keeps its 6-miss tolerance and the next
   call runs as state 0. Driver settings `optical_sony_states`,
   `optical_edge_state` (both default true); blobs carry the LD ellipse

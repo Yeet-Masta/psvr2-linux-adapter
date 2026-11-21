@@ -93,8 +93,9 @@ private:
 		// Stats for the periodic log.
 		int frames = 0, solved = 0, boots = 0, fixes = 0, matched = 0;
 		int reboots = 0;  // tracked frames where a boot replaced the track
-		int p1p = 0;      // consecutive one-LED (P1P) tracks; > 5 stops them (Sony)
-		int state = 0;    // Sony's tracker state (PSVR2_TRACK_*), FUN_1800db690
+		// Sony's per-controller tracker memory: state (FUN_1800db690), P1P
+		// count, sticky few-LED mode, last frame's matches.
+		psvr2_track_mem mem{};
 		double rms = 0;
 	};
 

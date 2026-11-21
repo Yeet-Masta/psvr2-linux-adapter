@@ -474,15 +474,19 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 		std::memcpy( prior.R, predicted.R, sizeof( prior.R ) );
 		prior.orient_age_s = dt;
 		prior.spin_rad_s = dt > 1e-3 ? vrmath::Angle( d ) / dt : 0.0;
-		prior.p1p_frames = h.p1p;
+		prior.p1p_frames = h.mem.p1p_frames;
 		// Sony's state machine (FUN_1800db690): close-range and edge states
-		// beside the normal track step.
-		ok = ( sony_states_ ? psvr2_led_track_state( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior,
-		                                             dt, &h.state, &out, &res )
-		                    : psvr2_led_track_ex( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior, dt,
-		                                          &out, &res ) ) == 0;
-		// Sony (FUN_1800dcf00): count consecutive one-LED tracks.
-		h.p1p = ok && res.method == 3 ? h.p1p + 1 : 0;
+		// beside the normal track step; h.mem carries the tracker state,
+		// P1P count, sticky few-LED mode and last frame's matches.
+		if ( sony_states_ )
+			ok = psvr2_led_track_state( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior, dt, &h.mem,
+			                            &out, &res ) == 0;
+		else
+		{
+			ok = psvr2_led_track_ex( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior, dt, &out,
+			                         &res ) == 0;
+			h.mem.p1p_frames = ok && res.method == 3 ? h.mem.p1p_frames + 1 : 0;
+		}
 		// Sony (FUN_1800d5070): the boot also runs while tracking, and its
 		// pose replaces a track whose cross-camera support is < 0.5 (or that
 		// failed) when it has 2+ more inliers, a score lower by 2, or a lower
@@ -507,6 +511,7 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 					res = br;
 					ok = true;
 					h.reboots++;
+					psvr2_led_track_mem_boot( &h.mem, cams_, &out, &res );
 				}
 			}
 		}
@@ -534,8 +539,7 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 			h.span_ref = q_imu;
 			h.vel = {};
 			h.last_us = 0;
-			h.p1p = 0;
-			h.state = psvr2_led_boot_state( cams_, &out );
+			psvr2_led_track_mem_boot( &h.mem, cams_, &out, &res );
 		}
 	}
 	if ( !ok )

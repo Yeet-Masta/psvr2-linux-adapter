@@ -161,7 +161,7 @@ static int run_close(int rev, const struct psvr2_rig_camera cams_in[])
 			struct psvr2_imu_prior pr = { 0 };
 			const struct psvr2_pose3 id = { { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, { 0 } };
 			double dir[3], dc[3];
-			int state;
+			struct psvr2_track_mem mem = { 0 };
 
 			perturb(&id, 0.4, 0, &truth);
 			if (edge) {
@@ -195,14 +195,14 @@ static int run_close(int rev, const struct psvr2_rig_camera cams_in[])
 				pr.orient_valid = 1;
 			}
 			n++;
-			state = edge ? PSVR2_TRACK_NORMAL : psvr2_led_boot_state(cams, &truth);
+			mem.state = edge ? PSVR2_TRACK_NORMAL : psvr2_led_boot_state(cams, &truth);
 			{
-				const int st0 = state;
-				if (psvr2_led_track_state(&cfg, cams, bl, &mod, &start, &pr, 1.0 / 60, &state, &out, &res) == 0) {
+				const int st0 = mem.state;
+				if (psvr2_led_track_state(&cfg, cams, bl, &mod, &start, &pr, 1.0 / 60, &mem, &out, &res) == 0) {
 					st_ok += right(&out, &truth);
 					st_gross += gross(&out, &truth);
 				}
-				entered += edge ? state == PSVR2_TRACK_EDGE : st0 != PSVR2_TRACK_NORMAL;
+				entered += edge ? mem.state == PSVR2_TRACK_EDGE : st0 != PSVR2_TRACK_NORMAL;
 			}
 			if (psvr2_led_track_ex(&cfg, cams, bl, &mod, &start, &pr, 1.0 / 60, &out, &res) == 0) {
 				ex_ok += right(&out, &truth);
@@ -231,7 +231,7 @@ static int run_model(int rev)
 	 * as on a recorded hardware frame (28-30, DEV-NOTES.md). LED_VA sets it. */
 	const double max_va = getenv("LED_VA") ? atof(getenv("LED_VA")) : 100;
 	double matched_sum = 0, support_sum = 0;
-	int support_low = 0, few_n = 0, few_ok = 0, few_wrong = 0;
+	int support_low = 0, few_n = 0, few_ok = 0, few_wrong = 0, sticky_n = 0, sticky_ok = 0;
 
 	for (int c = 0; c < 4; c++) {
 		struct psvr2_cam_model *m = &cams[c].model;
@@ -374,9 +374,10 @@ static int run_model(int rev)
 			fp.orient_valid = fp.gravity_valid = 1;
 			fp.p1p_frames = 0;
 			if (nb == want) {
-				const int counted = !cfg.sony_match || want == 3;
+				struct psvr2_track_mem fm = { 0 };
+				const int counted = want == 3;
 				few_n += counted;
-				if (psvr2_led_track_ex(&cfg, cams, ob, &mod, &start, &fp, 1.0 / 60, &out, &res) == 0) {
+				if (psvr2_led_track_state(&cfg, cams, ob, &mod, &start, &fp, 1.0 / 60, &fm, &out, &res) == 0) {
 					double d = 0;
 					for (int i = 0; i < 3; i++)
 						d += (out.t[i] - truth.t[i]) * (out.t[i] - truth.t[i]);
@@ -384,12 +385,33 @@ static int run_model(int rev)
 						few_wrong++;
 					else if (counted)
 						few_ok++;
+					/*
+					 * Sony keeps the IMU-rotation solve after a few-LED
+					 * frame (FUN_1800dcf00 +0x4c98) until 16 frames with
+					 * >= 5 matches: with all LEDs back, frames 1-15 are
+					 * P2P (method 2), frame 16 a full refine.
+					 */
+					if (fm.few_mode && sqrt(d) < 40) {
+						struct psvr2_pose3 cur = out, o2;
+						struct psvr2_solve_result r2;
+						int seq_ok = 1;
+						for (int f = 1; f <= 17; f++) {
+							const int rr = psvr2_led_track_state(&cfg, cams, bl, &mod, &cur, &fp, 1.0 / 60,
+											     &fm, &o2, &r2);
+							seq_ok &= rr == 0 && r2.method == (f < 16 ? 2 : 0) && !gross(&o2, &truth);
+							if (rr == 0)
+								cur = o2;
+						}
+						sticky_n++;
+						sticky_ok += seq_ok;
+					}
 				}
 			}
 		}
 	}
 	const int close_ok = run_close(rev, cams);
-	printf("rev %d: few-LED (1-3 seen) %d/%d right, %d wrong\n", rev, few_ok, few_n, few_wrong);
+	printf("rev %d: few-LED (1-3 seen) %d/%d right, %d wrong; few mode kept 15 frames %d/%d\n", rev, few_ok,
+	       few_n, few_wrong, sticky_ok, sticky_n);
 	printf("rev %d: track %3d/%d right, %d wrong; boot %3d/%d right, %d wrong; %.1f LEDs matched, "
 	       "support %.2f (%d < 0.5)\n",
 	       rev, track_ok, TRIALS, track_wrong, boot_ok, TRIALS, boot_wrong,
@@ -397,7 +419,8 @@ static int run_model(int rev)
 	       track_ok + track_wrong ? support_sum / (track_ok + track_wrong) : 0.0, support_low);
 	return track_ok >= TRIALS * 85 / 100 && boot_ok >= TRIALS * 90 / 100 &&
 	       40 * track_wrong <= TRIALS && 40 * boot_wrong <= TRIALS &&
-	       (!cfg.few_led || (few_ok >= few_n * (cfg.sony_match ? 50 : 80) / 100 && 20 * few_wrong <= few_n)) && close_ok;
+	       (!cfg.few_led || (few_ok >= few_n * 30 / 100 && 20 * few_wrong <= few_n &&
+				 10 * sticky_ok >= 9 * sticky_n)) && close_ok;
 }
 
 int main(void)

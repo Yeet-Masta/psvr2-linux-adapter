@@ -15,6 +15,7 @@
  */
 #ifndef PSVR2_LED_SOLVER_H
 #define PSVR2_LED_SOLVER_H
+#include <stdint.h>
 
 #include "libpsvr2.h"
 
@@ -153,15 +154,31 @@ int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
  */
 enum { PSVR2_TRACK_NORMAL = 0, PSVR2_TRACK_NEAR = 1, PSVR2_TRACK_CLOSE = 2, PSVR2_TRACK_EDGE = 3,
        PSVR2_TRACK_LOST = 4 };
+/*
+ * Per-controller tracker memory across frames (Sony's tracker object),
+ * kept by the caller; zero it, or use psvr2_led_track_mem_boot after a
+ * boot. prior->p1p_frames is not read when this is given.
+ */
+struct psvr2_track_mem {
+	int	state;			/* PSVR2_TRACK_* (FUN_1800db690, +0x4c94..) */
+	int	p1p_frames;		/* consecutive P1P results (+0x5dc) */
+	int	few_mode;		/* 1 = IMU-rotation solve kept (+0x4c98) */
+	int	few_good;		/* frames with >= 5 matches in it (+0x4c9c) */
+	uint64_t prev[PSVR2_SOLVER_CAMS];	/* LEDs matched last frame */
+};
 int psvr2_led_track_state(const struct psvr2_solver_cfg *cfg,
 			  const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
 			  const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
 			  const struct psvr2_led_model *model,
 			  const struct psvr2_pose3 *predicted,
-			  const struct psvr2_imu_prior *prior, double dt_s, int *state,
+			  const struct psvr2_imu_prior *prior, double dt_s,
+			  struct psvr2_track_mem *mem,
 			  struct psvr2_pose3 *out, struct psvr2_solve_result *res);
 /* The state after a boot (FUN_1800d5070): CLOSE < 100 mm, NEAR < 150. */
 int psvr2_led_boot_state(const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS], const struct psvr2_pose3 *pose);
+/* Reset *mem after a boot of `pose`, matched as in res (may be NULL). */
+void psvr2_led_track_mem_boot(struct psvr2_track_mem *mem, const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			      const struct psvr2_pose3 *pose, const struct psvr2_solve_result *res);
 
 /*
  * Cross-camera support of a pose (FUN_1800e27a0 / FUN_1800efd70): per

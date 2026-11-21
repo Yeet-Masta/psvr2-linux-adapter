@@ -574,6 +574,7 @@ struct problem {
 	int led_blob[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX];
 	int n;			/* matched pairs */
 	int expected;		/* associated LEDs clearly facing a camera (< 70 deg) */
+	uint64_t prev[PSVR2_SOLVER_CAMS];	/* LEDs matched last frame (FUN_1800f1950) */
 };
 
 /* Residuals (projected - blob), 2 per pair; 0 when a point fails to project. */
@@ -739,7 +740,7 @@ static double scale_for(const struct psvr2_pose3 *pose)
 	return fmin(1.0 / fmax(d_m, 1e-3), 10.0);
 }
 
-static int match_nearest(const struct vis *v, const struct psvr2_blob_list *b, double gate,
+static int match_nearest(const struct vis *v, const struct psvr2_blob_list *b, double gate, uint64_t prev,
 			 int led_blob[PSVR2_LED_MAX], double dist[PSVR2_LED_MAX]);
 
 /* s_rad: Sony's support radius; mode 1: match_sony, 0: match, 2:
@@ -762,7 +763,7 @@ static int match_all_ex(const struct psvr2_rig_camera cams[], const struct psvr2
 			p->expected += v.angle[i] < 70;
 		project_point(&cams[c], pose->t, opx, &od);
 		p->n += mode == 1 ? match_sony(&v, &blobs[c], gate, s_rad, od, p->led_blob[c], dist[c])
-			: mode == 2 ? match_nearest(&v, &blobs[c], gate, p->led_blob[c], dist[c])
+			: mode == 2 ? match_nearest(&v, &blobs[c], gate, p->prev[c], p->led_blob[c], dist[c])
 				    : match(&v, &blobs[c], gate, od, p->led_blob[c], dist[c]);
 	}
 	return p->n;
@@ -928,7 +929,7 @@ static int few_led_solve(const struct psvr2_rig_camera cams[], const struct psvr
 			 const struct psvr2_led_model *model, const struct problem *p,
 			 const struct psvr2_pose3 *predicted, const double R[9], struct psvr2_pose3 *out)
 {
-	enum { MAXE = 3 * PSVR2_SOLVER_CAMS };
+	enum { MAXE = PSVR2_SOLVER_CAMS * PSVR2_LED_MAX };
 	double xy[MAXE][2], Rp[MAXE][3], sum[MAXE][3] = { { 0 } }, cost[MAXE] = { 0 }, tp[PSVR2_SOLVER_CAMS][3];
 	int cam[MAXE], led[MAXE], cnt[MAXE] = { 0 }, n = 0, accepted = 0, pairs = 0;
 
@@ -1067,6 +1068,127 @@ static int few_led_solve(const struct psvr2_rig_camera cams[], const struct psvr
 	return n;
 }
 
+/*
+ * FUN_1800dcf00's choice: the IMU-rotation solve when <= 3 LEDs matched,
+ * the pose < 700 mm away and the IMU orientation is set. Sony keeps that
+ * mode (+0x4c98) until 16 frames with >= 5 matches (+0x4c9c), or until
+ * the IMU orientation goes; mem NULL = no memory (each frame decides).
+ */
+static int few_decide(const struct psvr2_solver_cfg *cfg, const struct psvr2_imu_prior *prior,
+		      const struct psvr2_pose3 *pose, int n, struct psvr2_track_mem *mem)
+{
+	struct psvr2_track_mem tmp = { 0 };
+
+	if (!mem)
+		mem = &tmp;
+	if (!cfg->few_led || !prior || !prior->orient_valid) {
+		mem->few_mode = 0;
+		return 0;
+	}
+	if (mem->few_mode) {
+		if (n >= 5 && ++mem->few_good > 15) {
+			mem->few_mode = 0;
+			return 0;
+		}
+		return 1;
+	}
+	if (n > 3 || norm(pose->t) >= 700)
+		return 0;
+	mem->few_mode = 1;
+	mem->few_good = 0;
+	return 1;
+}
+
+/*
+ * FUN_1800dcf00: the few-LED solve (FUN_1800e0d20; P1P at most 6 frames
+ * in a row) or the refine (FUN_1800dd2f0, >= 3 matches), on p's matches.
+ * res->method 2/3 or 0.
+ */
+static int few_or_refine(const struct psvr2_solver_cfg *cfg, const struct psvr2_rig_camera cams[],
+			 const struct psvr2_blob_list blobs[], const struct psvr2_led_model *model,
+			 struct problem *p, const struct psvr2_pose3 *predicted,
+			 const struct psvr2_imu_prior *prior, struct psvr2_track_mem *mem,
+			 struct psvr2_pose3 *pose, struct psvr2_solve_result *res)
+{
+	const int n = p->n;
+
+	res->method = 0;
+	if (few_decide(cfg, prior, pose, n, mem)) {
+		const int p1p = mem ? mem->p1p_frames : prior->p1p_frames;
+		int m;
+		if (n < 1 || (n == 1 && p1p > 5))
+			return -1;
+		m = few_led_solve(cams, blobs, model, p, predicted, prior->R, pose);
+		if (m < 1 || (m == 1 && p1p > 5))
+			return -1;
+		res->method = m == 1 ? 3 : 2;
+		if (mem)
+			mem->p1p_frames = m == 1 ? p1p + 1 : 0;
+	} else {
+		if (n < 3 || refine(p, cfg->max_iterations, pose))
+			return -1;
+		if (mem)
+			mem->p1p_frames = 0;
+	}
+	finish(p, pose, cfg->pothole * scale_for(pose), res);
+	res->expected = p->expected;
+	return 0;
+}
+
+/* Our acceptance check (cfg->own_accept): a full solve that explains under
+ * 3/4 of the LEDs facing the cameras, or any solve leaving more than
+ * 1.5 px rms, is a wrong local minimum. 1 = reject. */
+static int own_reject(const struct psvr2_solver_cfg *cfg, const struct problem *p,
+		      const struct psvr2_solve_result *res)
+{
+	if (!cfg->own_accept)
+		return 0;
+	if (res->rms_px > 1.5)
+		return 1;
+	return !res->method && (p->n < cfg->min_inliers_orientation || 4 * p->n < 3 * p->expected);
+}
+
+/*
+ * State 0 (FUN_1800db980): round 0 gated match + refine (FUN_1800d9d50)
+ * at SEARCHRADIUS x scale x 3 x (dt / 16.7 ms); its failure keeps the
+ * prediction (Sony goes on). Round 1 at 1.5 x POTHOLE x scale: < 3
+ * matches fail (code 8). Then FUN_1800dcf00 and the pose check.
+ */
+static int track_normal(const struct psvr2_solver_cfg *cfg, const struct psvr2_rig_camera cams[],
+			const struct psvr2_blob_list blobs[], const struct psvr2_led_model *model,
+			const struct psvr2_pose3 *predicted, const struct psvr2_imu_prior *prior, double dt_s,
+			struct psvr2_track_mem *mem, struct psvr2_pose3 *out, struct psvr2_solve_result *res)
+{
+	struct problem p = { .cams = cams, .blobs = blobs, .model = model };
+	double dist[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX];
+	struct psvr2_pose3 pose = *predicted;
+	double sc = scale_for(&pose);
+	const double frames = fmin(fmax(dt_s * 60.0, 0.0), 10.0);
+
+	if (mem)
+		memcpy(p.prev, mem->prev, sizeof(p.prev));
+	res->method = 0;
+	{
+		const double gate = cfg->search_radius_px * sc * 3.0 * frames;
+		struct psvr2_pose3 r0 = pose;
+		if (match_all(cams, blobs, model, &pose, fmax(gate, 1.0), cfg->search_radius_px * sc, cfg->sony_match,
+			      &p, dist) >= 3 && refine(&p, cfg->max_iterations, &r0) == 0)
+			pose = r0;
+		sc = scale_for(&pose);
+	}
+	{
+		const double gate = 1.5 * cfg->pothole * sc;
+		if (match_all(cams, blobs, model, &pose, fmax(gate, 1.0), gate, cfg->sony_match, &p, dist) < 3)
+			return -1;
+	}
+	if (few_or_refine(cfg, cams, blobs, model, &p, predicted, prior, mem, &pose, res))
+		return -1;
+	if (psvr2_led_pose_check(cfg, cams, model, prior, &pose, res, norm(pose.t) < 150) || own_reject(cfg, &p, res))
+		return -1;
+	*out = pose;
+	return 0;
+}
+
 int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
 		       const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
 		       const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
@@ -1075,56 +1197,7 @@ int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
 		       const struct psvr2_imu_prior *prior, double dt_s,
 		       struct psvr2_pose3 *out, struct psvr2_solve_result *res)
 {
-	struct problem p = { .cams = cams, .blobs = blobs, .model = model };
-	double dist[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX];
-	struct psvr2_pose3 pose = *predicted;
-	double sc = scale_for(&pose);
-	/* Sony: the search gate grows with the time since the prediction's
-	 * base, 3x per 60 Hz frame. */
-	const double frames = fmin(fmax(dt_s * 60.0, 0.0), 10.0);
-	const int few = cfg->few_led && prior && prior->orient_valid && norm(predicted->t) < 700;
-
-	res->method = 0;
-	for (int round = 0; round < 2; round++) {
-		/* Support radius: SEARCHRADIUS x scale, then the gate itself. */
-		const double gate = round ? 1.5 * cfg->pothole * sc
-					  : cfg->search_radius_px * sc * 3.0 * frames;
-		const double s_rad = round ? gate : cfg->search_radius_px * sc;
-		const int n = match_all(cams, blobs, model, &pose, fmax(gate, 1.0), s_rad, cfg->sony_match, &p, dist);
-		if (few && n >= 1 && (n < 3 || (round && n <= 3))) {
-			/* Sony: <= 3 LEDs -> rotation from the IMU (FUN_1800dcf00). */
-			const int m = few_led_solve(cams, blobs, model, &p, predicted, prior->R, &pose);
-			if (m < 1 || (m == 1 && prior->p1p_frames > 5))
-				return -1;
-			finish(&p, &pose, cfg->pothole * scale_for(&pose), res);
-			res->expected = p.expected;
-			res->method = m == 1 ? 3 : 2;
-			if (psvr2_led_pose_check(cfg, cams, model, prior, &pose, res, norm(pose.t) < 150) ||
-			    (cfg->own_accept && res->rms_px > 1.5))
-				return -1;
-			*out = pose;
-			return 0;
-		}
-		if (n < 3)
-			return -1;
-		if (refine(&p, cfg->max_iterations, &pose))
-			return -1;
-		sc = scale_for(&pose);
-	}
-	finish(&p, &pose, cfg->pothole * sc, res);
-	res->expected = p.expected;
-	if (psvr2_led_pose_check(cfg, cams, model, prior, &pose, res, norm(pose.t) < 150))
-		return -1;
-	/*
-	 * Our acceptance check (cfg->own_accept): a pose that explains under
-	 * 3/4 of the LEDs facing the cameras, or leaves more than 1.5 px rms,
-	 * is a wrong local minimum. Fail so the caller boots.
-	 */
-	if (cfg->own_accept &&
-	    (p.n < cfg->min_inliers_orientation || 4 * p.n < 3 * p.expected || res->rms_px > 1.5))
-		return -1;
-	*out = pose;
-	return 0;
+	return track_normal(cfg, cams, blobs, model, predicted, prior, dt_s, NULL, out, res);
 }
 
 int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
@@ -1190,13 +1263,15 @@ static int inner_count(const struct psvr2_rig_camera cams[], const struct psvr2_
 
 /*
  * FUN_1800ddb90 + FUN_1800f1950: every visible LED takes its nearest blob
- * within `gate` (blobs may be shared); then for two LEDs on one blob: a
- * squared-distance gap >= 400 px^2 drops the farther; else the one whose
- * second-nearest blob is nearer moves there (one without a second drops,
- * the farther when neither has one). Sony prefers LEDs matched in the
- * previous frame first; not modelled.
+ * within `gate` and remembers its second; then for two LEDs i < j (in the
+ * view-angle order) on one blob:
+ *  - squared distances >= 400 px^2 apart: the farther LED drops;
+ *  - neither matched last frame (`prev`): j drops;
+ *  - else, both with a second blob: the one whose second is nearer moves
+ *    to it (Sony re-checks nothing after a move);
+ *  - else the LED not matched last frame drops; both were: the farther.
  */
-static int match_nearest(const struct vis *v, const struct psvr2_blob_list *b, double gate,
+static int match_nearest(const struct vis *v, const struct psvr2_blob_list *b, double gate, uint64_t prev,
 			 int led_blob[PSVR2_LED_MAX], double dist[PSVR2_LED_MAX])
 {
 	int first[PSVR2_LED_MAX], second[PSVR2_LED_MAX], n = 0;
@@ -1217,26 +1292,29 @@ static int match_nearest(const struct vis *v, const struct psvr2_blob_list *b, d
 	}
 	for (int i = 0; i < v->n; i++)
 		for (int j = i + 1; j < v->n && first[i] >= 0; j++) {
-			int loser;
+			const int pi = (int)(prev >> v->led[i] & 1), pj = (int)(prev >> v->led[j] & 1);
+			int loser, move;
 			if (first[j] != first[i])
 				continue;
 			if (fabs(d1[i] - d1[j]) >= 400.0) {
 				loser = d1[i] >= d1[j] ? i : j;
-				first[loser] = -1;
-				continue;
-			}
-			if (second[i] >= 0 && second[j] >= 0)
+				move = 0;
+			} else if (!pi && !pj) {
+				loser = j;
+				move = 0;
+			} else if (second[i] >= 0 && second[j] >= 0) {
 				loser = d2[i] > d2[j] ? j : i;
-			else if (second[i] >= 0 || second[j] >= 0)
-				loser = second[i] >= 0 ? i : j;
-			else {
-				loser = d1[i] >= d1[j] ? i : j;
-				first[loser] = -1;
-				continue;
+				move = 1;
+			} else {
+				loser = pi && pj ? (d1[i] >= d1[j] ? i : j) : (pi ? j : i);
+				move = 0;
 			}
-			first[loser] = second[loser];
-			d1[loser] = d2[loser];
-			second[loser] = -1;
+			if (move) {
+				first[loser] = second[loser];
+				d1[loser] = d2[loser];
+			} else {
+				first[loser] = -1;
+			}
 		}
 	for (int i = 0; i < v->n; i++)
 		if (first[i] >= 0) {
@@ -1306,40 +1384,25 @@ static int grazing(const struct psvr2_rig_camera cams[], const struct psvr2_blob
 static int track_close(const struct psvr2_solver_cfg *cfg, const struct psvr2_rig_camera cams[],
 		       const struct psvr2_blob_list blobs[], const struct psvr2_led_model *model,
 		       const struct psvr2_pose3 *predicted, const struct psvr2_imu_prior *prior, int st,
-		       struct psvr2_pose3 *out, struct psvr2_solve_result *res)
+		       struct psvr2_track_mem *mem, struct psvr2_pose3 *out, struct psvr2_solve_result *res)
 {
 	struct problem p = { .cams = cams, .blobs = blobs, .model = model };
 	double dist[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX];
 	struct psvr2_pose3 pose = *predicted;
 	const double gate = cfg->search_radius_px * scale_for(&pose);
 	const double limit = st == PSVR2_TRACK_CLOSE ? model->cone_deg : 174.0;
-	int n = match_all_ex(cams, blobs, model, &pose, gate, gate, cfg->sony_match ? 1 : 0, limit, &p, dist);
+	int n;
 
+	if (mem)
+		memcpy(p.prev, mem->prev, sizeof(p.prev));
 	res->method = 0;
+	n = match_all_ex(cams, blobs, model, &pose, gate, gate, cfg->sony_match ? 1 : 0, limit, &p, dist);
 	if (n < 3)
 		n = match_all_ex(cams, blobs, model, &pose, gate, gate, 2, model->cone_deg, &p, dist);
 	if (cfg->grazing_check)
 		n = grazing(cams, blobs, model, &pose, &p);
-	if (n <= 0)
-		return -1;
-	if (cfg->few_led && prior && prior->orient_valid && norm(predicted->t) < 700 && n <= 3) {
-		const int m = few_led_solve(cams, blobs, model, &p, predicted, prior->R, &pose);
-		if (m < 1 || (m == 1 && prior->p1p_frames > 5))
-			return -1;
-		finish(&p, &pose, cfg->pothole * scale_for(&pose), res);
-		res->expected = p.expected;
-		res->method = m == 1 ? 3 : 2;
-		if (cfg->own_accept && res->rms_px > 1.5)
-			return -1;
-		*out = pose;
-		return 0;
-	}
-	if (n < 3 || refine(&p, cfg->max_iterations, &pose))
-		return -1;
-	finish(&p, &pose, cfg->pothole * scale_for(&pose), res);
-	res->expected = p.expected;
-	if (cfg->own_accept &&
-	    (p.n < cfg->min_inliers_orientation || 4 * p.n < 3 * p.expected || res->rms_px > 1.5))
+	if (n <= 0 || few_or_refine(cfg, cams, blobs, model, &p, predicted, prior, mem, &pose, res) ||
+	    own_reject(cfg, &p, res))
 		return -1;
 	*out = pose;
 	return 0;
@@ -1369,15 +1432,26 @@ static int next_state(int st, int valid, int imu, double d, int matched)
 	return st;
 }
 
+static void set_prev(struct psvr2_track_mem *mem, const struct psvr2_solve_result *res, int nleds)
+{
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		mem->prev[c] = 0;
+		for (int l = 0; res && l < nleds && l < 64; l++)
+			if (res->led_blob[c][l] >= 0)
+				mem->prev[c] |= (uint64_t)1 << l;
+	}
+}
+
 int psvr2_led_track_state(const struct psvr2_solver_cfg *cfg,
 			  const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
 			  const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
 			  const struct psvr2_led_model *model,
 			  const struct psvr2_pose3 *predicted,
-			  const struct psvr2_imu_prior *prior, double dt_s, int *state,
+			  const struct psvr2_imu_prior *prior, double dt_s,
+			  struct psvr2_track_mem *mem,
 			  struct psvr2_pose3 *out, struct psvr2_solve_result *res)
 {
-	int st = *state, r;
+	int st = mem->state, r;
 
 	if (st < PSVR2_TRACK_NORMAL || st >= PSVR2_TRACK_LOST)
 		st = PSVR2_TRACK_NORMAL;
@@ -1385,11 +1459,12 @@ int psvr2_led_track_state(const struct psvr2_solver_cfg *cfg,
 		st = PSVR2_TRACK_NORMAL;
 	if (st == PSVR2_TRACK_NORMAL && cfg->edge_state && inner_count(cams, model, predicted) <= 3)
 		st = PSVR2_TRACK_EDGE;
-	r = st == PSVR2_TRACK_NORMAL ? psvr2_led_track_ex(cfg, cams, blobs, model, predicted, prior, dt_s, out, res)
-				     : track_close(cfg, cams, blobs, model, predicted, prior, st, out, res);
-	*state = next_state(st, r == 0, prior && prior->orient_valid,
-			    r == 0 ? cam_dist(cams, out, res, model->count) : cam_dist(cams, predicted, NULL, 0),
-			    r == 0 ? res->matched : 0);
+	r = st == PSVR2_TRACK_NORMAL ? track_normal(cfg, cams, blobs, model, predicted, prior, dt_s, mem, out, res)
+				     : track_close(cfg, cams, blobs, model, predicted, prior, st, mem, out, res);
+	mem->state = next_state(st, r == 0, prior && prior->orient_valid,
+				r == 0 ? cam_dist(cams, out, res, model->count) : cam_dist(cams, predicted, NULL, 0),
+				r == 0 ? res->matched : 0);
+	set_prev(mem, r == 0 ? res : NULL, model->count);
 	return r;
 }
 
@@ -1398,6 +1473,14 @@ int psvr2_led_boot_state(const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS], 
 	const double d = cam_dist(cams, pose, NULL, 0);
 
 	return d < 100 ? PSVR2_TRACK_CLOSE : d < 150 ? PSVR2_TRACK_NEAR : PSVR2_TRACK_NORMAL;
+}
+
+void psvr2_led_track_mem_boot(struct psvr2_track_mem *mem, const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			      const struct psvr2_pose3 *pose, const struct psvr2_solve_result *res)
+{
+	memset(mem, 0, sizeof(*mem));
+	mem->state = psvr2_led_boot_state(cams, pose);
+	set_prev(mem, res, PSVR2_LED_MAX);
 }
 
 /* ---- orientation-prior boot (RESEARCH.md §9.3 step 6) -------------------- */

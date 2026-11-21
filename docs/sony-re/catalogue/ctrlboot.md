@@ -80,6 +80,36 @@ in `triage.tsv`.
 | `0x1800a1ce0`, `0x1800a1d60` | 19, 33 | per-controller overlay thunks |
 | `0x18004c590`, `0x18004c600`, `0x18004c9c0`, `0x1800474f0` | 14–660 | overlay entry points in the tracking frontend |
 
+## Raw-image blob extraction (unreachable on PC) [sure for reachability]
+
+A complete PC-side blob detector for raw camera images exists, but nothing
+calls it in this DLL: its only entry `0x18004ad80` has no caller and no
+data reference, and the DLL exports only `HmdDriverFactory`. The headset
+does the detection and sends `LD` blob packets instead (`ledsync.md`).
+Marked `ref` in `triage.tsv`.
+
+- `0x18004ad80`: copies a 14-byte detection parameter block, then queues
+  one `BlobThreadParams` job per camera (`0x180054410`) and waits
+  (`0x180053da0`).
+- Worker thread `0x1800540e0` (vtable `WorkerThread`): job type 0 →
+  `0x1800ccad0` (image 640 × 480 from `0x18035176c/70` into a 0x2404-byte
+  blob list, the same size as one camera's block in an `LD` packet);
+  type 1 → controller boot/track `0x1800a56b0` (modes 1 and 2); type 2 →
+  cross boot `0x1800a5ac0`; type 3 → background view update (slot 2).
+  Types 1–3 are used (`0x180048690`); type 0 never is.
+- `0x1800ccad0` (707 lines): threshold, collect up to 256 candidate peaks
+  above a level (parameter byte 1), grow each into a region
+  (`0x1800cc1b0`, `0x1800cc570`), label components (`0x1800edac0`, 777
+  lines), keep regions with 2..`param[12]` components, then centroid and
+  shape (`0x1800eb0e0`) [likely for the stage roles].
+- `0x1800ea4c0` (411 lines): a second connected-components entry with its
+  own error text ("ConnectedComponents returned ..."), helpers
+  `0x1800eae50`, `0x1800eb360`, `0x1800ec020`, `0x1800ed8d0`,
+  `0x1800f2700`, `0x1800f23a0` [likely].
+- Other helpers: `0x1800e9a90`, `0x1800e97e0`, `0x1800ce140`,
+  `0x1800ed6f0`, `0x1800ed830`, thunks `0x1800a4f40`, `0x1800cca50`,
+  `0x1800ebfc0`.
+
 ## Multi-camera frame step (`0x180048690`, tracking frontend) [sure unless tagged]
 
 Called by the per-frame core `0x18004b0a0`. Order of work:

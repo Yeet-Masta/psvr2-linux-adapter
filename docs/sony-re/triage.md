@@ -7,8 +7,8 @@ Every function in [`scripts/sony-re/inventory.tsv`](../../scripts/sony-re/invent
 
 | Verdict | Meaning | Functions | Decompiled lines |
 |---------|---------|----------:|-----------------:|
-| **core** | Behaviour the Linux driver needs: already ported, or still to port. | 2252 | ~187 k |
-| **ref** | Worth reading to understand the device or Sony's design, or an optional feature (relocaliser). Nothing to port now. | 980 | ~91 k |
+| **core** | Behaviour the Linux driver needs: already ported, or still to port. | 2207 | ~182 k |
+| **ref** | Worth reading to understand the device or Sony's design, or an optional feature (relocaliser). Nothing to port now. | 1025 | ~96 k |
 | **fluff** | Library code, Windows glue, Sony's companion-app UI, VrTrace debug capture, initialisers. Skip. | 1943 | ~105 k |
 
 Columns of `triage.tsv`: `va`, `lines` (Ghidra line count from the
@@ -63,7 +63,7 @@ what is still missing.
 
 | Area | Verdict | Functions | Lines | Done in `userspace/lib/sie` | What it is | Linux driver today |
 |------|---------|----------:|------:|----:|-----------|-------------------|
-| ctrlboot | core | 816 | 76 k | 42 | Controller boot: multi-camera pose search, RANSAC/P3P, LM pose solve, robust losses, background model, connected components | Ported in large parts (`optical_pose.cpp`, `sie/ctrlboot`): RANSAC boot, P3P, sampler, MSAC, few-LED mode |
+| ctrlboot | core | 772 | 71 k | 42 | Controller boot: multi-camera pose search, RANSAC/P3P, LM pose solve, robust losses, background model, connected components | Ported in large parts (`optical_pose.cpp`, `sie/ctrlboot`): RANSAC boot, P3P, sampler, MSAC, few-LED mode |
 | tracking | core | 334 | 33 k | 0 | IR tracker thread stages, UKF manager, TrackerManager, INS feed, occlusion queries | UKF in simulation (`controller_ukf.cpp`); IR-thread stages in section 3.2 not described |
 | sense | core | 194 | 17 k | 0 | Controller manager over libpad: open/close, per-frame poll, input, vibration mode | `sense_hid.cpp`, `controller_device.cpp` |
 | headset-usb | core | 205 | 9 k | 0 | `CaesarManager` and the per-interface `CaesarUsbThread*` readers: enumeration, alt settings, control reports, init order, restart | Kernel module: init sequence, `0xde` clock map, firmware gate, see-through, quit/restart, per-interface recovery |

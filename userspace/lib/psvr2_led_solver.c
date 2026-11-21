@@ -44,6 +44,7 @@ void psvr2_solver_default_cfg(struct psvr2_solver_cfg *cfg)
 	cfg->max_depth_mm = 1500;
 	cfg->own_accept = 1;
 	cfg->sony_match = 1;
+	cfg->few_led = 1;
 }
 
 static float bits_to_float(uint32_t b)
@@ -822,6 +823,222 @@ int psvr2_led_pose_check(const struct psvr2_solver_cfg *cfg,
 	return 0;
 }
 
+double psvr2_led_support(const struct psvr2_solver_cfg *cfg,
+			 const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			 const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
+			 const struct psvr2_led_model *model,
+			 const struct psvr2_pose3 *pose,
+			 const struct psvr2_solve_result *res)
+{
+	const double radius = cfg->search_radius_px * scale_for(pose);
+	double sum = 0;
+	int ncam = 0;
+
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		int vis = 0, m = 0;
+		double nd = 0;
+		if (!cams[c].active)
+			continue;
+		for (int l = 0; l < model->count; l++) {
+			double px[2], va;
+			if (psvr2_led_project(&cams[c], model, pose, l, px, &va, NULL) || va >= 90 ||
+			    px[0] < 0 || px[1] < 0 || px[0] >= cams[c].model.width || px[1] >= cams[c].model.height)
+				continue;
+			vis++;
+			const int k = res->led_blob[c][l];
+			if (k >= 0 && k < blobs[c].count) {
+				m++;
+				nd += fmin(1.0, hypot(blobs[c].xy[k][0] - px[0], blobs[c].xy[k][1] - px[1]) / radius);
+			}
+		}
+		if (vis < 2)
+			continue;
+		ncam++;
+		sum += m ? (1.0 - nd / m) * m / vis : 0.0;
+	}
+	return ncam ? sum / ncam : 0.0;
+}
+
+static int unproject(const struct psvr2_rig_camera *cam, const double px[2], double ray[3]);
+
+/*
+ * Sony's pair depth (FUN_1800e0d20 inline, and FUN_1800d1240 with the
+ * roles swapped). Camera frame, rays (x, y, 1). LED a on ray ra, LED b on
+ * ray rb, D = R p_b - R p_a: z_b (ra - rb) = D.z ra - D.xy, solved for
+ * 1 / z_b over the image-plane residual; z_a = z_b - D.z. Returns
+ * t = z_a (ra, 1) - R p_a, i.e. LED a exactly on its ray. -1 if degenerate.
+ */
+static int pair_depth(const double ra[2], const double rb[2], const double Rpa[3], const double Rpb[3],
+		      double t[3])
+{
+	const double D[3] = { Rpb[0] - Rpa[0], Rpb[1] - Rpa[1], Rpb[2] - Rpa[2] };
+	const double u[2] = { D[0] - D[2] * ra[0], D[1] - D[2] * ra[1] };
+	const double w[2] = { ra[0] - rb[0], ra[1] - rb[1] };
+	const double uu = u[0] * u[0] + u[1] * u[1];
+	double inv, za;
+
+	if (!(uu > 1e-12))
+		return -1;
+	inv = -(w[0] * u[0] + w[1] * u[1]) / uu;
+	if (!(fabs(inv) > 1e-12))
+		return -1;
+	za = 1.0 / inv - D[2];
+	t[0] = za * ra[0] - Rpa[0];
+	t[1] = za * ra[1] - Rpa[1];
+	t[2] = za - Rpa[2];
+	return 0;
+}
+
+static int unproject_xy(const struct psvr2_cam_model *m, const double px[2], double xy[2]);
+
+/*
+ * Sony's few-LED solve (FUN_1800dcf00 -> FUN_1800e0d20): rotation = the
+ * IMU orientation prior; translation from the matched LEDs' blob rays.
+ * One LED: the point on its ray nearest the predicted LED position (P1P,
+ * no distance gate, as Sony). 2+ LEDs in a camera: every pair gives two
+ * translations (each LED put exactly on its ray, FUN_1800d1240 for the
+ * second); each within 100 mm of the prediction counts for both LEDs. An
+ * LED's cost = sum over its pairs of |t1 - t2|^2 / |p_a - p_b| (9999 when
+ * not both counted), floor 0.01; the result = the LEDs' mean translations
+ * weighted by 1 / cost. Sony runs this per camera; here every camera's
+ * pairs pool, and rays only in different cameras (no in-camera pair) use
+ * the least-squares ray intersection, gated at 100 mm. Not modelled:
+ * Sony drops blobs touching the image border (no blob size here).
+ * Returns the LED count used, -1 = no pose.
+ */
+static int few_led_solve(const struct psvr2_rig_camera cams[], const struct psvr2_blob_list blobs[],
+			 const struct psvr2_led_model *model, const struct problem *p,
+			 const struct psvr2_pose3 *predicted, const double R[9], struct psvr2_pose3 *out)
+{
+	enum { MAXE = 3 * PSVR2_SOLVER_CAMS };
+	double xy[MAXE][2], Rp[MAXE][3], sum[MAXE][3] = { { 0 } }, cost[MAXE] = { 0 }, tp[PSVR2_SOLVER_CAMS][3];
+	int cam[MAXE], led[MAXE], cnt[MAXE] = { 0 }, n = 0, accepted = 0, pairs = 0;
+
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		double v[3];
+		for (int i = 0; i < 3; i++)
+			v[i] = predicted->t[i] - cams[c].t[i];
+		mtv(cams[c].R, v, tp[c]);
+		for (int l = 0; l < model->count && n < MAXE; l++) {
+			const int k = p->led_blob[c][l];
+			double w[3];
+			if (k < 0 || k >= blobs[c].count || unproject_xy(&cams[c].model, blobs[c].xy[k], xy[n]))
+				continue;
+			mv(R, model->pos[l], w);
+			mtv(cams[c].R, w, Rp[n]);
+			cam[n] = c;
+			led[n] = l;
+			n++;
+		}
+	}
+	if (n == 0)
+		return -1;
+	memcpy(out->R, R, sizeof(out->R));
+	if (n == 1) {
+		const double r[3] = { xy[0][0], xy[0][1], 1 };
+		double v[3], tc[3], s;
+		for (int i = 0; i < 3; i++)
+			v[i] = Rp[0][i] + tp[cam[0]][i];
+		s = dot(r, v) / dot(r, r);
+		for (int i = 0; i < 3; i++)
+			tc[i] = s * r[i] - Rp[0][i];
+		mv(cams[cam[0]].R, tc, out->t);
+		for (int i = 0; i < 3; i++)
+			out->t[i] += cams[cam[0]].t[i];
+		return 1;
+	}
+	for (int a = 0; a < n; a++)
+		for (int b = a + 1; b < n; b++) {
+			const double dx = xy[b][0] - xy[a][0], dy = xy[b][1] - xy[a][1];
+			double t1[3], t2[3], e[3], c = 9999.0;
+			int ok1 = 0, ok2 = 0;
+			if (cam[a] != cam[b] || dx * dx + dy * dy <= 0.001)
+				continue;
+			pairs++;
+			if (!pair_depth(xy[a], xy[b], Rp[a], Rp[b], t1)) {
+				for (int i = 0; i < 3; i++)
+					e[i] = t1[i] - tp[cam[a]][i];
+				ok1 = dot(e, e) < 10000.0;	/* 100 mm */
+			}
+			if (!pair_depth(xy[b], xy[a], Rp[b], Rp[a], t2)) {
+				for (int i = 0; i < 3; i++)
+					e[i] = t2[i] - tp[cam[a]][i];
+				ok2 = dot(e, e) < 10000.0;
+			}
+			for (int i = 0; i < 3; i++) {
+				const double add = (ok1 ? t1[i] : 0) + (ok2 ? t2[i] : 0);
+				sum[a][i] += add;
+				sum[b][i] += add;
+			}
+			cnt[a] += ok1 + ok2;
+			cnt[b] += ok1 + ok2;
+			accepted += ok1 + ok2;
+			if (ok1 && ok2) {
+				double dp[3], dt[3];
+				for (int i = 0; i < 3; i++) {
+					dp[i] = model->pos[led[a]][i] - model->pos[led[b]][i];
+					dt[i] = t1[i] - t2[i];
+				}
+				if (norm(dp) > 0)
+					c = dot(dt, dt) / norm(dp);
+			}
+			cost[a] += c;
+			cost[b] += c;
+		}
+	if (pairs == 0) {
+		/* Rays only in different cameras: least-squares intersection. */
+		double A[9] = { 0 }, bv[3] = { 0 }, e[3];
+		for (int q = 0; q < n; q++) {
+			const double r[3] = { xy[q][0], xy[q][1], 1 };
+			const struct psvr2_rig_camera *C = &cams[cam[q]];
+			double d[3], w[3], o[3], dn;
+			mv(C->R, r, d);
+			dn = norm(d);
+			for (int i = 0; i < 3; i++)
+				d[i] /= dn;
+			mv(C->R, Rp[q], w);	/* R p, rig frame */
+			for (int i = 0; i < 3; i++)
+				o[i] = C->t[i] - w[i];
+			for (int i = 0; i < 3; i++)
+				for (int j = 0; j < 3; j++) {
+					A[3 * i + j] += (i == j) - d[i] * d[j];
+					bv[i] += ((i == j) - d[i] * d[j]) * o[j];
+				}
+		}
+		if (solve_spd(3, A, bv, out->t))
+			return -1;
+		for (int i = 0; i < 3; i++)
+			e[i] = out->t[i] - predicted->t[i];
+		return dot(e, e) < 10000.0 ? n : -1;
+	}
+	if (accepted == 0)
+		return -1;
+	{
+		/* Camera-frame means to the rig frame, weighted by 1 / cost. */
+		double S = 0, W = 0, t[3] = { 0 };
+		for (int q = 0; q < n; q++) {
+			cost[q] = fmax(cost[q], 0.01);
+			S += cost[q];
+		}
+		for (int q = 0; q < n; q++)
+			if (cnt[q])
+				W += S / cost[q];
+		if (!(W > 0))
+			return -1;
+		for (int q = 0; q < n; q++) {
+			double tw[3];
+			if (!cnt[q])
+				continue;
+			const double f = S / cost[q] / cnt[q] / W;
+			mv(cams[cam[q]].R, sum[q], tw);
+			for (int i = 0; i < 3; i++)
+				t[i] += f * (tw[i] + cnt[q] * cams[cam[q]].t[i]);
+		}
+		memcpy(out->t, t, sizeof(t));
+	}
+	return n;
+}
+
 int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
 		       const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
 		       const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
@@ -837,13 +1054,30 @@ int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
 	/* Sony: the search gate grows with the time since the prediction's
 	 * base, 3x per 60 Hz frame. */
 	const double frames = fmin(fmax(dt_s * 60.0, 0.0), 10.0);
+	const int few = cfg->few_led && prior && prior->orient_valid && norm(predicted->t) < 700;
 
+	res->method = 0;
 	for (int round = 0; round < 2; round++) {
 		/* Support radius: SEARCHRADIUS x scale, then the gate itself. */
 		const double gate = round ? 1.5 * cfg->pothole * sc
 					  : cfg->search_radius_px * sc * 3.0 * frames;
 		const double s_rad = round ? gate : cfg->search_radius_px * sc;
-		if (match_all(cams, blobs, model, &pose, fmax(gate, 1.0), s_rad, cfg->sony_match, &p, dist) < 3)
+		const int n = match_all(cams, blobs, model, &pose, fmax(gate, 1.0), s_rad, cfg->sony_match, &p, dist);
+		if (few && n >= 1 && (n < 3 || (round && n <= 3))) {
+			/* Sony: <= 3 LEDs -> rotation from the IMU (FUN_1800dcf00). */
+			const int m = few_led_solve(cams, blobs, model, &p, predicted, prior->R, &pose);
+			if (m < 1 || (m == 1 && prior->p1p_frames > 5))
+				return -1;
+			finish(&p, &pose, cfg->pothole * scale_for(&pose), res);
+			res->expected = p.expected;
+			res->method = m == 1 ? 3 : 2;
+			if (psvr2_led_pose_check(cfg, cams, model, prior, &pose, res, norm(pose.t) < 150) ||
+			    (cfg->own_accept && res->rms_px > 1.5))
+				return -1;
+			*out = pose;
+			return 0;
+		}
+		if (n < 3)
 			return -1;
 		if (refine(&p, cfg->max_iterations, &pose))
 			return -1;
@@ -879,10 +1113,10 @@ int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
 
 /* Pixel -> unit ray in the rig frame (inverse projection by Gauss-Newton
  * on the forward model; our choice, Sony's inverse was not found). */
-static int unproject(const struct psvr2_rig_camera *cam, const double px[2], double ray[3])
+/* Blob pixel -> normalised camera coordinates (x, y), z = 1. */
+static int unproject_xy(const struct psvr2_cam_model *m, const double px[2], double xy[2])
 {
-	const struct psvr2_cam_model *m = &cam->model;
-	double x = -(px[0] - m->cx) / m->fx, y = -(px[1] - m->cy) / m->fy, d[3];
+	double x = -(px[0] - m->cx) / m->fx, y = -(px[1] - m->cy) / m->fy;
 
 	for (int it = 0; it < 20; it++) {
 		double P[3] = { x, y, 1 }, a[2], bx[2], by[2], J[4], det, ex, ey;
@@ -906,7 +1140,17 @@ static int unproject(const struct psvr2_rig_camera *cam, const double px[2], dou
 		x -= (J[3] * ex - J[1] * ey) / det;
 		y -= (-J[2] * ex + J[0] * ey) / det;
 	}
-	d[0] = x; d[1] = y; d[2] = 1;
+	xy[0] = x;
+	xy[1] = y;
+	return 0;
+}
+
+static int unproject(const struct psvr2_rig_camera *cam, const double px[2], double ray[3])
+{
+	double d[3] = { 0, 0, 1 };
+
+	if (unproject_xy(&cam->model, px, d))
+		return -1;
 	mv(cam->R, d, ray);	/* rig <- camera */
 	const double n = norm(ray);
 	for (int i = 0; i < 3; i++)

@@ -779,7 +779,8 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
   depth (thresholds 100/200/300 mm, compared squared); associate mode 0;
   gated match + refine (`FUN_1800d9d50`) with S = SEARCHRADIUS·scale and
   R = 3·S·dt / (1/60 s); gated match with S = R = 1.5·POTHOLE·scale,
-  < 3 matches → fail (code 8); refine (`FUN_1800dcf00`); pose check.
+  < 3 matches → fail (code 8); `FUN_1800dcf00` (the few-LED solve, §2.17,
+  else refine); pose check.
 - **Pose check** (`FUN_1800d89f0`), in this order:
   1. gravity: when the prior flag `+0x3360` is set and its age `+0x35e0`
      is < **10** s: the measured gravity (`+0x3310`) rotated by the pose,
@@ -795,8 +796,46 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
 - Our port: `psvr2_led_track_ex` and `psvr2_led_pose_check`; the driver
   passes gravity from the fused IMU orientation and the prediction as the
   orientation prior. Our joint 4-camera solve replaces Sony's per-camera
-  trackers, so the cross-camera support and the track/boot arbitration
-  are not ported.
+  trackers. The cross-camera support is `psvr2_led_support`; the driver
+  runs the track/boot arbitration on it (`OpticalPose::SolveHand`).
+
+### 2.17 Few-LED solve (`FUN_1800dcf00`, `FUN_1800e0d20`, `FUN_1800d1240`) [sure unless tagged]
+
+- `FUN_1800dcf00` runs when the match count (`+0x49c`) is ≤ **3**, the IMU
+  orientation flag (`a1[822]`) is set and the predicted LED-0 position is
+  < **700** mm away. With 1 match and the consecutive-P1P counter
+  (`+0x5dc`) > **5** it gives up. Success: method `+0x5e0` = 2 (P2P,
+  counter reset) or 3 (P1P, counter + 1; at 5+ the pose z is replaced from
+  `a1[529]` [unclear what that vector is]).
+- `FUN_1800e0d20`: rotation = the IMU quaternion `a1[828]`. LEDs used:
+  the tracker's matched set (`+0x48` bit mask, `+0x43c` blob indices),
+  minus blobs whose box (centre ± size·π/2) leaves the image or whose
+  normalised position is NaN or out of range.
+  - 1 LED (only when the caller's flag is set, it always is): t = the
+    point on the blob ray (x, y, 1) nearest R·p + t_pred, minus R·p. No
+    distance gate.
+  - 2+ LEDs: for each pair (a, b) whose normalised positions differ by
+    more than √0.001, D = R(p_b − p_a); 1/z_b = −(w·u)/|u|² with
+    u = D.xy − D.z·r_a, w = r_a − r_b; z_a = z_b − D.z;
+    t₁ = z_a(r_a, 1) − R p_a. `FUN_1800d1240` is the same with a and b
+    swapped (t₂). Each tᵢ within **100** mm of the prediction adds to
+    both LEDs' sums and counts. Pair cost |t₁ − t₂|² / |p_a − p_b| when
+    both count, else **9999**, added to both LEDs. Costs floored at
+    **0.01**; result = Σ (S/cost_l / n_l / W) · sum_l with S = Σ cost,
+    W = Σ S/cost_l over LEDs with n_l > 0. None counted → fail.
+- Sony's gated match (§2.11) needs 2 supporting neighbours per LED, so 1
+  or 2 isolated blobs never reach this solve; it acts when a cleanup or
+  pass 3 leaves ≤ 3 matches, or on a patch of 3 neighbouring LEDs.
+- Our port: `few_led_solve` in `psvr2_led_track_ex` (`cfg.few_led`,
+  default on), pairs pooled over all cameras (Sony: per camera); rays
+  only in different cameras use the least-squares intersection, gated at
+  100 mm. The border-blob drop is not ported (no blob size in our lists).
+  The driver keeps the P1P counter (`HandState::p1p`).
+- Test (`test_led_solver`, occlusion block): a patch of 1–3 neighbouring
+  LEDs in one camera, IMU 1° off. Sony match: 50–75 % of 3-LED patches
+  within 40 mm, ≤ 1 pose off by more; our matcher (`LED_SONY=0`): 85–95 %
+  of all patches. Two LEDs ~6 px apart at 600 mm with 0.3 px noise give
+  20–35 mm depth error from the geometry alone.
 
 ### 2.15 Leftovers (item 2)
 
@@ -805,7 +844,7 @@ These no longer block a port:
 | Gap | Where |
 |---|---|
 | Candidate score inside the gated match | answered, §2.11 |
-| Track-vs-boot arbitration, cross-camera support | `FUN_1800d5070`, `FUN_1800e27a0` → `FUN_1800e25a0` → `FUN_1800efd70` |
+| Track-vs-boot arbitration, cross-camera support | answered, §2.16 |
 | Exact LM stop thresholds (cost tol, gain tol) | `FUN_1800f9a80` fields `+0x1c`, `+0x24`; set from the option block in `FUN_1800f7970` |
 | The 0.25 in the option block | `FUN_1800f7970` (candidate: minimum robust scale `+0x18`) |
 | Unit of the multi-camera error e | `FUN_1800e49b0` |

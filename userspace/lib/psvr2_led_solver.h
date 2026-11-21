@@ -53,6 +53,10 @@ struct psvr2_solve_result {
 	int	expected;		/* predicted LEDs facing a camera */
 	double	score;			/* MSAC / T: -matched (perfect) .. 0 */
 	double	rms_px;
+	/* 0 = full 6-DoF solve; 2 = P2P, 3 = P1P: rotation from the IMU
+	 * orientation prior, translation from 2+ / 1 matched LED rays
+	 * (Sony's method enum at tracker +0x4c94). */
+	int	method;
 	int	led_blob[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX];	/* -1 = none */
 };
 
@@ -73,6 +77,9 @@ struct psvr2_solver_cfg {
 	/* 1 = Sony's three-pass gated match with neighbour support
 	 * (FUN_1800df5b0); 0 = ours (image-shift consensus, nearest blob). */
 	int	sony_match;
+	/* 1 = with <= 3 matched LEDs and an orientation prior, solve the
+	 * translation with the IMU rotation (Sony FUN_1800dcf00, default). */
+	int	few_led;
 };
 void psvr2_solver_default_cfg(struct psvr2_solver_cfg *cfg);
 
@@ -89,6 +96,7 @@ struct psvr2_imu_prior {
 	double	R[9];
 	double	orient_age_s;		/* checked only when < 5 s */
 	double	spin_rad_s;		/* skipped at >= pi rad/s */
+	int	p1p_frames;		/* consecutive P1P results so far (caller) */
 };
 
 /*
@@ -117,11 +125,29 @@ int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
 		    struct psvr2_pose3 *out, struct psvr2_solve_result *res);
 
 /*
+ * Cross-camera support of a pose (FUN_1800e27a0 / FUN_1800efd70): per
+ * camera with >= 2 LEDs facing it (< 90 deg) and in the image, the
+ * fraction matched in res times (1 - mean distance / radius_px x scale);
+ * the mean over those cameras, 0 when none. Sony compares it with 0.5.
+ * The radius (Sony's normaliser) is a guess: SEARCHRADIUS.
+ */
+double psvr2_led_support(const struct psvr2_solver_cfg *cfg,
+			 const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			 const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
+			 const struct psvr2_led_model *model,
+			 const struct psvr2_pose3 *pose,
+			 const struct psvr2_solve_result *res);
+
+/*
  * Sony's track step (FUN_1800db980): first gate SEARCHRADIUS x scale x
  * 3 x (dt / 16.7 ms), refine; second gate 1.5 x POTHOLE x scale, >= 3
  * matches, refine; then psvr2_led_pose_check with `prior` (may be NULL),
- * then our acceptance check when cfg->own_accept. psvr2_led_track is this
- * with dt = 1/60 s and no prior.
+ * then our acceptance check when cfg->own_accept. With 1-3 matches, an
+ * orientation prior and the prediction < 700 mm away, Sony's few-LED solve
+ * instead (res->method 2 or 3; P1P at most 6 frames in a row, the caller
+ * counts them in prior->p1p_frames; pair estimates within 100 mm of the
+ * prediction, weighted by their consistency). psvr2_led_track is this with dt = 1/60 s and
+ * no prior.
  */
 int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
 		       const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],

@@ -90,7 +90,8 @@ static int run_model(int rev)
 	/* Blobs for LEDs < 100 deg off-axis: that gives 28 matches per pose,
 	 * as on a recorded hardware frame (28-30, DEV-NOTES.md). LED_VA sets it. */
 	const double max_va = getenv("LED_VA") ? atof(getenv("LED_VA")) : 100;
-	double matched_sum = 0;
+	double matched_sum = 0, support_sum = 0;
+	int support_low = 0, few_n = 0, few_ok = 0, few_wrong = 0;
 
 	for (int c = 0; c < 4; c++) {
 		struct psvr2_cam_model *m = &cams[c].model;
@@ -109,6 +110,8 @@ static int run_model(int rev)
 	psvr2_solver_default_cfg(&cfg);
 	if (getenv("LED_SONY"))
 		cfg.sony_match = atoi(getenv("LED_SONY"));
+	if (getenv("LED_FEW"))
+		cfg.few_led = atoi(getenv("LED_FEW"));
 	if (getenv("LED_OWN"))
 		cfg.own_accept = atoi(getenv("LED_OWN"));
 	srand(1);
@@ -162,6 +165,9 @@ static int run_model(int rev)
 		if (psvr2_led_track_ex(&cfg, cams, bl, &mod, &start, getenv("LED_PRIOR") ? &pr : NULL, 1.0 / 60,
 				       &out, &res) == 0) {
 			matched_sum += res.matched;
+			support_sum += psvr2_led_support(&cfg, cams, bl, &mod, &out, &res);
+			if (psvr2_led_support(&cfg, cams, bl, &mod, &out, &res) < 0.5)
+				support_low++;
 			if (right(&out, &truth))
 				track_ok++;
 			else
@@ -175,12 +181,82 @@ static int run_model(int rev)
 			else
 				boot_wrong++;
 		}
+		/*
+		 * Occlusion: camera 0 sees only a patch of 1-3 neighbouring LEDs
+		 * (the most face-on one and its nearest in the image), no clutter.
+		 * With an IMU orientation ~1 deg off, Sony's few-LED solve keeps the
+		 * pose; right = within 40 mm. Two LEDs ~6 px apart at 600 mm with
+		 * 0.3 px noise give 20-35 mm depth error from the pair geometry
+		 * alone (Sony's solve has the same), so a tighter cut counts noise,
+		 * not wrong associations. Sony's gated match needs 2 supporting
+		 * neighbours per LED, so it matches nothing with 1-2 isolated blobs:
+		 * those trials then only count wrong poses (cfg.sony_match), not
+		 * misses, and about half the 3-LED patches still miss.
+		 */
+		{
+			struct psvr2_blob_list ob[PSVR2_SOLVER_CAMS] = { 0 };
+			struct psvr2_imu_prior fp = pr;
+			struct psvr2_pose3 g;
+			const int want = 1 + trial % 3;
+			double vpx[PSVR2_LED_MAX][2], best = 1e9;
+			int nv = 0, seed = -1, nb = 0;
+			unsigned char taken[PSVR2_LED_MAX] = { 0 };
+			for (int l = 0; l < mod.count; l++) {
+				double va;
+				if (psvr2_led_project(&cams[0], &mod, &truth, l, vpx[nv], &va, NULL) || va >= 60)
+					continue;
+				if (va < best) {
+					best = va;
+					seed = nv;
+				}
+				nv++;
+			}
+			for (int q = 0; q < want && seed >= 0; q++) {
+				int pick = -1;
+				double bd = 1e18;
+				for (int t = 0; t < nv; t++) {
+					const double dx = vpx[t][0] - vpx[seed][0], dy = vpx[t][1] - vpx[seed][1];
+					if (!taken[t] && dx * dx + dy * dy < bd) {
+						bd = dx * dx + dy * dy;
+						pick = t;
+					}
+				}
+				if (pick < 0)
+					break;
+				taken[pick] = 1;
+				ob[0].xy[nb][0] = vpx[pick][0] + 0.3 * gauss();
+				ob[0].xy[nb][1] = vpx[pick][1] + 0.3 * gauss();
+				nb++;
+			}
+			ob[0].count = nb;
+			perturb(&truth, 0.017, 0, &g);
+			memcpy(fp.R, g.R, sizeof(fp.R));
+			fp.orient_valid = fp.gravity_valid = 1;
+			fp.p1p_frames = 0;
+			if (nb == want) {
+				const int counted = !cfg.sony_match || want == 3;
+				few_n += counted;
+				if (psvr2_led_track_ex(&cfg, cams, ob, &mod, &start, &fp, 1.0 / 60, &out, &res) == 0) {
+					double d = 0;
+					for (int i = 0; i < 3; i++)
+						d += (out.t[i] - truth.t[i]) * (out.t[i] - truth.t[i]);
+					if (sqrt(d) >= 40)
+						few_wrong++;
+					else if (counted)
+						few_ok++;
+				}
+			}
+		}
 	}
-	printf("rev %d: track %3d/%d right, %d wrong; boot %3d/%d right, %d wrong; %.1f LEDs matched\n",
+	printf("rev %d: few-LED (1-3 seen) %d/%d right, %d wrong\n", rev, few_ok, few_n, few_wrong);
+	printf("rev %d: track %3d/%d right, %d wrong; boot %3d/%d right, %d wrong; %.1f LEDs matched, "
+	       "support %.2f (%d < 0.5)\n",
 	       rev, track_ok, TRIALS, track_wrong, boot_ok, TRIALS, boot_wrong,
-	       track_ok + track_wrong ? matched_sum / (track_ok + track_wrong) : 0.0);
+	       track_ok + track_wrong ? matched_sum / (track_ok + track_wrong) : 0.0,
+	       track_ok + track_wrong ? support_sum / (track_ok + track_wrong) : 0.0, support_low);
 	return track_ok >= TRIALS * 85 / 100 && boot_ok >= TRIALS * 90 / 100 &&
-	       40 * track_wrong <= TRIALS && 40 * boot_wrong <= TRIALS;
+	       40 * track_wrong <= TRIALS && 40 * boot_wrong <= TRIALS &&
+	       (!cfg.few_led || (few_ok >= few_n * (cfg.sony_match ? 50 : 80) / 100 && 20 * few_wrong <= few_n));
 }
 
 int main(void)

@@ -388,11 +388,11 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 			if ( !h.frames )
 				continue;
 			DriverLog( "psvr2: optical pose: %s: %s, solved %d/%d frames, %d boots tried, %d fixes, matched %.1f, "
-			           "rms %.2f px, remap %d",
+			           "rms %.2f px, remap %d, %d re-boots",
 			           HandName( hand ), h.tracking ? "tracking" : "searching", h.solved, h.frames, h.boots, h.fixes,
 			           h.solved ? double( h.matched ) / h.solved : 0.0, h.solved ? h.rms / h.solved : 0.0,
-			           h.remap >= 0 ? h.remap : h.cand_remap );
-			h.frames = h.solved = h.boots = h.fixes = h.matched = 0;
+			           h.remap >= 0 ? h.remap : h.cand_remap, h.reboots );
+			h.frames = h.solved = h.boots = h.fixes = h.matched = h.reboots = 0;
 			h.rms = 0;
 		}
 	}
@@ -464,7 +464,37 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 		std::memcpy( prior.R, predicted.R, sizeof( prior.R ) );
 		prior.orient_age_s = dt;
 		prior.spin_rad_s = dt > 1e-3 ? vrmath::Angle( d ) / dt : 0.0;
+		prior.p1p_frames = h.p1p;
 		ok = psvr2_led_track_ex( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior, dt, &out, &res ) == 0;
+		// Sony (FUN_1800dcf00): count consecutive one-LED tracks.
+		h.p1p = ok && res.method == 3 ? h.p1p + 1 : 0;
+		// Sony (FUN_1800d5070): the boot also runs while tracking, and its
+		// pose replaces a track whose cross-camera support is < 0.5 (or that
+		// failed) when it has 2+ more inliers, a score lower by 2, or a lower
+		// score and lies nearer the last pose (here: the prediction).
+		if ( h.remap >= 0 )
+		{
+			const double sup = ok ? psvr2_led_support( &cfg_, cams_, lists, &h.model[h.mirror], &out, &res ) : 0.0;
+			psvr2_pose3 bo{};
+			psvr2_solve_result br{};
+			psvr2_imu_prior grav = prior;
+			grav.orient_valid = 0;
+			if ( sup < 0.5 && Boot( hand, h, frame_us, world_from_rig, q_imu, yaw_now, lists, bo, br, true ) &&
+			     psvr2_led_pose_check( &cfg_, cams_, &h.model[h.mirror], &grav, &bo, &br, 0 ) == 0 )
+			{
+				auto d2 = []( const double *a, const double *b ) {
+					return ( a[0] - b[0] ) * ( a[0] - b[0] ) + ( a[1] - b[1] ) * ( a[1] - b[1] ) + ( a[2] - b[2] ) * ( a[2] - b[2] );
+				};
+				const bool nearer = d2( out.t, predicted.t ) > d2( bo.t, predicted.t );
+				if ( !ok || ( nearer && res.score > br.score ) || res.matched + 2 <= br.matched || res.score > br.score + 2 )
+				{
+					out = bo;
+					res = br;
+					ok = true;
+					h.reboots++;
+				}
+			}
+		}
 		if ( !ok && ++h.fails >= 6 )
 			h.tracking = false;
 	}
@@ -532,7 +562,7 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 
 bool OpticalPose::Boot( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const vr::HmdQuaternion_t &q_imu,
                         double yaw_now, const psvr2_blob_list lists[PSVR2_SOLVER_CAMS], psvr2_pose3 &out,
-                        psvr2_solve_result &res )
+                        psvr2_solve_result &res, bool quiet )
 {
 	// Hypotheses: heading (the controller's current one first when the
 	// remap is known, then 12 steps of 30 deg, offset 15 deg every other
@@ -613,8 +643,9 @@ bool OpticalPose::Boot( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose
 	out = best_out;
 	res = best_res;
 	h.cand_remap = h.remap;
-	DriverLog( "psvr2: optical pose: %s: boot ok (heading %.0f deg%s, %d LEDs, %.2f px)", HandName( hand ),
-	           best_yaw / kDeg, locked ? ", near the current heading" : "", res.matched, res.rms_px );
+	if ( !quiet )
+		DriverLog( "psvr2: optical pose: %s: boot ok (heading %.0f deg%s, %d LEDs, %.2f px)", HandName( hand ),
+		           best_yaw / kDeg, locked ? ", near the current heading" : "", res.matched, res.rms_px );
 	return true;
 }
 

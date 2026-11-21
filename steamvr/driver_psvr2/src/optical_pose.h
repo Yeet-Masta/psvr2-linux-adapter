@@ -92,6 +92,8 @@ private:
 		double span = 0;
 		// Stats for the periodic log.
 		int frames = 0, solved = 0, boots = 0, fixes = 0, matched = 0;
+		int reboots = 0;  // tracked frames where a boot replaced the track
+		int p1p = 0;      // consecutive one-LED (P1P) tracks; > 5 stops them (Sony)
 		double rms = 0;
 	};
 
@@ -99,7 +101,8 @@ private:
 	void SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &world_from_rig,
 	                psvr2_blob_list lists[PSVR2_SOLVER_CAMS], float wt[PSVR2_SOLVER_CAMS][PSVR2_SOLVER_BLOBS] );
 	bool Boot( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const vr::HmdQuaternion_t &q_imu, double yaw_now,
-	           const psvr2_blob_list lists[PSVR2_SOLVER_CAMS], psvr2_pose3 &out, psvr2_solve_result &res );
+	           const psvr2_blob_list lists[PSVR2_SOLVER_CAMS], psvr2_pose3 &out, psvr2_solve_result &res,
+	           bool quiet = false );
 	void Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const psvr2_pose3 &rig_pose,
 	             const vr::HmdQuaternion_t &q_imu, const psvr2_solve_result &res );
 	void LoadHand( int hand );

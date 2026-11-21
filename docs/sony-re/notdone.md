@@ -758,8 +758,18 @@ There is **no split of blobs between controllers** before solving
 
 So the two controllers are kept apart by LED-sync timing (each lights in
 its own frames, `ledsync.md`) and by the pose-driven association, not by
-a blob partition [likely]. `FUN_1800a5e30` → `FUN_1800ad2b0` runs after
-all controllers and may resolve cross-controller conflicts [guess].
+a blob partition [likely]. `FUN_1800a5e30` runs after all controllers:
+it is no conflict resolution. It builds (|t|², index) per controller (the
+tracked pose `+0x1b20`, or the predicted pose when only predicted, flag
+`+0x9200`) and sorts it (`FUN_1800ad2b0`, std::sort) into the order at
+`+0x15c44`: the next frame processes the nearest controller first. With
+no blob claiming the order only matters for shared per-camera state.
+Our driver lets a tracked hand claim its blobs first (own choice).
+
+`FUN_1800d4b90` (before each controller's `FUN_1800d5070`): per LED, the
+blob whose `link` word (camera blob store `+0x88`, not the tracker list: LED in byte 0, controller id
+`+0x604` in byte 1) names it, into `+0x1988`. Nothing in the tracker reads
+`+0x1988` (only init/free and an overlay) [likely: debug].
 
 Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
 `+0xf0`, `+0x110` f32 [unknown]; `+0xb0` flag byte; `+0xd0` weight = 1.0;
@@ -829,8 +839,18 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
 - Our port: `few_led_solve` in `psvr2_led_track_ex` (`cfg.few_led`,
   default on), pairs pooled over all cameras (Sony: per camera); rays
   only in different cameras use the least-squares intersection, gated at
-  100 mm. The border-blob drop is not ported (no blob size in our lists).
-  The driver keeps the P1P counter (`HandState::p1p`).
+  100 mm. Border drop: blobs carry the LD major semi-axis as the size
+  (tracker list `+0x28` ← store `+0x48`; the same field is the major
+  in the `+0x48` major/minor ratio test of `FUN_1800e2330`) [likely]. The
+  driver keeps the P1P counter (`HandState::p1p`).
+- `FUN_1800e2330` (the per-frame blob filter, by camera distance of the
+  prediction: ≤ 100 mm {8.5, flag 0}, ≤ 200 {8.5, 1}, ≤ 300 {3.5, 1},
+  else {3.0, 0}; tables `0x180318b88/b60/bd8/bb8`): keeps a blob when its
+  weight (store `+0xe8`) is ≥ 3 (2 when the store byte `+0x160` is set,
+  or the major ≥ 32/π), store flag byte `+0xa8` bit 2 clear, bit 1 clear
+  when the table flag is set, and with bit 0 set major/minor ≤ the table
+  ratio. Not ported: the flag byte's source bits were not traced (it is
+  not the LD `flags` word as is) [open].
 - Test (`test_led_solver`, occlusion block): a patch of 1–3 neighbouring
   LEDs in one camera, IMU 1° off. Sony match: 50–75 % of 3-LED patches
   within 40 mm, ≤ 1 pose off by more; our matcher (`LED_SONY=0`): 85–95 %

@@ -363,6 +363,7 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 		{
 			// Ellipse angle (+ 2 pi; -1 = undefined) for the grazing check.
 			lists[c].angle[k] = blobs[c].angle[idx[k]];
+			lists[c].major[k] = blobs[c].major[idx[k]];  // few-LED border check
 			// LD blob x reads 4 px (508 image) left of the calibrated model
 			// on every camera; PSVR2Toolkit compensates in Sony's driver by
 			// moving cx 8 px left in the 1016 calibration (ir_tracker_hooks.cpp).

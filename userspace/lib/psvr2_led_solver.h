@@ -50,6 +50,9 @@ struct psvr2_blob_list {
 	 * when has_angle (the grazing check). */
 	int	has_angle;
 	double	angle[PSVR2_SOLVER_BLOBS];
+	/* Blob ellipse major semi-axis (LD record, px; <= 0 = unknown). The
+	 * few-LED solve skips blobs within major x pi/2 of the image border. */
+	double	major[PSVR2_SOLVER_BLOBS];
 };
 
 struct psvr2_solve_result {

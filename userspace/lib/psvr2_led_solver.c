@@ -942,6 +942,15 @@ static int few_led_solve(const struct psvr2_rig_camera cams[], const struct psvr
 			double w[3];
 			if (k < 0 || k >= blobs[c].count || unproject_xy(&cams[c].model, blobs[c].xy[k], xy[n]))
 				continue;
+			if (blobs[c].major[k] > 0) {
+				/* Sony: the blob box, centre +- size x pi/2, must lie in
+				 * the image (size = blob list +0x28, the LD major axis
+				 * [likely]). */
+				const double r = blobs[c].major[k] * M_PI / 2, *b = blobs[c].xy[k];
+				if (b[0] - r < 0 || b[1] - r < 0 || b[0] + r >= cams[c].model.width ||
+				    b[1] + r >= cams[c].model.height)
+					continue;
+			}
 			mv(R, model->pos[l], w);
 			mtv(cams[c].R, w, Rp[n]);
 			cam[n] = c;

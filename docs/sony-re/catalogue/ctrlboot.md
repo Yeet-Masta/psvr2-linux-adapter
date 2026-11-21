@@ -180,6 +180,31 @@ Other solver helpers:
 | `0x1800f8c50`, `0x1800fa4a0` | 130 | resize of solver work buffers (`0x1800fe9e0`) [likely] |
 | `0x1800fbe40`, `0x1800fdd90` | 146, 167 | recursive helpers (sort / partition) [guess] |
 | `0x1800f2cc0` | 149 | 32 points on a circle (step 2π/32) for a caller with no caller (`0x1800e9f30`) [likely: debug] |
+| `0x180105a60` | 181 | builds the `LeastSquaresCost<PoseCost,float,6>` object (vtable `0x1803195a0`) for the LM driver `0x1800f7970`: copies the point and model references, residual count = 2 × points (u and v per LED) [sure] |
+| `0x180107700` | 227 | multi-camera residuals: turns the 6-vector (rotation vector at `+0x10`, translation at `+0x1c`) into a pose with the exp-map `0x180104e30` (eps 0.001), composes it with the rig transform at `cost +0x50`, then for each LED composes with that LED's camera transform and projects with the pinhole model `0x180046240`; residuals into `cost +0xc0`, then the robust scale `0x180108920` [sure for the flow] |
+| `0x180107bf0` | 226 | same as `0x180107700` but projects through the full camera model with distortion (`0x180103580`) [sure for the flow] |
+| `0x180108920` | 71 | residual scale after a residual pass: median of the absolute residuals through `0x1801046e0` (the 1.483 × median rule of `notdone.md` §2.10) [likely] |
+| `0x180106d70`, `0x180108100` | 145 | residual statistics of a cost object: RMS, max, min of the residuals and mean weight (residuals `+0xb0`, weights `+0x100`; the second reads `+0xc0`/`+0x110`). No caller in this build [sure] |
+| `0x180109670` | 179 | partial sort (introselect) of a float array, the core of the median used by `0x1801046e0` (via `0x1801090f0` / `0x1801094a0`); `0x180109a70` (99) is its partition step [likely] |
+
+## Boot statistics and RANSAC settings [sure unless tagged]
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x1800c7f00` | 176 | end-of-boot statistics (log tag `ComputeBootStats`), called by the boot step `0x1800d8b60`: over the list of boot candidates (80-byte entries at `+0x1048`/`+0x1050`) it takes mean, SD, min and max of the score (`+0x44`) and of the inlier count (`+0x40`); feeds each candidate pose to `0x1800c7470`, then `0x1800c78c0`; stores a boot ratio (candidates / attempts, scaled) at `+0x1064` and the spread at `+0x1068`, logs both lines, then empties the list. Diagnostic only: nothing reads `+0x1064` for a decision [likely] |
+| `0x1800c7470` | 261 | add a pose (3 × 3 rotation + translation) to the statistics accumulator unless an equal one is already in it [sure] |
+| `0x1800c78c0` | 231 | finish the accumulator: mean resultant length of the rotation axes (norm of each averaged column, mean of the three; 1.0 = all poses agree), pose count and the largest angle to the mean (`maxPoseErrorDeg`) [likely] |
+| `0x1800c7280` | 93 | accumulator ctor [sure] |
+| `0x1800c0e10` | 194 | RANSAC settings block, default ctor (inside the controller ctor `0x1800d2360`): max iterations 1000 / 1000, `+0x08` = 12, adaptive flag 1, three identity pose slots, Mersenne Twister seeded 666, sub-block `0x1800c07e0` [sure] |
+| `0x1800c1310` | 251 | the same block from explicit parameters (thresholds as floats, a 16-byte header and the seed from the caller's struct), with float defaults 6.0 (sample size), 200.0 and 3.0. No caller in this build [sure] |
+| `0x1800e6450`, `0x1800e7120`, `0x1800e8270`, `0x1800e8e00` | 124–217 | copy / resize / insert for a vector whose items are 32-byte `RnD::Vector<float>` objects (allocate through the allocator, deep-copy each inner vector) [likely] |
+
+Close-range path helpers (`0x1800a88f0`):
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x1800cf7d0` | 311 | for both cameras of the pair: map each 2D observation through that camera's model (`0x18009eb50`) to a normalised ray [likely] |
+| `0x1800cf540` | 208 | rotation helper: matrix from a quaternion (`0x180044bc0`) with SIMD `acos`/`sincos` (`0x18009e170`, `0x18009e2a0`), i.e. a slerp-style blend between two orientations [guess] |
 
 ## Multi-camera frame step (`0x180048690`, tracking frontend) [sure unless tagged]
 

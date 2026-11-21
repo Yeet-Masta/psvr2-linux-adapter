@@ -40,10 +40,14 @@ An **error-state, augmented, symmetric sigma-point filter**:
 - augmented with **6 IMU noise** terms (gyro, accel) and the **m measurement
   noise** terms: n = 15 + 6 + m (`0x1800942f0`, set up by `0x180092630` and
   `0x180091930`);
-- **2n sigma points, no central point**, spread `±sqrt(n)` along the columns
-  of the Cholesky factor, all weights `1/(2n)` — the unscented transform with
-  α = 1, κ = 0 (that is, a cubature Kalman filter). n + λ is computed as
-  `n + 0 − n + n`.
+- **2n + 1 sigma points**: the central point plus `±sqrt(n)` along the
+  columns of the Cholesky factor. The unscented transform with α = 1,
+  β = 2, κ = 0 (n + λ is computed as `n + 0 − n + n`, so λ = 0): the
+  central point has mean weight 0 and covariance weight **2**, the others
+  `1/(2n)` for both. So the mean is the cubature mean, but the predicted
+  covariances get an extra `2·(y₀ − ŷ)(y₀ − ŷ)ᵀ` term
+  (`catalogue/ctrltracker.md` §1; an earlier version of this file said
+  there was no central point).
 
 One filter step (`0x180065b70`, "kalmanFilterStep") covers the interval from
 the newest filter state to the measurement time in one go:
@@ -65,7 +69,11 @@ the newest filter state to the measurement time in one go:
 5. The stationary damping (`0x18006e5a0`, `tracking.md` §5.5) is called
    only when the IMU history reached the split time in step 1, that is on
    long intervals without measurements [sure for the call site].
-6. Return codes: 0 ok, −1 numeric failure, −2 a specific solver failure.
+6. Return codes of the step: 0 ok, −1 numeric failure, −2 a specific
+   solver failure. Return codes of the solver `0x1800942f0`: 0 ok, −1 a callback failed,
+   −3 the augmented covariance is not positive definite, −4 `DPPTRF` of the
+   innovation covariance reported a bad argument. The fixed-size transforms
+   return −2 or −3 for a failed Cholesky.
 
 Delayed measurements: a measurement older than the newest state is applied at
 its own time and the IMU states after it are replayed (`0x18007add0`,
@@ -139,8 +147,11 @@ below 1 m/s, else 20 cm).
 
 - The exact sigma-point process model (`0x1800638d0`) and `h(x)`
   (`0x18005fad0`), checked only for their role, not their algebra.
-- The UKF solver internals (`0x1800942f0`): Cholesky variant, jitter and the
-  `−2` failure.
+- The UKF solver internals are now in `catalogue/ctrltracker.md` §1:
+  packed Cholesky without jitter, inverse of S by `DPPTRF` + `DPPTRI`.
+  Open: when `DPPTRF` finds S not positive definite (positive info) the
+  code continues with the half-factored matrix instead of failing; whether
+  that ever happens in practice is unchecked.
 - The manager's split time `+0x2168` and the "use accel bias flag" (`+0x38`
   of the state).
 - Config limits listed in `RESEARCH.md` §11 q9.

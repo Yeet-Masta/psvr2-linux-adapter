@@ -63,15 +63,32 @@ solver (`catalogue/ctrlboot.md`, "Solver classes"):
 | `0x180083880` | 59 | f2c `s_copy` [sure] | Fortran string assignment (dest, src, dest length, src length); called by ILAENV |
 | `0x180083700` | 76 | f2c `s_cat` [likely] | Fortran string concatenation (pointer list, length list, overlap check); no caller |
 
+## Double-precision subset (`0x18008d910`–`0x18008ee2f`)
+
+A second, smaller f2c block in double precision serves the controller
+UKF (`catalogue/ctrltracker.md`): packed Cholesky, inverse from the
+factor, and the BLAS routines they need. Same evidence as above.
+
+| Function | Lines | Routine | Evidence |
+|----------|-------|---------|----------|
+| `0x18008d910` | 61 | `DPPTRF` (Cholesky of a packed SPD matrix) [sure] | 4 arguments (uplo, n, ap, info); info = −2 for n < 0; square root of each pivot; calls DSCAL and DSPR; option 'Lower' |
+| `0x18008daa0` | 123 | `DPPTRI` (inverse from the DPPTRF factor) [sure] | 4 arguments; calls DTPTRI (inlined), DDOT, DSCAL, DSPR, DTPMV; options 'Lower', 'No transpose', 'Non-unit', 'Transpose' |
+| `0x18008dd70` | 75 | `DTPTRI` (packed triangular inverse) [likely] | options 'Non-unit', 'No transpose', 'Lower'; calls DSCAL and DTPMV; no caller (inlined into DPPTRI) |
+| `0x18008df50` | 99 | `DDOT` [sure] | returns a double dot product |
+| `0x18008e0e0` | 98 | `DSCAL` [sure] | scales a vector (constant increment folded away) |
+| `0x18008e270` | 195 | `DSPR` (packed symmetric rank-1 update) [sure] | 6 arguments (uplo, n, alpha, x, incx, ap) |
+| `0x18008e5b0` | 381 | `DTPMV` (packed triangular matrix × vector) [likely] | 6 arguments (uplo, trans, diag, n, ap, x) |
+| `0x18008ec20` | 80 | `DTPSV` or a second `DTPMV` copy [guess] | same 6-argument shape; no caller |
+
 ## The rest of the old `lib:linalg` range
 
 The triage first labelled all of `0x180070950`–`0x18009ffe0` as a
 library. Only the block above is one. The rest is Sony code and is now
 labelled core (`triage.md` §5):
 
-- `0x180070950`–`0x180082e90` and `0x18008d910`–`0x18009cff0`: the
-  controller UKF (`ukf.md`) with its double-precision matrix kernels
-  (AVX, Cholesky on 'Lower' triangles), its replay path (`0x18007add0`,
+- `0x180070950`–`0x180082e90` and `0x18008ee30`–`0x18009cff0`: the
+  controller UKF (`ukf.md`, `catalogue/ctrltracker.md`) with its
+  double-precision matrix kernels, its replay path (`0x18007add0`,
   log `WARNING--->backwards!`), the tilt correction (`0x18007dc60`), the
   IMU interval reduction (`0x180082e90`) and the solver `0x1800942f0`.
   → ctrl-tracker.

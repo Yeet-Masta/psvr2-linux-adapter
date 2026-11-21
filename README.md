@@ -149,17 +149,17 @@ Regenerate with `python scripts/sony-re/triage/progress.py`.
 | Stage | Progress | Functions |
 |---|---|---|
 | Triaged | `████████████████████` 100% | 5175 / 5175 |
-| Documented (all) | `█████████░░░░░░░░░░░` 43% | 2251 / 5175 |
-| Documented (core) | `█████████░░░░░░░░░░░` 47% | 1151 / 2435 |
+| Documented (all) | `█████████░░░░░░░░░░░` 46% | 2378 / 5175 |
+| Documented (core) | `██████████░░░░░░░░░░` 52% | 1270 / 2427 |
 | Documented (ref) | `████░░░░░░░░░░░░░░░░` 19% | 190 / 1025 |
-| Documented (fluff) | `███████████░░░░░░░░░` 53% | 910 / 1715 |
+| Documented (fluff) | `███████████░░░░░░░░░` 53% | 918 / 1723 |
 
 <details><summary>Core functions by subsystem</summary>
 
 | Subsystem (core functions) | Progress | Documented |
 |---|---|---|
 | `ctrl-boot` | `███████████░░░░░░░░░` 55% | 435 / 790 |
-| `ctrl-tracker` | `██████░░░░░░░░░░░░░░` 28% | 140 / 498 |
+| `ctrl-tracker` | `███████████░░░░░░░░░` 53% | 259 / 490 |
 | `libpad` | `█████████░░░░░░░░░░░` 47% | 136 / 290 |
 | `map+steamvr` | `█████████░░░░░░░░░░░` 45% | 111 / 247 |
 | `ins+irtracker` | `█████████░░░░░░░░░░░` 46% | 106 / 232 |

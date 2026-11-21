@@ -7,7 +7,7 @@ rows = list(csv.reader(open(p, encoding="utf-8", newline=""), delimiter="\t"))
 n = 0
 for r in rows[1:]:
     ea = int(r[0], 16)
-    if r[2] != "lib:linalg" or 0x180083700 <= ea <= 0x18008d3ff:
+    if r[2] != "lib:linalg" or 0x180083700 <= ea <= 0x18008ee2f:
         continue
     r[2] = "ctrl-boot" if ea >= 0x18009d100 else "ctrl-tracker"
     r[3] = "todo"; n += 1

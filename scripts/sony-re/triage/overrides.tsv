@@ -100,5 +100,6 @@
 0x1800f2700	-	ref	ctrlboot	raw-image blob extraction / connected components; no caller on PC (only entry 0x18004ad80 is unreferenced)
 0x1800970f0	-	fluff	lib	import thunk inside the UKF range
 0x180070950	0x180082fff	core	ctrltracker	controller UKF and its double-precision matrix kernels (was mislabelled lib:linalg; catalogue/lapack.md)
-0x18008d910	0x18009cfff	core	ctrltracker	controller UKF solver and its double-precision matrix kernels (was mislabelled lib:linalg; catalogue/lapack.md)
+0x18008d910	0x18008ee2f	fluff	lib	f2c CLAPACK, double precision packed Cholesky subset (catalogue/lapack.md)
+0x18008ee30	0x18009cfff	core	ctrltracker	controller UKF solver and its double-precision matrix kernels (was mislabelled lib:linalg; catalogue/lapack.md)
 0x180083700	0x18008d3ff	fluff	lib	f2c CLAPACK, single precision (catalogue/lapack.md)

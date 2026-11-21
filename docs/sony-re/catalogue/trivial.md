@@ -8,7 +8,7 @@ only zeroes fields, a record copy or an obfuscated-string decoder. The
 role column is in our own words and is `[sure]` for the shape; what the
 caller does with the value is in the caller's own entry.
 
-795 functions.
+793 functions.
 
 ## app:dialog (3)
 
@@ -171,7 +171,7 @@ caller does with the value is in the caller's own entry.
 | `0x180109d40` | core | const_ret | returns the constant 0 | none (vtable/callback) |
 | `0x180109d60` | core | dtor | destructor of `RnD::Robustifier` (frees itself when the flag argument is set) | none (vtable/callback) |
 
-## ctrl-tracker (66)
+## ctrl-tracker (64)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -218,7 +218,6 @@ caller does with the value is in the caller's own entry.
 | `0x18005bf30` | core | zero_init | constructor/reset: sets about 39 fields to zero or defaults | `0x18005b860`, `0x18005bb00` +1 |
 | `0x18005d360` | core | eh_ctor | constructs an array at +0x5 of 2 × 0x2218-byte elements (element function `0x18005d440`) | none (vtable/callback) |
 | `0x18005d3d0` | core | dtor | destructor of `UkfManager` (frees itself when the flag argument is set) | none (vtable/callback) |
-| `0x18005d440` | core | eh_ctor | constructs an array at +0x3e9 of 4 × 0xb0-byte elements (element function `0x180061900`) | `0x18005d180`, `0x18005d2d0` +2 |
 | `0x18005d580` | core | eh_ctor | destroys an array at +0x5 of 2 × 0x2218-byte elements (element function `0x18005d4b0`) | none (vtable/callback) |
 | `0x18005f180` | core | dtor | destructor of `OIFusion::OpticalMarkerData` (frees itself when the flag argument is set) | none (vtable/callback) |
 | `0x180060000` | core | const_ret | returns the constant 0 | none (vtable/callback) |
@@ -234,7 +233,6 @@ caller does with the value is in the caller's own entry.
 | `0x180061490` | core | eh_ctor | constructs an array at +0x2 of 4 × 0xb0-byte elements (element function `0x180061900`) | none (vtable/callback) |
 | `0x180061ab0` | core | getter | identity: returns argument 1 | none (vtable/callback) |
 | `0x180063480` | core | thunk | forwards to `0x180063310` with extra constant arguments | none (vtable/callback) |
-| `0x180067900` | core | copy | copies a record field by field (about 38 fields) | `0x1800676a0`, `0x180067b50` +1 |
 | `0x180069950` | core | xordec | decodes an obfuscated log string (XOR with fixed 64-bit keys) | none (vtable/callback) |
 | `0x18006ae80` | core | setter | reads one lane of a SIMD vector selected by argument 2 | none (vtable/callback) |
 | `0x18006aec0` | core | setter | reads one lane of a SIMD vector selected by argument 2 | none (vtable/callback) |

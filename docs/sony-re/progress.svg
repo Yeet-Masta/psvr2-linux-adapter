@@ -1,14 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="96" viewBox="0 0 640 96" role="img" aria-label="PSVR2 DLL: 2445 of 5175 functions documented">
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="96" viewBox="0 0 640 96" role="img" aria-label="PSVR2 DLL: 2609 of 5175 functions documented">
 <style>
 text{font:600 14px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#1f2328}
 .s{font-weight:400;font-size:12px;fill:#59636e}
 .track{fill:#d1d9e0}
 @media (prefers-color-scheme:dark){text{fill:#f0f6fc}.s{fill:#9198a1}.track{fill:#3d444d}}
 </style>
-<text x="16" y="26">PSVR2 driver DLL: 2445 / 5175 functions documented (47.2%)</text>
-<text x="624" y="26" text-anchor="end" class="s">55.9% of code by lines</text>
+<text x="16" y="26">PSVR2 driver DLL: 2609 / 5175 functions documented (50.4%)</text>
+<text x="624" y="26" text-anchor="end" class="s">57.9% of code by lines</text>
 <rect class="track" x="16" y="40" width="608" height="22" rx="5"/>
 <clipPath id="c"><rect x="16" y="40" width="608" height="22" rx="5"/></clipPath>
-<g clip-path="url(#c)"><rect x="16.0" y="40" width="157.1" height="22" fill="#2f81f7"/><rect x="173.1" y="40" width="22.3" height="22" fill="#a371f7"/><rect x="195.4" y="40" width="107.9" height="22" fill="#8b949e"/></g>
-<rect x="16" y="76" width="10" height="10" rx="2" fill="#2f81f7"/><text x="30" y="85" class="s">core 1337/2427</text><rect x="166" y="76" width="10" height="10" rx="2" fill="#a371f7"/><text x="180" y="85" class="s">ref 190/1025</text><rect x="316" y="76" width="10" height="10" rx="2" fill="#8b949e"/><text x="330" y="85" class="s">fluff 918/1723</text>
+<g clip-path="url(#c)"><rect x="16.0" y="40" width="172.7" height="22" fill="#2f81f7"/><rect x="188.7" y="40" width="22.3" height="22" fill="#a371f7"/><rect x="211.0" y="40" width="111.5" height="22" fill="#8b949e"/></g>
+<rect x="16" y="76" width="10" height="10" rx="2" fill="#2f81f7"/><text x="30" y="85" class="s">core 1470/2396</text><rect x="166" y="76" width="10" height="10" rx="2" fill="#a371f7"/><text x="180" y="85" class="s">ref 190/1025</text><rect x="316" y="76" width="10" height="10" rx="2" fill="#8b949e"/><text x="330" y="85" class="s">fluff 949/1754</text>
 </svg>

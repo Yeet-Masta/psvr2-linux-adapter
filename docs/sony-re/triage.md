@@ -7,9 +7,9 @@ Every function in [`scripts/sony-re/inventory.tsv`](../../scripts/sony-re/invent
 
 | Verdict | Meaning | Functions | Decompiled lines |
 |---------|---------|----------:|-----------------:|
-| **core** | Behaviour the Linux driver needs: already ported, or still to port. | 2435 | ~206 k |
+| **core** | Behaviour the Linux driver needs: already ported, or still to port. | 2396 | ~204 k |
 | **ref** | Worth reading to understand the device or Sony's design, or an optional feature (relocaliser). Nothing to port now. | 1025 | ~96 k |
-| **fluff** | Library code, Windows glue, Sony's companion-app UI, VrTrace debug capture, initialisers. Skip. | 1715 | ~80 k |
+| **fluff** | Library code, Windows glue, Sony's companion-app UI, VrTrace debug capture, initialisers. Skip. | 1754 | ~83 k |
 
 Columns of `triage.tsv`: `va`, `lines` (Ghidra line count from the
 inventory), `subsystem` (inventory label), `verdict`, `area` (what part of
@@ -72,7 +72,7 @@ what is still missing.
 | irtracker | core | 104 | 7 k | 41 | Headset INS helpers (quaternion, filters) | `psvr2_ins.c` (strapdown + mode-1 blender) |
 | room | core | 105 | 6 k | 14 | Map-state singleton, universe/chaperone file, default play area | Own chaperone file in `hmd_device_driver.cpp` (`provide_chaperone`) |
 | io | core | 30 | 5 k | 0 | Low-level HID/USB I/O wrappers (libpad device threads, overlapped reads) | Replaced by hidraw / usbfs |
-| ctrltracker | core | 347 | 31 k | 36 | UKF kernels, process noise, quaternion maths; the UKF predict / correct / replay code and its double-precision matrix kernels at `0x180070950`–`0x18009cfff` (first mislabelled as a library, see `catalogue/lapack.md`) | `sie/ctrltracker`, `controller_ukf.cpp` |
+| ctrltracker | core | 317 | 29 k | 36 | UKF kernels, process noise, quaternion maths; the UKF predict / correct / replay code and its double-precision matrix kernels at `0x180070950`–`0x18009cfff` (first mislabelled as a library, see `catalogue/lapack.md`) | `sie/ctrltracker`, `controller_ukf.cpp` |
 | ledsync | core | 4 | 0.1 k | 0 | Few helpers; the LedSyncer itself is under tracking/steamvr | `led_syncer.cpp` |
 | reloc | ref | 874 | 84 k | 0 | Relocaliser: keyframes, pose graph, map DB, RP frame unpack | Not done (optional, `DEV-NOTES.md`); RP data exposed on `/dev/psvr2-rp` |
 | config | ref | 35 | 2 k | 0 | `ConfigManager`: `config.ini`, change notifications | Settings in `steamvr.vrsettings` instead |
@@ -80,8 +80,8 @@ what is still missing.
 | status | ref | 5 | 0.7 k | 0 | Status-info dispatcher (mode, proximity, thermal warning) to UI prompts | Field meanings only |
 | firmware | ref | 6 | 0.7 k | 0 | `HMD2_FIRMWARE.CUP` version check beside the app | Not needed |
 | trace-format | ref | 9 | 0.8 k | 9 | VrTrace parsers that document wire formats (image header V0200, `ST` frame TOC) | Formats in `trace.md` §4 |
-| lib | fluff | 1055 | 41 k | – | CRT, STL, jsoncpp, dense linear algebra, Eigen, OpenCV-derived SVD/Rodrigues, thunks, CRT startup | Use libc / Eigen / OpenCV |
-| debug | fluff | 363 | 20 k | 316 | VrTrace capture tool, IR recording writer, debug status text | – |
+| lib | fluff | 1092 | 43 k | – | CRT, STL, jsoncpp, dense linear algebra, Eigen, OpenCV-derived SVD/Rodrigues, thunks, CRT startup | Use libc / Eigen / OpenCV |
+| debug | fluff | 365 | 21 k | 316 | VrTrace capture tool, IR recording writer, debug status text | – |
 | trace | fluff | 105 | 9 k | – | Remaining VrTrace helpers | – |
 | app | fluff | 74 | 6 k | – | `VrDialogManager` (dialogs, desktop/see-through guides, safety notice, locale), companion-app launch and Authenticode checks | – |
 | init | fluff | 81 | 4 k | – | Static initialisers (`0x180001000–0x180008160`) | – |
@@ -134,7 +134,7 @@ tracker most likely still approximates.
 
 ## 4. What is fluff, and why
 
-- **Libraries (1055 in area `lib`).** MSVC CRT/STL, jsoncpp, an f2c CLAPACK
+- **Libraries (1092 in area `lib`).** MSVC CRT/STL, jsoncpp, an f2c CLAPACK
   (`0x180083700–0x18008d3ff`, `catalogue/lapack.md`), Eigen integrators,
   OpenCV-derived SVD / Jacobi / Rodrigues / fisheye projection, import
   thunks, CRT startup and exception funclets. Linux uses its own libraries.

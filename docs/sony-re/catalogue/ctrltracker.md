@@ -206,3 +206,104 @@ vector by the sigma point's attitude (`0x180058720`). `0x180097110` and
 | `0x18009aa00`, `0x18009aca0` | 70, 49 | normal-equation accumulators for a 4-parameter fit |
 | `0x18009b420`, `0x18009b7c0`, `0x18009bf60`, `0x18009c400` | 163–302 | 4-parameter least-squares fits solved with the 4 × 4 inverse `0x180059000` (centre and radius of a sphere through accelerometer samples, i.e. an accelerometer offset calibration); only `0x18009b7c0` is reached (from `0x18009a1a0`) |
 | `0x18009aea0`, `0x18009b080` | 78, 119 | per-axis acceptance flags for that fit (fabs tests); no caller |
+
+## 6. `UkfManager` object, snapshot I/O and helpers (`0x180050000`–`0x18006ffff`)
+
+### Manager and filter object [sure unless tagged]
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x180061950`, `0x18005d180`, `0x18005d2d0` | 15–19 | create the `UkfManager` singleton (0x4460 bytes; two per-hand filters of 0x2218 bytes, ctor `0x18005d440`, dtor `0x18005d4b0`) and a 1.5 MB (0x180000) arena |
+| `0x180061920` | 16 | destroy the singleton |
+| `0x18005d0e0` | 25 | bump allocator in that arena with alignment; logs "Memory allocated for pad_tracker is not enough" when the 1.5 MB is used up |
+| `0x18005d220` | 35 | reset both filters (`0x180063d30`) |
+| `0x18005d4b0`, `0x18005d530` | 19, 15 | per-hand filter dtor: measurement buffer (`Array<VisionBufferElement<DotMarkerData>,4>`, 0xb0-byte entries) and five mutexes (`+0x3a8`, `+0x3f8`, `+0xee0`, `+0xf30`, `+0xf80`) |
+| `0x18005cff0` | 12 | destroy two of those mutexes |
+| `0x18005c0d0` | 19 | reset a filter's working state: clear counters, zero the pose block (`0x18005a570`) and the covariance (`0x180060a40`) |
+| `0x18006d6e0` | 45 | allocate the filter's work matrices (15-vector, packed 15 × 15 double, ...) and the noise blocks (`0x180092300`, `0x180092560`, `0x180092630`) |
+| `0x18005dff0` | 73 | start a filter from an external pose: `0x18005dab0`, then the first-measurement init `0x180068620` [likely] |
+| `0x18005e240` | 72 | convert one state entry to the exported pose record: time `+0x108`, position, velocity, attitude (double → float), rates [sure] |
+| `0x18005e340` | 106 | under the manager mutex, copy up to n newest state entries, newest first, as 184-byte exported records (`0x18005e240`) [likely: the history query] |
+| `0x18005e590` | 21 | read one field of a filter under its mutex `+0xf58` |
+| `0x18005e9c0`, `0x18005eac0` | 89, 97 | copy the three 128-byte records at `+0x6c8` out, then reset (`0x180063f50`) [likely] |
+| `0x18005f8b0` | 22 | store position and quaternion into a measurement record |
+| `0x18005f8f0` | 10 | set one flag byte in both per-hand filters (`+0x7f8`) |
+| `0x18005b770`, `0x18005b790` | 10, 51 | filter config defaults: two 32-byte constant blocks, 0.001 and 0.1 (as raw floats), 60000 (µs) [sure for the values] |
+
+### Snapshot save / restore [sure]
+
+A filter can be written to and read back from a flat buffer. The buffer
+starts with the magic `UKF` plus a zero byte and must be at least 2 MB
+(`0x18005e670`, which logs "snapshot header is invalid magic." otherwise);
+`0x18005c130` writes, `0x18005c7f0` reads.
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x18005e670` | 17 | check the magic and size, then restore |
+| `0x180057f30`, `0x1800580b0` | 18, 21 | write the two top-level blocks |
+| `0x180057fa0`, `0x180058130` | 58, 80 | read them |
+| `0x180057050`, `0x180057560` | 77, 138 | write composite blocks (several vectors and matrices) |
+| `0x1800571e0`, `0x180057850` | 210, 371 | read composite blocks |
+| `0x180056b60`, `0x180056df0`, `0x180056f20` | 39 | write a vector (count, then 8-byte items) |
+| `0x180056c10`, `0x180056ea0`, `0x180056fd0` | 28 | read a vector |
+| `0x180056c90`, `0x180056d70` | 40, 22 | write / read a dense matrix (rows, cols, items) |
+| `0x18005aae0`, `0x18005b010` | 282, 366 | write / read the state ring (456-byte entries) |
+| `0x180059d90`, `0x180059f00` | 84, 81 | write / read a ring of 96-byte entries |
+| `0x18005a160`, `0x18005a280` | 72, 66 | write / read a ring of 24-byte entries |
+| `0x180060910`, `0x1800608a0` | 31, 30 | write / read the measurement ring (480-byte entries) |
+| `0x180060ba0`, `0x180060b30` | 31, 30 | the same for 60-byte entries |
+| `0x180060cb0`, `0x180060c40` | 31, 30 | the same for 456-byte entries (a second state ring) |
+| `0x180060e00`, `0x180060d90` | 33, 30 | the same for 16-byte entries |
+| `0x180060f10`, `0x180060ea0` | 31, 30 | the same for 24-byte entries |
+| `0x180061020`, `0x180060fb0` | 33, 30 | the same for 64-byte entries |
+| `0x180061130`, `0x1800610c0` | 31, 30 | the same for 96-byte entries |
+| `0x180056a10`, `0x1800619d0` | 32 | `memcpy_s` copies used by these |
+
+### State, covariance and ring helpers [sure unless tagged]
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x180060a40` | 24 | reset a packed 15 × 15 float covariance (480 bytes) to the identity |
+| `0x1800634b0` | 25 | build a diagonal packed covariance from five float3 variances (position, velocity, attitude, gyro bias, accel bias) |
+| `0x180065390` | 85 | P0 for a new filter: attitude (1°, 5°, 1°)², velocity 0.04, position 0.0025, through `0x1800634b0` (values of `tracking.md` §5.5) |
+| `0x180063220`, `0x180063310`, `0x1800633c0` | 46, 23, 22 | clear / read / write a 3 × 3 block of the packed 15 × 15 covariance (row offset by the 29 − i rule) |
+| `0x18006ace0` | 56 | fill a packed double matrix with one value |
+| `0x18006abf0`, `0x18006ac30`, `0x18006ac80`, `0x18006acb0` | 13, 13, 10, 10 | allocate a double vector / packed matrix; free them |
+| `0x18006a000`, `0x180063890` | 14, 13 | allocate a 128-entry ring of 480-byte measurements; a 128 KB block |
+| `0x180062710`, `0x18006a240` | 48, 45 | copy one state ring into another when the sizes match |
+| `0x180062c30` | 53 | sanity check of the newest state entry: any position component beyond 10000 → reset [likely] |
+| `0x180062d60`, `0x1800675e0` | 104, 44 | find a ring entry by timestamp (log tag `LIT::searchOffsetByTimestamp`); index lookup with −1 when out of range |
+| `0x1800654f0` | 134 | start a state entry from another one: copy time and attitude, zero the velocity and biases; no caller [likely] |
+| `0x180067410` | 67 | divergence test as in `tracking.md` §5.5 (\|v\| over the limit at config `+0x798`, gyro or accel bias over `+0x7a0` / `+0x79c`) followed by a covariance reset; no caller (the live copy is inside `0x180067b50`) |
+| `0x1800676a0` | 169 | build a measurement-time snapshot of the newest state and measurement (`0x180067900`, slot `+0x50` of the measurement); no caller |
+| `0x180059cb0`, `0x180059d20`, `0x18005a060`, `0x18005a0c0`, `0x18005a110` | 13–22 | state-entry ctors: zero fields, default standard deviations 0.01 |
+| `0x180059b60`, `0x180059bc0`, `0x18005a390`, `0x18005a3e0`, `0x18005a430`, `0x18005a800`, `0x18005a860` | 7–30 | pose / vector record ctors (zero position, unit axis, cleared flags) |
+| `0x180058c60`, `0x180058cd0` | 11 | 3 × 3 identity; diagonal 3 × 3 from a float3 |
+| `0x180058bc0` | 4 | read element (r, c) of a 4-wide matrix |
+| `0x180062490`, `0x180062540` | 22, 20 | 3 × 3 transpose between row and column layouts |
+| `0x180062610` | 9 | apply a rotation to the four columns of a 4 × 4 pose (`0x180058e40`) |
+| `0x180063140` | 32 | 3 × 3 product then repack (`0x1800621a0`) |
+| `0x180063580` | 72 | combine several float3 inputs with three 3 × 3 matrices into one result; no caller [guess] |
+| `0x18005f150`, `0x180061900` | 3, 2 | `DotMarkerData` vtable stores (ctor / dtor) |
+| `0x180060030` | 62 | `DotMarkerData` slot: the measurement mapped through a 4 × 4 transform (0 if invalid) |
+| `0x180060570` | 16 | `DotMarkerData` slot `+0x60`: the vector at `+0x38` if valid (`ukf.md` §3) |
+| `0x1800617a0`, `0x180060590`, `0x180060690`, `0x1800612f0`, `0x180061370`, `0x180061880` | 9–62 | the 4-entry measurement buffer (`VisionBufferElement`, 0xb0 bytes): shift entries down, insert, pop and count |
+| `0x180069a20`, `0x180069b50`, `0x180069d20`, `0x180069e10`, `0x18006a070` | 16–33 | in-place XOR decoders for obfuscated log strings; no caller |
+
+### Generic code inside this range (library / debug) [sure]
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x180050370`, `0x1800505a0`, `0x180050880`, `0x1800509c0`, `0x180050b60` | 70–80 | `std::string` / `std::wstring` grow and append |
+| `0x180050d10`, `0x180052760`, `0x1800527e0`, `0x180053020`, `0x180053070`, `0x180053620`, `0x1800537b0` | 7–19 | `std::map` sentinel and node allocation, recursive node free |
+| `0x180052670` | 20 | 32-byte aligned `operator new` |
+| `0x180052e80` | 45 | narrow string → `std::wstring` through the filesystem code page (`__std_fs_code_page`, `__std_fs_convert_narrow_to_wide`) |
+| `0x180056ae0` | 15 | lock a mutex, throw on error |
+| `0x180053840`, `0x180053870`, `0x180053890`, `0x1800538d0`, `0x180053970`, `0x180053a20`, `0x180054710` | 12–29 | `std::thread` / `std::mutex` / `std::condition_variable` wrappers (join, lock, timed wait, move) |
+| `0x180054870`, `0x180054a90` | 58, 27 | condition wait with a timeout in ms (clamped to 10 days) |
+| `0x180053b00`, `0x180053bd0`, `0x180053cd0`, `0x180053d10`, `0x180053d40` | 13–28 | `IrFramework::Thread` dtor and stop/join; `IrFramework::Event` ctor, dtor and signal |
+| `0x180053e70`, `0x180053f30`, `0x1800544d0`, `0x180054490` | 20–24 | `WorkerThread` ctor, dtor, signal, stop |
+| `0x180053b20`, `0x180053fc0`, `0x180054570`, `0x180054690`, `0x1800547c0`, `0x1800549e0`, `0x180054bd0`, `0x180054c20` | 11–40 | start a thread through `_beginthreadex` with a heap-allocated (object, entry) pair, the shared thread entry, and the stop of a worker in the global table at `0x1805f65e0` (stride 408) |
+| `0x1800542c0` | 53 | worker job dispatch by job type (0–3), e.g. the cross boot `0x1800a5ac0` (`catalogue/ctrlboot.md`) |
+| `0x180050010`, `0x180050f30`, `0x180051060`, `0x180051190` | 21–63 | destructors of the rig object `0x1805f6cb0` (element arrays, `RnD::Vector` members) |
+| `0x180054ec0`, `0x1800558e0` | 313, 291 | draw a text string into an 8-bit image with a 16 × 16-glyph bitmap font (glyph index from the character, size from the last argument); no caller — debug overlay |

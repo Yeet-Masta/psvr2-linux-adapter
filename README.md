@@ -134,6 +134,50 @@ packaging/       Arch PKGBUILD (psvr2-dkms)
 install.sh       DKMS install / uninstall.sh to reverse
 ```
 
+## Reverse-engineering progress
+
+<!-- re-progress:start -->
+
+![PSVR2 DLL reverse-engineering progress](docs/sony-re/progress.svg)
+
+Progress of understanding Sony's PSVR2 SteamVR driver DLL, function by
+function. *Triaged* means the function has a verdict (core: the Linux
+driver needs it; ref: reference only; fluff: library or debug code).
+*Documented* means a doc under [docs/sony-re](docs/sony-re) explains it.
+Regenerate with `python scripts/sony-re/triage/progress.py`.
+
+| Stage | Progress | Functions |
+|---|---|---|
+| Triaged | `████████████████████` 100% | 5175 / 5175 |
+| Documented (all) | `████░░░░░░░░░░░░░░░░` 20% | 1019 / 5175 |
+| Documented (core) | `███████░░░░░░░░░░░░░` 36% | 786 / 2207 |
+| Documented (ref) | `█░░░░░░░░░░░░░░░░░░░` 7% | 72 / 1025 |
+| Documented (fluff) | `██░░░░░░░░░░░░░░░░░░` 8% | 161 / 1943 |
+
+<details><summary>Core functions by subsystem</summary>
+
+| Subsystem (core functions) | Progress | Documented |
+|---|---|---|
+| `ctrl-boot` | `███████░░░░░░░░░░░░░` 36% | 276 / 758 |
+| `ctrl-tracker` | `█████░░░░░░░░░░░░░░░` 23% | 69 / 298 |
+| `libpad` | `█████████░░░░░░░░░░░` 43% | 124 / 290 |
+| `map+steamvr` | `██████░░░░░░░░░░░░░░` 30% | 75 / 247 |
+| `ins+irtracker` | `███████░░░░░░░░░░░░░` 33% | 77 / 232 |
+| `steamvr` | `███████░░░░░░░░░░░░░` 36% | 36 / 100 |
+| `ledsync` | `███████████░░░░░░░░░` 57% | 51 / 89 |
+| `config` | `████░░░░░░░░░░░░░░░░` 20% | 17 / 86 |
+| `debug:trace` | `████████████░░░░░░░░` 59% | 26 / 44 |
+| `tracking` | `███████░░░░░░░░░░░░░` 37% | 7 / 19 |
+| `room` | `█████████████████░░░` 87% | 13 / 15 |
+| `sense` | `██████████████░░░░░░` 69% | 9 / 13 |
+| `math+threads` | `█████░░░░░░░░░░░░░░░` 27% | 3 / 11 |
+| `lib:linalg` | `███████████████░░░░░` 75% | 3 / 4 |
+| `import/thunk` | `░░░░░░░░░░░░░░░░░░░░` 0% | 0 / 1 |
+
+</details>
+
+<!-- re-progress:end -->
+
 ## Contributing
 
 This is an early-stage, community-oriented project — issues, fixes, and new

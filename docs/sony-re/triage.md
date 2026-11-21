@@ -101,6 +101,7 @@ driver-from-head, chaperone file, INS, LED sync, UKF). What is still open:
 | INS mode-0 adaptive blender, stillness / shock switches, SLAM good-frame count | blender `0x180181400` and its callers (tracking.md §3.1) | core | `psvr2_ins.h` says only mode 1 is done; mode-0 gains are unknown. |
 | Extreme-environment blob modes 2–4 | ledsync / ctrlboot (`notdone.md`) | core | Need tracker settings that are 0 in a normal install. |
 | Hardware checks | UKF, two-controller sync, BROAD divider | core | Implemented, not yet confirmed on hardware (`DEV-NOTES.md`). |
+| Background model (static IR lights) | `RnD::Background`, `0x1800b40e0` and stages (`background.md`) | core | Not in the driver: Sony scores every blob against a 3D map of static lights before the controller solve. Where the solver reads the score is still open. |
 
 ### 3.2 Core functions no doc describes yet
 
@@ -123,7 +124,8 @@ headset-usb 1. The largest:
 | `0x18005c7f0`, `0x18005c130`, `0x1800641d0` | 529, 457, 441 | UKF snapshot code `0x18005e5f0–0x18005e6e0` | UKF snapshot save/restore [likely] |
 | `0x1801780e0` | 506 | `0x1801792a0` | INS status / version log ("%dDoF") [likely] |
 | `0x18006f020`, `0x180068ee0`, `0x18006dbd0` | 594, 443, 429 | ctrltracker | UKF steps not yet in `ukf.md` |
-| `0x1800b8b00`, `0x1800b43d0`, `0x1800b3090`, `0x1800b53c0`, `0x1800a88f0` | 780–822 | ctrlboot `0x1800b40e0`, `0x1800a37f0` | boot search stages |
+| `0x1800b43d0`, `0x1800b3090`, `0x1800b53c0` | 816–818 | ctrlboot `0x1800b40e0` | **background model** stages (static IR lights), now in `background.md` |
+| `0x1800b8b00`, `0x1800a88f0` | 780–822 | ctrlboot `0x1800a37f0` | `0x1800a88f0`: close-range fusion path of `0x1800a37f0` (`catalogue/ctrlboot.md`) |
 | `0x1800ea4c0` | 411 | ctrlboot | connected components (blob labelling) |
 
 Read the four IR-thread stages first: they run per LD frame between the

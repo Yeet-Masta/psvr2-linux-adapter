@@ -426,6 +426,26 @@ bool ControllerUkf::Update( State &s, const Fix &f )
 				C[i][j] += wgt * di * e[j];
 		}
 	}
+	// Central sigma point (Sony 0x1800942f0): alpha = 1, beta = 2, kappa = 0
+	// give it mean weight 0 and covariance weight 2. Its state deviation is
+	// zero, so it adds to S only, not to C.
+	{
+		double h0[kMaxM], e0[kMaxM];
+		h0[0] = s.p.x, h0[1] = s.p.y, h0[2] = s.p.z;
+		if ( m == 12 )
+		{
+			double R[3][3];
+			Rot( s.q, R );
+			for ( int c = 0; c < 3; c++ )
+				for ( int r = 0; r < 3; r++ )
+					h0[3 + 3 * c + r] = kTip * R[r][c];
+		}
+		for ( int i = 0; i < m; i++ )
+			e0[i] = h0[i] - ybar[i];
+		for ( int i = 0; i < m; i++ )
+			for ( int j = 0; j < m; j++ )
+				S[i][j] += 2.0 * e0[i] * e0[j];
+	}
 	for ( int i = 0; i < m; i++ )
 		S[i][i] += i < 3 ? sp * sp : sr * sr;
 

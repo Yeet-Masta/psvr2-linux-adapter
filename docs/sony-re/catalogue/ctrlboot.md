@@ -58,6 +58,28 @@ For each controller `i`:
    (overlay) and `0x1800dde10` [sure for readers; purpose: close-range
    handling, likely].
 
+## Debug overlay (fluff) [sure]
+
+Draws into an RGB debug image; none of it affects tracking. Marked fluff
+in `triage.tsv`.
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x1800bdd00` | 76 | 8×8 text at (x, y), clipped to the image |
+| `0x1800bdec0` | 99 | Bresenham line |
+| `0x1800be0c0` | 110 | line / cross with colour |
+| `0x1800be3e0` | 97 | rectangle |
+| `0x1800be530` | 675 | ellipse outline from line segments |
+| `0x1800bedc0` | 683 | covariance ellipse of a blob |
+| `0x1800bf660`, `0x1800bf750` | 38, 216 | circle, filled marker |
+| `0x1800d5c40` | 101 | coloured marker |
+| `0x1800d5fc0` | 750 | tracking-state overlay (`notdone.md`) |
+| `0x1800d6e50`, `0x1800d7410` | 320, 699 | one controller: LED projections, pose, blobs |
+| `0x1800d7da0` | 162 | pose axes |
+| `0x1800d8890`, `0x1800a1e80` | 63, 66 | integer and controller-id labels |
+| `0x1800a1ce0`, `0x1800a1d60` | 19, 33 | per-controller overlay thunks |
+| `0x18004c590`, `0x18004c600`, `0x18004c9c0`, `0x1800474f0` | 14–660 | overlay entry points in the tracking frontend |
+
 ## Multi-camera frame step (`0x180048690`, tracking frontend) [sure unless tagged]
 
 Called by the per-frame core `0x18004b0a0`. Order of work:

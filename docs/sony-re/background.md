@@ -110,6 +110,7 @@ Accepted points become landmarks with an initial value 20.0 per camera
 | `0x1800b3fe0` | 64 | slot 3: zero the camera's score array, then write each landmark's score at its blob index (camera 0 → view 0 side A, 1 → view 0 side B, 2 → view 1 side B, 3 → view 2 side B) [sure] |
 | `0x1800b6450`, `0x1800b9f00` | 470, 451 | debug overlays (slot 4) [sure] |
 | `0x1800b7040` | 145 | Background2 per-camera update → `0x1800b7350`, `0x1800b85b0`, `0x1800b9740` (dead on PC) [likely] |
+| `0x1800b8b00` | 822 | Background2 counterpart of `0x1800b3090` (same arguments, shares `0x1800b2e20`; no direct caller) [likely] |
 | `0x1800b82f0` | 39 | Background2 slot 3: scores from 288-byte spot records [sure] |
 | `0x18004c9c0` | 22 | debug: draws the active model through slot 4 [sure] |
 

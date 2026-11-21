@@ -65,3 +65,17 @@
 0x180046f40	-	core	tracking	default tracker-settings struct (3, 3, 20, 7, 5, 5, ...)
 0x18004c9c0	-	fluff	debug	debug draw of one camera image through the overlay object (vtable slot 4)
 0x18004d610	-	ref	tracking	tracker statistics snapshot (ratios, frame counts, copy of a global std::map)
+0x1800bdd00	0x1800bf8ff	fluff	debug	debug-overlay raster primitives (8x8 text, Bresenham line, cross, circle, ellipse into an RGB image)
+0x1800d5c40	-	fluff	debug	overlay: coloured marker
+0x1800d5fc0	-	fluff	debug	overlay: tracking state text and markers (notdone.md 2.x)
+0x1800d6e50	-	fluff	debug	overlay: one controller (LED projections)
+0x1800d7410	-	fluff	debug	overlay: one controller (pose, blobs)
+0x1800d7da0	-	fluff	debug	overlay: pose axes
+0x1800d8890	-	fluff	debug	overlay: integer label
+0x1800a1ce0	-	fluff	debug	overlay thunk for one controller
+0x1800a1d60	-	fluff	debug	overlay thunk for one controller
+0x1800a1e80	-	fluff	debug	overlay: controller id label
+0x1800b6450	-	fluff	debug	Background overlay (vtable slot 4)
+0x1800b9f00	-	fluff	debug	Background2 overlay (vtable slot 4)
+0x18004c600	-	fluff	debug	overlay: inlier count text
+0x18004c590	-	fluff	debug	debug-overlay entry for one camera (sets two overlay flags, calls 0x1800474f0)

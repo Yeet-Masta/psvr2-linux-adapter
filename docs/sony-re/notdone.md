@@ -1415,6 +1415,24 @@ No new unknowns block it. In short:
 - So only an external process that writes that shared-memory block (a
   Sony tool or the PS VR2 app) can enable Extreme-Env. There is no
   SteamVR setting, registry key or file for it in this DLL.
+- The same block holds the LED-sync phase hold (`+0x05`, `ledsync.md`
+  §3.2), a debug knob that pins controllers to one phase. Extreme-Env
+  mode 3 is the only code in the DLL that writes it.
+
+What an opt-in port would need (none of it is in the driver yet):
+
+1. A setting standing in for `+0x34` (force) and `+0x33` (auto entry from
+   Many Blob, and which of modes 2/3/4).
+2. The two extra `0x09` blocks from `ledsync.md` §2.6 (`Block09` in
+   `optical_tracker.cpp` has only Normal and Many Blob).
+3. The entry and exit rules of `ledsync.md` §4.3: 5 flagged packets in a
+   row to enter from Many Blob, 180 flag-free packets to leave.
+4. In mode 3, hold every controller in PRESCAN (`LedSyncer::HoldPrescan`)
+   and release it on the way out.
+
+What blocks 0x08/0x0e = `0xff` (mode 4) and block 0x15 = 1/2 do inside the
+headset is not known [guess: harder blob rejection for bright, cluttered
+rooms]. Without hardware tests, Normal ↔ Many Blob is the safer default.
 
 ---
 

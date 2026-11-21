@@ -328,8 +328,27 @@ works from BROAD onward with a wider window [likely].
 | > 5 s since this controller's last tracker pass | INIT |
 | Controller connection id (info `+0x08`) changed | INIT |
 | Transport mode (info `+0x68`) went from 2 to 1 while in phases 1..4 | INIT |
-| Extreme-Env mode 3 active (§4.3) | Force PRESCAN |
+| Phase hold = 1 (below; Extreme-Env mode 3 sets it, §4.3) and phase ≠ PRESCAN | PRESCAN |
+| Phase hold = 2 and phase is BG or STABLE | PRESCAN |
+| Phase hold = 3 and phase is STABLE | BG |
 | Phase 0, 5 or 6 at end of checks | PRESCAN |
+
+**Phase hold** (tracker setting byte `+0x05`, `0x18035b9f5`, read through
+`FUN_180189c20`) [sure]. A debug knob that pins every controller to one
+phase. 0 = off (the default; `FUN_18018a7e0` zero-fills it). 1 = PRESCAN,
+2 = BROAD, 3 = BG, 4 = STABLE. Besides the forced moves above, each phase
+handler skips its normal exit while the hold names that phase:
+
+| Hold | Exit it blocks | Handler |
+|------|----------------|---------|
+| 1 | PRESCAN → BROAD | `FUN_1801971f0`, `FUN_180199150` |
+| 2 | BROAD → BG (slot 4 centred), BROAD → PRESCAN after 10 s | `FUN_180198240` |
+| 3 | BG → STABLE, BG → PRESCAN after 13 s | `FUN_1801975e0` |
+| 4 | STABLE → BG every 100 s, STABLE → PRESCAN after 15 s invisible | `FUN_1801992b0` |
+
+Only Extreme-Env mode 3 writes the hold from inside the DLL (§4.3). Any
+other value has to come through the shared tracker-settings block
+(`notdone.md` §6).
 
 ## 4. State machines
 
@@ -375,13 +394,54 @@ Runs once per LD packet with version > 0x100.
 |------|------|-------|-------|
 | 0 | Normal | start; or Many Blob quiet for 480 frames | camera 0 or 1 reports ≥ 200 blobs, or its flag bits are set → 1 |
 | 1 | Many Blob | from Normal; or from Extreme after 180 quiet frames | ≤ 49 blobs on both cameras for 480 frames → 0 |
-| 2 / 3 / 4 | Extreme Env | tracker settings byte `+0x34` set; `+0x33` = 0/2/3 picks 2/3/4 | 180 frames without camera flags → 1 |
+| 2 / 3 / 4 | Extreme Env | see below | 180 frames in a row without camera 0/1 flags → 1 |
 
-"Quiet" means: camera 0/1 flag bits clear and (for Many Blob) both blob
-counts ≤ 49. The two Extreme-Env settings bytes default to 0, so a normal
-install only uses Normal ↔ Many Blob [likely]. Mode 3 forces every
-controller back to PRESCAN while it lasts. Each mode has its own `0x09`
-block (§2.6).
+Extreme-Env entry, checked every packet, any current mode:
+
+- tracker settings byte `+0x34` non-zero: enter at once;
+- else, in Many Blob only: settings byte `+0x33` non-zero and camera 0 or 1
+  flag bits set on 5 packets in a row (counter `0x18035be28`; any packet
+  that fails the test resets it).
+
+Which mode: `+0x33` = 2 → mode 3, 3 → mode 4, any other value (0 and 1
+included) → mode 2. While `+0x34` stays set, the mode is re-entered on
+every packet, so it never times out.
+
+"Quiet" for the Many-Blob exit means both blob counts ≤ 49. The camera
+flags do not count there unless `+0x33` is non-zero (then a flagged packet
+resets the quiet count and feeds the Extreme-Env entry instead). After a
+Many-Blob exit the Normal test runs on the same packet, so a flagged packet
+goes straight back to Many Blob: the mode at the end of the packet is
+unchanged, nothing is pushed, and only the two log lines and the switch
+counter show it. "Quiet" for the Extreme-Env exit means camera 0/1 flag
+bits clear; blob counts do not matter there.
+
+The two Extreme-Env settings bytes default to 0, so a normal install only
+uses Normal ↔ Many Blob [likely]. Each mode has its own `0x09` block (§2.6).
+
+Mode 3 sets the phase hold (§3.2) to 1, so every controller sits in
+PRESCAN while mode 3 lasts. Leaving mode 3 for Many Blob clears the hold
+to 0. Leaving modes 2 or 4 leaves it as it was [sure].
+
+Bookkeeping in the tracker object [sure unless tagged]:
+
+| Off | Type | Meaning |
+|-----|------|---------|
+| `+0x4d24c` | u32 | Mode class: 0 Normal, 1 Many Blob, 2 any Extreme mode |
+| `+0x4d250` | f32 | Seconds in the current mode: +1/60 per packet (+1/30 in mode 3 [guess: the headset halves the LD rate there]) |
+| `+0x4d254` | f32 | Quiet time towards the exit: quiet counter × the same step |
+| `+0x4d258` | u32 | Changes into Many Blob |
+| `+0x4d25c` | u32 | Changes into an Extreme mode |
+| `+0x4f3b8..+0x4f3c4` | u32 ×4 | Per-camera flag events (cameras 0..3), at most one per 60 s each; last-event host µs (u64 ×4) at `+0x4f448..+0x4f460` |
+| `+0x4f3c8` | u32 | Normal → Many Blob switches |
+| `+0x4f3cc` | u32 | Passed Extreme entry checks (counts every packet while `+0x34` is set) |
+| `+0x4f474` | u32 | Mode |
+
+A mode change clears both f32 timers. After the mode logic, the function
+compares the LD echo with the block for the new mode and, when it differs
+and the frame is not the one right after the last push, hands the 24 bytes
+to the config manager (`FUN_18015e720`), which `FUN_180126b80` then sends
+(§2.6).
 
 ## 5. Algorithms
 

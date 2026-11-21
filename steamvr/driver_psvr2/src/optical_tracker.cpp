@@ -366,23 +366,26 @@ void OpticalTracker::UpdateBlobMode( const Header &h )
 		return;
 	const bool flags = ( h.cam_flags & 0x3 ) || ( h.cam_flags & 0x300 );
 	const bool many = h.count[0] >= 200 || h.count[1] >= 200;
-	if ( blob_mode_ == 0 )
+	const int before = blob_mode_;
+	if ( blob_mode_ == 1 )
 	{
-		if ( many || flags )
-		{
-			blob_mode_ = 1;
-			quiet_frames_ = 0;
-			DriverLog( "psvr2: optical: Many Blob mode" );
-		}
-		return;
-	}
-	const bool quiet = !flags && h.count[0] <= 49 && h.count[1] <= 49;
-	quiet_frames_ = quiet ? quiet_frames_ + 1 : 0;
-	if ( quiet_frames_ >= 480 )
-	{
+		// Sony's Many-Blob exit looks at blob counts only; the camera flags
+		// count there only with Extreme-Env enabled (ledsync.md §4.3).
+		const bool quiet = h.count[0] <= 49 && h.count[1] <= 49;
+		quiet_frames_ = quiet ? quiet_frames_ + 1 : 0;
+		if ( quiet_frames_ < 480 )
+			return;
 		blob_mode_ = 0;
-		DriverLog( "psvr2: optical: Normal blob mode" );
+		quiet_frames_ = 0;
+		// Sony then runs the Normal test on the same packet.
 	}
+	if ( many || flags )
+	{
+		blob_mode_ = 1;
+		quiet_frames_ = 0;
+	}
+	if ( blob_mode_ != before )
+		DriverLog( blob_mode_ ? "psvr2: optical: Many Blob mode" : "psvr2: optical: Normal blob mode" );
 }
 
 void OpticalTracker::PushDetectionConfig( const psvr2_ld_packet &pkt, const Header &h )

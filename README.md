@@ -100,11 +100,14 @@ High-rate buffered IMU capture works with `libiio` (`iio_readdev`) against the
 ### Install (persistent)
 
 ```bash
-sudo ./install.sh                    # DKMS build/install + udev rules
+./install.sh            # module (DKMS), udev rules, input group, SteamVR driver,
+                        # steamvr.vrsettings; asks for sudo where needed
+git pull && ./install.sh --update   # later: redo only what changed
+./install.sh --set headset_ins=false   # driver_psvr2 overrides in steamvr.vrsettings
 # Arch: cd packaging && makepkg -si  # builds the psvr2-dkms package
 ```
 
-`sudo ./uninstall.sh` reverses it. See [docs/install.md](docs/install.md) for all
+`./uninstall.sh` reverses it (`--all` also removes libpsvr2 and the install state). See [docs/install.md](docs/install.md) for all
 install paths and [docs/display.md](docs/display.md) for the display details.
 
 ## Use as a SteamVR headset

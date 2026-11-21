@@ -24,11 +24,36 @@ Installs the module so it persists across reboots and rebuilds on kernel
 upgrades, and installs the udev rules:
 
 ```bash
-sudo ./install.sh        # dkms add/build/install + udev rules
-sudo modprobe psvr2
+./install.sh             # everything below; asks for sudo where needed
 ```
 
-Remove with `sudo ./uninstall.sh`. Requires the `dkms` package.
+Parts (run one or several by name, e.g. `./install.sh kernel udev`):
+
+| Part | What |
+|------|------|
+| `kernel` | psvr2 module via DKMS (sources only copied to `/usr/src/psvr2-<ver>`), loaded right away |
+| `udev` | `kernel/99-psvr2.rules` to `/etc/udev/rules.d` (device access, IMU buffer for the headset INS, Sense hidraw) |
+| `group` | adds you to `input` (log out and back in once) |
+| `steamvr` | builds `driver_psvr2` and symlinks it into SteamVR's `drivers/` (`steamvr/install-steamvr-driver.sh`) |
+| `settings` | `"displayPortTrainingMode": 1` in `steamvr.vrsettings` ([steamvr.md](steamvr.md)); a `.psvr2.bak` copy is kept |
+| `lib` | libpsvr2 to `/usr/local` (not default; the driver links it statically) |
+
+Iterating: `git pull && ./install.sh --update` rebuilds the DKMS module only
+when `kernel/` changed (content hash in `/var/lib/psvr2`) and then reloads it,
+re-installs the udev rules only when they changed, and rebuilds the SteamVR
+driver incrementally (the symlink makes the new build live on the next
+SteamVR start). `--no-reload` keeps the running module. Close SteamVR first:
+it rewrites `steamvr.vrsettings` on exit and holds the module.
+
+Driver settings: `./install.sh --set key=value` writes into the
+`driver_psvr2` section of `steamvr.vrsettings` (defaults in
+`steamvr/driver_psvr2/resources/settings/default.vrsettings`); `--set -key`
+removes an override.
+
+`./uninstall.sh` removes the module, rules, SteamVR registration and the
+settings keys it added (and the `driver_psvr2` overrides); `--all` also libpsvr2
+and the install state. The `input` group membership stays. Requires `dkms`,
+`cmake`, a C/C++ toolchain and `python3` (for the settings edit).
 
 ## 3. Arch package
 

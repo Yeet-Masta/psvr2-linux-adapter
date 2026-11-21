@@ -1,0 +1,61 @@
+# RTTI class (substring match on demangled vtable name) -> verdict, area, reason
+# verdicts: core = Linux driver needs this behaviour; ref = read for knowledge / optional feature; fluff = not needed
+CaesarUsbThreadRelocPre	ref	reloc	RP endpoint reader (relocaliser input); optional feature
+CaesarUsbThreadLog	ref	headset-usb	headset log endpoint reader; diagnostics only
+CaesarUsbThread	core	headset-usb	per-interface WinUSB reader thread (connect hook, read loop, restart)
+CaesarManager	core	headset-usb	headset USB manager: owns the per-interface readers, control reports
+HmdDevice	core	steamvr	SteamVR HMD device (properties, display, pose)
+SenseDevice	core	steamvr	SteamVR Sense controller device (props, input, haptics, pose)
+ServerDriver	core	steamvr	SteamVR server provider (init order, RunFrame, events)
+IServerTrackedDeviceProvider	core	steamvr	OpenVR provider interface
+ITrackedDeviceServerDriver	core	steamvr	OpenVR device interface
+IVRDisplayComponent	core	steamvr	OpenVR display component
+HandSkeleton	core	steamvr	hand skeleton bones / blend
+IRTrackerThread	core	tracking	IR/LED tracker thread (LD packets, pose solve)
+LedSyncer	core	ledsync	controller LED sync state machine
+UkfManager	core	tracking	controller UKF (optical + IMU fusion)
+InsContext	core	tracking	headset INS (IMU propagation of SLAM pose)
+InsManager	core	tracking	headset INS manager
+RawImuUpdater	core	tracking	IMU feed into INS
+ImuUpdater	core	tracking	IMU feed into INS
+UpdateControllerThread	core	tracking	controller update thread
+UpdateThread	core	steamvr	HMD update thread
+TrackerManager	core	tracking	tracker orchestration
+HmdTrackerIntf	core	tracking	tracker interface used by ctrlboot
+OpticalMarkerData	core	tracking	optical marker (LED blob) data
+DotMarkerData	core	tracking	LED blob data
+BlobThreadParams	core	tracking	blob worker params
+VisionThreadParams	core	tracking	vision worker params
+CrossBootThreadParams	core	ctrlboot	boot worker params
+BackgroundThreadParams	core	ctrlboot	background model worker params
+RnD::Background	core	ctrlboot	background (static light) model for blob rejection
+RnD::IBackground	core	ctrlboot	background model interface
+RnD::Spots	core	ctrlboot	LED spot list
+RnD::PoseCost	core	ctrlboot	pose cost for LM solve
+RnD::MVPoseCost	core	ctrlboot	multi-view pose cost LM solver
+LeastSquaresCost	core	ctrlboot	least-squares pose cost
+RnD::Robustifier	core	ctrlboot	robust loss
+RnD::FullBootConstraints	core	ctrlboot	boot constraint checks
+RnD::SatisfyConstraints	core	ctrlboot	boot constraint checks
+MersenneTwister	ref	ctrlboot	RANSAC RNG; any RNG works unless bit-exact replay is wanted
+RnD::DefaultAllocator	fluff	lib	allocator
+RnD::Allocator	fluff	lib	allocator
+OcclusionQueries	core	tracking	LED visibility (which model LEDs face a camera)
+WorkerThread	fluff	platform	worker thread wrapper
+ConfigManager	ref	config	config manager: device-behaviour settings and IMU-to-head calibration
+ShareManager	ref	ipc	shared memory with Sony's companion apps; Linux uses its own IPC
+CheckThread	fluff	app	companion-app / installer check thread
+CreateProcessThread	fluff	app	launches Sony's Windows companion apps
+AstonManager	ref	aston	see triage doc
+AstonContext	ref	aston	see triage doc
+Relocalizer	ref	reloc	relocaliser (optional room-map feature)
+PoseGraph	ref	reloc	relocaliser pose graph container
+StereoKeypoint	ref	reloc	relocaliser keypoint container
+VrTrace	fluff	debug	VrTrace capture tool (debug dumps)
+IVrTraceCallback	fluff	debug	VrTrace hook
+Json::	fluff	lib	jsoncpp
+Framework::	fluff	platform	Windows thread/event/mutex wrapper
+IrFramework::	fluff	platform	Windows thread/event wrapper
+IrCaptureMutex	fluff	platform	mutex wrapper
+Eigen::	fluff	lib	Eigen
+std::	fluff	lib	MSVC STL

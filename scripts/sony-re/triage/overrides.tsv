@@ -1,0 +1,60 @@
+# lo	hi('-' = single)	verdict	area	reason   (manual, from reading the decompile / repo docs)
+0x180001000	0x180008160	fluff	init	static initialisers (globals, std::string constants, localised installer messages)
+0x180127b70	-	core	headset-usb	per-interface USB connect + read loop (headset.md)
+0x18018aaf0	-	core	tracking	IR tracker thread: LD packets to pose solve (ledsync.md, opticalpose.md)
+0x18011d0c0	-	core	sense	controller open/close via libpad (sense.md)
+0x18011bae0	-	core	sense	per-controller poll (sense.md)
+0x18019ee30	-	core	steamvr	HMD update: pose, worn state (steamvr.md)
+0x1801a2cb0	-	core	steamvr	ServerDriver::RunFrame (steamvr.md)
+0x18019d1b0	-	core	steamvr	HMD Activate: properties (steamvr.md)
+0x1801a7bf0	-	core	steamvr	Sense pose (steamvr.md)
+0x1801a1a00	-	core	steamvr	lens geometry from calibration (steamvr.md)
+0x1801a10c0	-	core	steamvr	hidden-area mesh (steamvr.md)
+0x1801a4390	-	core	steamvr	refresh / EDID type select (display.md)
+0x18005d5d0	-	core	tracking	UkfManager setup (ukf.md)
+0x1801ac4e0	-	ref	reloc	RelocalizerThread loop (reloc.md, room.md); optional
+0x1801ab410	-	ref	reloc	RP frame unpack (reloc.md); optional
+0x1801ac1f0	-	ref	reloc	map load (room.md); optional
+0x1801abf90	-	ref	reloc	relocaliser start (room.md); optional
+0x18011e8e0	-	core	room	chaperone_info JSON builder: play area into SteamVR (trace.md 10)
+0x18011ef90	-	core	room	default play area (trace.md 10)
+0x18011f7d0	-	core	room	universe init from chaperone file (trace.md 10)
+0x18011fd30	-	ref	room	sceBoundaryMeta.bin load (trace.md 10)
+0x180116230	-	fluff	debug	VrTrace capture command parser (trace.md 2)
+0x18010a000	0x180117d00	fluff	debug	VrTrace capture/dump code (trace.md 1-6); nothing feeds it on PC
+0x180238f00	0x18023ffff	fluff	lib	MSVC CRT startup, import thunks, exception-unwind funclets (inventory calls this range reloc)
+0x18011a260	-	ref	tracking	256-entry ring reader under lock (vtable-only; tracker data ring)
+0x180124610	-	core	headset-usb	getter: copies a 0x1084-byte block + u16 from the USB reader state
+0x180124660	-	core	headset-usb	getter: copies a 0x1084-byte block + u16 from the USB reader state
+0x18012c2c0	0x18012d920	fluff	lib	MSVC std::map / std::string instantiations
+0x18012f7f0	-	ref	config	config-manager poke (counter + notify)
+0x180132340	-	ref	steamvr	starts a helper thread (std::thread wrapper)
+0x1801359e0	0x180135be0	fluff	lib	jsoncpp / iostream helpers
+0x1801382c0	0x18013a090	fluff	lib	jsoncpp exception ctors / STL
+0x18013d710	-	core	tracking	TrackerManager ctor
+0x180160070	0x1801600c0	core	tracking	TrackerManager ctor / field init
+0x180161940	-	core	calibration	camera calibration blob size/magic check ('S' header, 148/228 bytes per camera) (trace.md 12)
+0x1801a3870	-	core	steamvr	SenseDevice ctor
+0x1801abf50	-	ref	steamvr	locked getter of a 16-byte global
+0x1801adf50	0x1801ae260	fluff	debug	IR-tracker recording file writer (fwrite of 'IR'-tagged records; debug capture)
+0x18013b1c0	0x18013ba30	fluff	lib	MSVC iostream / std::map instantiations
+0x180123130	-	ref	firmware	firmware-file check: reads HMD2_FIRMWARE.CUP version beside the app (Windows updater path)
+0x1801581f0	-	ref	ipc	ShareManager: shared memory/events with Sony's companion apps (SHARE_VRT2_*); Linux uses toolkit_ipc instead
+0x180158600	-	ref	ipc	ShareManager setup: named shared memory, mutexes, events (SHARE_VRT2_WIN_*)
+0x18015a3e0	-	ref	config	reads %LOCALAPPDATA%\Sony\PlayStation VR2\config.ini (driver INI; see display.md)
+0x18015ad30	-	ref	config	config.ini keys (SafetyNotice, LastRecordedDateTime, LimitDisplay, ...)
+0x18015bdb0	-	ref	config	creates the user config.ini
+0x18015ec40	-	ref	config	config update notification (ConfigUpdate log)
+0x18015f470	-	ref	config	config write (ConfigWrite log)
+0x180132890	-	ref	status	status-info dispatcher: headset status fields (mode, proximity, thermal warning, ...) to UI prompts; field meanings useful
+0x180134730	-	ref	status	status-info change logger (same fields)
+0x180131bd0	-	ref	tracking	tracking-status change handler (tracking lost / fatal status -> UI)
+0x180131750	-	ref	config	"fake position" debug setting
+0x1801318f0	-	ref	config	"force 3DoF" setting
+0x180134580	-	ref	room	reads collisionBounds / CollisionBoundsFadeDistance from SteamVR settings
+0x180130850	-	ref	reloc	routine map save trigger
+0x180131b00	-	ref	room	play-area-not-set state change
+0x18012d900	0x1801354ff	fluff	app	VrDialogManager: Sony companion-app dialogs, desktop/see-through guides, safety notices, locale match, exe checks
+0x1801211c0	-	core	room	map-state field copy under lock (map id -> pending id)
+0x18012bce0	0x18012be20	fluff	lib	std::string construct from C string
+0x180185ef0	-	fluff	debug	debug status text (per-controller state, battery, per-camera counters) for the debug page

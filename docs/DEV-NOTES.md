@@ -313,8 +313,18 @@ OpticalTracker yet.
     mirrors the left model in x (positions and normals) and reverses its
     LED index lists (opticalpose.md §2b.2). `optical_pose.cpp` mirrors the
     left model; our model has no index lists, so nothing to reverse.
-  - Sony's gravity check (3/6 deg, accepts 5-6 inlier boots) is not in
-    the solver. Not needed by the driver: `optical_pose.cpp` already boots
-    from the gravity-aligned IMU orientation with a heading sweep and
-    needs >= 12 LEDs (18 without a recent fix), above Sony's 7.
+  - Sony's gravity check (3/6 deg, accepts 5-6 inlier boots) is in
+    `psvr2_led_boot_ransac` (below). `psvr2_led_boot_oriented` still has
+    only the orientation rule; `optical_pose.cpp` needs >= 12 LEDs (18
+    without a recent fix) there anyway, above Sony's 7.
+- Sony's RANSAC boot (`psvr2_led_boot_ransac`, notdone.md §2.19): P3P over
+  3 LEDs x 3 blobs, ring stage then random stage, MSAC score per camera,
+  every hypothesis through the pose check; per-camera refine; our
+  support >= 0.75 gate (`own_accept`). Needs no heading: the driver
+  (`optical_ransac_boot`, default on) tries it before the heading sweep
+  when the remap is known, with gravity only, or with the current heading
+  while fixes are recent. Test: 178-196/200 right with orientation +
+  gravity, 154-183 with gravity only, 0 wrong; ~6 ms per call. The left
+  model needs its LED rings reversed (`psvr2_led_model_mirror_x`). Not
+  validated on hardware.
 - Needs hardware before wiring: rig camera poses, blob pixel scale vs 508.

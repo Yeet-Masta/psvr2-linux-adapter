@@ -539,6 +539,7 @@ if (inliers < MININLIERSFORBOOT /*7*/) {
 }
 ```
 
+- The RANSAC itself (sampler, P3P, score, setup): §2.19.
 - **Gravity check** (`FUN_1800e1f50`): angle in degrees (`·180/π`)
   between measured gravity (`+0x3310`, valid flag `+0x3334`, set by
   `FUN_1800d4b90`'s IMU path) and the model's gravity under the candidate
@@ -917,6 +918,134 @@ the match count in state 3 is `+0x49c` and must be > **5** to leave.
   ≤ 1 gross. Controller near an image corner, one camera: the edge state
   is right 57–68 % vs 81–84 % for the normal step, 3–7 % gross vs
   2–5 %; blobs cut by the border are not simulated.
+
+### 2.19 RANSAC boot (`FUN_1800c2960`, `FUN_1800c4940`, `FUN_1800c2080`, `FUN_1800c52f0`, `FUN_1800c58f0`, `FUN_1800c5ac0`, `FUN_1800c62c0`, `FUN_1800c6df0`, `FUN_1800c3320`, `FUN_1800c18a0`) [sure unless tagged]
+
+The RANSAC object is boot obj `+0x870`. `FUN_1800d3360` sets it up with
+`FUN_1800c18a0` (decompiling it crashes IDA 9.5; read from the
+disassembly):
+
+| Off | Value | Source |
+|---|---|---|
+| `+0x00`, `+0x04` | iteration cap | RANSACMAXSAMPLES (`+0x63c`); `FUN_1800d8b60` then sets 50/200 (§2.9) |
+| `+0x08` | 12 | [unknown] |
+| `+0x0c` | adaptive flag = **0** | so §2.5's bound never runs here |
+| `+0x10` | RANSACRINGBOOTRATIO 0.5 | `+0x690` |
+| `+0x14` | confidence 0.99 | |
+| `+0x18`, `+0x1c` | `+0x638` | [unknown] |
+| `+0x20` | inlier threshold, px | INLIERTHRESHOLD (`+0x634`); × min(1/d(m), 10) when SCALEDINLIER (`+0x649`, 0 in all models) |
+| `+0x24`, `+0x28`, `+0x2c` | **6.0**, **200.0**, **3.0** | close threshold, distance, blob size (step 5) |
+| `+0xf7c` | ring-stage cap = (int)(`+0x00` × `+0x10`) = **100** | computed before the boot-in-track cap |
+
+`FUN_1800d8b60` reseeds the Mersenne Twister at `+0x1f8` with `+0x60c`
+= **0** on every boot, so a boot is deterministic per blob set. Mode
+`+0xf10` is **7** with an IMU quaternion (`+0x3380`, USEGRAVITYBOOT), else
+**6**; its rotation is at `+0xf20`. The hypothesis callback `+0xf08` is
+`RnD::FullBootConstraints` (vtable `0x1803191e0`, boot obj `+0x4ca0`):
+slot 1 = `FUN_1800d89f0(pose, close = 1) == 0`, the pose check of §2.16.
+
+Setup (`FUN_1800c3aa0`):
+
+- Valid blobs (`FUN_1800c3c90`): those that undistort; failures store
+  100000.
+- Blob neighbours (`FUN_1800c62c0`): the min(4, valid − 1) nearest valid
+  blobs in pixels (mode 3 instead takes one per 90° direction quadrant).
+- LED neighbours (`FUN_1800c6df0`): the 4 nearest LEDs in the model, all
+  LEDs.
+- Sampled LEDs (`FUN_1800c3320`): all LEDs in modes 6 and 7; the cut to
+  LEDs within 95° of the camera under the mode rotation applies to mode 4
+  only.
+- LED rings: model block (§2.4) words **198** = ring count, **199 + k** =
+  length of ring k, **231 + 32·k** = its LED indices (rev 1: 6 rings, rev
+  2–6: 9, other: 10; the first ring repeats its first 3 LEDs at the end,
+  so it closes). `FUN_1800d3ae0` copies them to boot obj `+0x19c0`
+  (total length `+0x19e0`); `FUN_1800d8b60` points `+0xf70`/`+0xf78` at
+  them.
+
+Loop (`FUN_1800c2960`), until `+0x1f0` (samples) reaches the cap:
+
+1. **Sample** (`FUN_1800c4940`, modes 6/7). Draws are
+   `(int)(r·2⁻³²·n)` (`0x18031a2e0`).
+   - *Ring stage*, while fewer than `+0xf7c` ring samples were taken:
+     without a current blob chain, up to min(4·blobs, 20) tries of a blob
+     and two of its neighbours; `FUN_1800c52f0` orders them as a chain
+     (end, middle, end) through the vertex where the path turns by < 90°,
+     ends so that `d_in.y·d_out.x < d_in.x·d_out.y`, and needs a fourth
+     neighbour of the last blob continuing it (same turn, dot ≥ 0); chains
+     already tried are skipped. Then the next 3-LED window of the rings
+     (window i of a ring of n: i ≤ n − 4, then the next ring) that passes
+     `FUN_1800c5ac0(…, 0)` is the sample. Windows used up: the chain is
+     dropped and this sample comes from the next stage.
+   - *Random stage*: an LED and two of its neighbours, a blob and two of
+     its neighbours, all distinct (`FUN_1800c61d0`); `FUN_1800c58f0` swaps
+     LEDs 1 and 2 when the blob triangle's turn (`d1.y·d2.x < d1.x·d2.y`)
+     and the LED triangle's (`((L1−L0)×(L2−L1))·(n0+n1+n2) < 0`)
+     disagree, then in mode 7 `FUN_1800c5ac0(…, 1)`; retried until one
+     passes. A blob with a known LED (`+0x1980` map) replaces the drawn
+     blob.
+   - `FUN_1800c5ac0` (mode 7 only, else pass): the image vector blob 0 →
+     blob 2 (a3 = 0) or → middle of blobs 1, 2 (a3 = 1) within 90° of the
+     LED vector, both in an image frame aligned to gravity (`+0x1000`);
+     when the mean ray is within 30° of gravity the LED centroid must face
+     the camera instead.
+2. The 3 blobs must be valid and their `+0x3504` value ≤ `+0x1070`
+   [unknown field], else a fail counter (limit `+0x106c`).
+3. P3P (`FUN_1800f43e0`) on the three rays → up to 4 poses.
+4. Per pose: each sampled LED faces the camera (camera-frame normal · unit
+   view ray < **0.08**) and lies within **95°** of the optical axis
+   (`cosf(1.6580629)`); then the callback (pose check).
+5. **Score** (`FUN_1800c2080`): threshold `+0x20`, or `+0x24` (6 px) when
+   |t| < `+0x28` (200 mm), the mean `+0x3496` value of the 3 sampled
+   blobs > `+0x2c` (3; blob size [likely]) and `+0xf14` = 0. Every LED
+   (≤ 24) is projected with the full camera model; it counts when its
+   depth ≠ 0 and normalised r² ≤ 200 (no facing test). Each LED takes its
+   nearest blob with d² < thr²; a blob takes at most **2** LEDs, in LED
+   order. cost = Σ min(d², thr²) / LED count.
+6. Keep the pose with more inliers, or as many and a lower cost (the last
+   3 bests are kept at `+0x30/+0x70/+0xb0`; `FUN_1800c7f00` uses them only
+   when `+0x664` = 1, model word 5, which is 48).
+
+Afterwards `FUN_1800d8b60` needs ≥ **4** inliers (`+0xa94`), then §2.9.
+
+**Our port**: `psvr2_led_boot_ransac(cfg, cams, blobs, model, prior,
+in_track, …)` — mode 7 when `prior->orient_valid`, else mode 6; every
+hypothesis goes through `psvr2_led_pose_check(…, close = 1)`. Per camera:
+RANSAC, our refine (`psvr2_led_track`, all cameras), the §2.9 acceptance
+(`boot_accept`: ≥ MININLIERSFORBOOT, or gravity ≤ 3°/6° with ≥ 5, or
+orientation ≤ 15°/30° nearer than 500 mm with ≥ 4); the candidate with
+the most matches (then lowest rms) wins. Model rings come from
+`scripts/sony-re/extract_led_header.py`. Ours, not Sony's:
+
+- P3P by Grunert's quartic (Haralick et al. 1994) with numeric roots;
+- the mode 7 direction test uses the full prior rotation, not image
+  gravity (no near-gravity branch);
+- blob size = LD major semi-axis;
+- with `own_accept`, a candidate needs cross-camera support ≥ **0.75**
+  (`psvr2_led_support`): without it, wrong boots (mostly a ring turned by
+  one LED, ~20°, 11–31 matches at ~1 px) reached 1.5 % (orientation
+  prior) and 10 % (no IMU) in the test; they score 0.23–0.78, right ones
+  0.69–0.95;
+- not ported: the `+0x3504` blob gate, the known-LED map, the early stop
+  `FUN_1800c7cc0` (at `+0x1060` inliers).
+
+Driver: `optical_ransac_boot` (default true) tries it first when the
+remap is known — gravity only (mode 6, no heading), plus the current
+heading (mode 7) while fixes are recent — with the sweep's 12/18-LED
+floor; the heading sweep stays the fallback.
+
+Test (`test_led_solver`, 200 poses per model, same blobs as the boot
+test): orientation ~3° and gravity ~1° off (mode 7): **178–196** right,
+0 wrong; gravity only (mode 6, the driver's case): **154–183** right,
+0 wrong; no IMU (`LED_RANSAC=0`): 138–170 right, ≤ 1 wrong. Ring stage
+off, rev 3: 139 and 90 right (the ring stage is most of the hit rate);
+with the chain turn sign flipped: 158 and 91 (so the sign above holds in
+our pixel frame). Left-hand model (`LED_MIRROR=1`,
+`psvr2_led_model_mirror_x`: x negated, rings reversed as Sony does,
+opticalpose.md §2b.2), rev 3: 186 and 170 right, 0 wrong; mirrored
+without reversing the rings: 159 and 124. About 6 ms per call (4
+cameras, WSL). Our oriented
+boot (`psvr2_led_boot_oriented`) stays better when the heading is known:
+198–200 right.
 
 ### 2.15 Leftovers (item 2)
 

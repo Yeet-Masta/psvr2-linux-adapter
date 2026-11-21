@@ -85,6 +85,9 @@
 		"optical_sony_states": true,
 		"//edgestate": "Sony's edge state (<= 3 LEDs predicted inside the images); less accurate in simulation.",
 		"optical_edge_state": true,
+		"//ransacboot": "true = boot first with Sony's RANSAC (FUN_1800c2960; no heading needed, gravity from the IMU),",
+		"//ransacboot2": "then the heading sweep if it finds nothing; false = heading sweep only.",
+		"optical_ransac_boot": true,
 
 		"optical_ukf": true,
 		"optical_ukf_hold_ms": 300,

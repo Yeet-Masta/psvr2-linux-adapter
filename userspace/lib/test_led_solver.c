@@ -5,7 +5,9 @@
  * blob noise and two clutter blobs per camera. Blobs exist only for LEDs
  * facing a camera (< 100 deg; LED_VA), as the controller body hides the
  * rest. Env: LED_REV (one model), LED_SONY (0 = our gated match),
- * LED_OWN (0 = Sony's acceptance only), LED_PRIOR (IMU priors).
+ * LED_OWN (0 = Sony's acceptance only), LED_PRIOR (IMU priors),
+ * LED_RANSAC (0 = the gravity-only RANSAC boot gets no IMU at all),
+ * LED_MIRROR (1 = the left-hand model, mirrored in x).
  *
  * Pass, per model: track and boot succeed often enough, and at most 2.5% of
  * trials accept a wrong pose. A near-planar LED ring seen by one camera has
@@ -18,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "psvr2_led_solver.h"
 
@@ -227,10 +230,11 @@ static int run_model(int rev)
 	struct psvr2_led_model mod;
 	struct psvr2_solver_cfg cfg;
 	int track_ok = 0, track_wrong = 0, boot_ok = 0, boot_wrong = 0;
+	int rp_ok = 0, rp_wrong = 0, rn_ok = 0, rn_wrong = 0, rp_gross = 0, rn_gross = 0;
 	/* Blobs for LEDs < 100 deg off-axis: that gives 28 matches per pose,
 	 * as on a recorded hardware frame (28-30, DEV-NOTES.md). LED_VA sets it. */
 	const double max_va = getenv("LED_VA") ? atof(getenv("LED_VA")) : 100;
-	double matched_sum = 0, support_sum = 0;
+	double matched_sum = 0, support_sum = 0, ransac_s = 0;
 	int support_low = 0, few_n = 0, few_ok = 0, few_wrong = 0, sticky_n = 0, sticky_ok = 0;
 
 	for (int c = 0; c < 4; c++) {
@@ -247,6 +251,8 @@ static int run_model(int rev)
 		memcpy(cams[c].t, ct[c], sizeof(ct[c]));
 	}
 	psvr2_led_model_load(rev, &mod);
+	if (getenv("LED_MIRROR") && atoi(getenv("LED_MIRROR")))
+		psvr2_led_model_mirror_x(&mod);	/* the left-hand model */
 	psvr2_solver_default_cfg(&cfg);
 	if (getenv("LED_SONY"))
 		cfg.sony_match = atoi(getenv("LED_SONY"));
@@ -320,6 +326,27 @@ static int run_model(int rev)
 				boot_ok++;
 			else
 				boot_wrong++;
+		}
+		/* Sony's RANSAC boot: with that orientation and gravity ~1 deg
+		 * off (mode 7), and with gravity only (mode 6; the driver's case
+		 * when the heading is unknown). LED_RANSAC=0: no IMU at all. */
+		struct psvr2_imu_prior pb = pr, pg = pr;
+		memcpy(pb.R, start.R, sizeof(pb.R));
+		pg.orient_valid = 0;
+		const clock_t t0 = clock();
+		const int rp_ret = psvr2_led_boot_ransac(&cfg, cams, bl, &mod, &pb, 0, &out, &res);
+		ransac_s += (double)(clock() - t0) / CLOCKS_PER_SEC;
+		if (rp_ret == 0) {
+			rp_ok += right(&out, &truth);
+			rp_wrong += !right(&out, &truth);
+			rp_gross += gross(&out, &truth);
+		}
+		if (psvr2_led_boot_ransac(&cfg, cams, bl, &mod,
+					  getenv("LED_RANSAC") && !atoi(getenv("LED_RANSAC")) ? NULL : &pg, 0, &out,
+					  &res) == 0) {
+			rn_ok += right(&out, &truth);
+			rn_wrong += !right(&out, &truth);
+			rn_gross += gross(&out, &truth);
 		}
 		/*
 		 * Occlusion: camera 0 sees only a patch of 1-3 neighbouring LEDs
@@ -410,6 +437,9 @@ static int run_model(int rev)
 		}
 	}
 	const int close_ok = run_close(rev, cams);
+	printf("rev %d: RANSAC boot, orientation + gravity %d/%d right, %d wrong (%d gross), %.1f ms; "
+	       "gravity only %d/%d right, %d wrong (%d gross)\n",
+	       rev, rp_ok, TRIALS, rp_wrong, rp_gross, 1000 * ransac_s / TRIALS, rn_ok, TRIALS, rn_wrong, rn_gross);
 	printf("rev %d: few-LED (1-3 seen) %d/%d right, %d wrong; few mode kept 15 frames %d/%d\n", rev, few_ok,
 	       few_n, few_wrong, sticky_ok, sticky_n);
 	printf("rev %d: track %3d/%d right, %d wrong; boot %3d/%d right, %d wrong; %.1f LEDs matched, "
@@ -419,6 +449,8 @@ static int run_model(int rev)
 	       track_ok + track_wrong ? support_sum / (track_ok + track_wrong) : 0.0, support_low);
 	return track_ok >= TRIALS * 85 / 100 && boot_ok >= TRIALS * 90 / 100 &&
 	       40 * track_wrong <= TRIALS && 40 * boot_wrong <= TRIALS &&
+	       rp_ok >= TRIALS * 85 / 100 && rn_ok >= TRIALS * 70 / 100 && 40 * rp_wrong <= TRIALS &&
+	       40 * rn_wrong <= TRIALS &&
 	       (!cfg.few_led || (few_ok >= few_n * 30 / 100 && 20 * few_wrong <= few_n &&
 				 10 * sticky_ok >= 9 * sticky_n)) && close_ok;
 }

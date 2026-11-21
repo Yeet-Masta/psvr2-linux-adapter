@@ -2,8 +2,10 @@
 """Write userspace/lib/psvr2_led_models.h from Sony's PSVR2 driver DLL.
 
 The seven Sense LED models (docs/RESEARCH.md 9.1): per hardware rev, the LED
-count, the view-angle cone and per-LED position (mm, controller frame) and
-unit normal. Only the raw values are copied, floats as IEEE-754 bit patterns.
+count, the view-angle cone, per-LED position (mm, controller frame) and
+unit normal, and the LED rings the RANSAC boot samples from (block words
+198 = count, 199 + k = length of ring k, 231 + 32 k = its LED indices;
+docs/sony-re/notdone.md 2.19). Only the raw values are copied, floats as IEEE-754 bit patterns.
 
   extract_led_header.py <driver_playstation_vr2_orig.dll> <out.h>
 """
@@ -13,6 +15,7 @@ import sys
 from extract_led_models import FIRST_MODEL, MAX_LEDS, MODEL_COUNT, MODEL_STRIDE, reader
 
 LED_MAX = 24  # PSVR2_LED_MAX in psvr2_led_solver.h
+RING_MAX, RING_LEN = 16, 32  # PSVR2_RING_MAX / PSVR2_RING_LEN in psvr2_led_solver.h
 
 
 def main():
@@ -23,6 +26,7 @@ def main():
            "#ifndef PSVR2_LED_MODELS_H", "#define PSVR2_LED_MODELS_H", "#include <stdint.h>", "",
            "static const struct {", "\tint count, cone_deg;",
            f"\tuint32_t pos[{LED_MAX}][3], nrm[{LED_MAX}][3];",
+           f"\tint rings, ring_len[{RING_MAX}];", f"\tsigned char ring[{RING_MAX}][{RING_LEN}];",
            f"}} psvr2_led_models[{MODEL_COUNT}] = {{"]
     for m in range(MODEL_COUNT):
         base = FIRST_MODEL + m * MODEL_STRIDE
@@ -32,12 +36,25 @@ def main():
             sys.exit(f"model {m}: unexpected header {hdr}; different driver build?")
         pos = struct.unpack(f"<{count * 3}I", read(base + 0x18, count * 12))
         nrm = struct.unpack(f"<{count * 3}I", read(base + 0x18 + MAX_LEDS * 12, count * 12))
+        w = struct.unpack("<1255i", read(base, 0x139c))
+        nr = w[198]
+        lens = list(w[199:199 + nr])
+        if not 0 <= nr <= RING_MAX or any(not 3 <= n <= RING_LEN for n in lens):
+            sys.exit(f"model {m}: unexpected rings {nr} {lens}")
+        rings = [w[231 + 32 * k:231 + 32 * k + lens[k]] for k in range(nr)]
+        if any(not 0 <= i < count for r in rings for i in r):
+            sys.exit(f"model {m}: ring LED out of range")
         out.append(f"\t{{ {count}, {cone}, /* {base:#x} */")
         for name, v in (("pos", pos), ("nrm", nrm)):
             out.append("\t\t{")
             for i in range(count):
                 out.append("\t\t\t{ " + ", ".join(f"0x{x:08x}" for x in v[i * 3:i * 3 + 3]) + " },")
             out.append("\t\t},")
+        out.append(f"\t\t{nr}, {{ " + ", ".join(map(str, lens)) + " },")
+        out.append("\t\t{")
+        for r in rings:
+            out.append("\t\t\t{ " + ", ".join(map(str, r)) + " },")
+        out.append("\t\t},")
         out.append("\t},")
     out += ["};", "", "#endif", ""]
     open(sys.argv[2], "w").write("\n".join(out))

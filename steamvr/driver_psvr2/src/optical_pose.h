@@ -118,6 +118,7 @@ private:
 	psvr2_rig_camera cams_[PSVR2_SOLVER_CAMS] = {};
 	psvr2_solver_cfg cfg_{};
 	bool sony_states_ = true;  // optical_sony_states: close-range / edge states
+	bool ransac_boot_ = true;  // optical_ransac_boot: Sony's RANSAC boot before the heading sweep
 
 	// head <- rig (settings optical_rig_offset_x/y/z in m, head axes, and
 	// optical_rig_tilt_deg about the head's x axis).

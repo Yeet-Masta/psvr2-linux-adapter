@@ -47,6 +47,10 @@ void psvr2_solver_default_cfg(struct psvr2_solver_cfg *cfg)
 	cfg->few_led = 1;
 	cfg->grazing_check = 1;
 	cfg->edge_state = 1;
+	cfg->inlier_px = 2;
+	cfg->ransac_samples = 200;
+	cfg->ransac_samples_in_track = 50;
+	cfg->ransac_ring_ratio = 0.5;
 }
 
 static float bits_to_float(uint32_t b)
@@ -68,6 +72,26 @@ void psvr2_led_model_load(int rev, struct psvr2_led_model *model)
 		for (int k = 0; k < 3; k++) {
 			model->pos[i][k] = bits_to_float(psvr2_led_models[m].pos[i][k]);
 			model->nrm[i][k] = bits_to_float(psvr2_led_models[m].nrm[i][k]);
+		}
+	model->rings = psvr2_led_models[m].rings;
+	for (int r = 0; r < model->rings; r++) {
+		model->ring_len[r] = psvr2_led_models[m].ring_len[r];
+		for (int i = 0; i < model->ring_len[r]; i++)
+			model->ring[r][i] = psvr2_led_models[m].ring[r][i];
+	}
+}
+
+void psvr2_led_model_mirror_x(struct psvr2_led_model *model)
+{
+	for (int i = 0; i < model->count; i++) {
+		model->pos[i][0] = -model->pos[i][0];
+		model->nrm[i][0] = -model->nrm[i][0];
+	}
+	for (int r = 0; r < model->rings; r++)
+		for (int i = 0, j = model->ring_len[r] - 1; i < j; i++, j--) {
+			const int t = model->ring[r][i];
+			model->ring[r][i] = model->ring[r][j];
+			model->ring[r][j] = t;
 		}
 }
 
@@ -1642,4 +1666,668 @@ int psvr2_led_boot_oriented(const struct psvr2_solver_cfg *cfg,
 			return -1;
 	}
 	return 0;
+}
+
+/* ---- Sony's RANSAC boot (FUN_1800d8b60 -> FUN_1800c2960) ----------------- */
+
+/* MT19937 (RnD::MersenneTwister, FUN_18009f3e0 seed / FUN_18009f530 draw). */
+struct mt19937 {
+	uint32_t s[624];
+	int i;
+};
+
+static void mt_seed(struct mt19937 *m, uint32_t seed)
+{
+	m->s[0] = seed;
+	for (int i = 1; i < 624; i++)
+		m->s[i] = 1812433253u * (m->s[i - 1] ^ (m->s[i - 1] >> 30)) + (uint32_t)i;
+	m->i = 624;
+}
+
+static uint32_t mt_next(struct mt19937 *m)
+{
+	uint32_t y;
+
+	if (m->i >= 624) {
+		for (int k = 0; k < 624; k++) {
+			y = (m->s[k] & 0x80000000u) | (m->s[(k + 1) % 624] & 0x7fffffffu);
+			m->s[k] = m->s[(k + 397) % 624] ^ (y >> 1) ^ (y & 1 ? 0x9908b0dfu : 0);
+		}
+		m->i = 0;
+	}
+	y = m->s[m->i++];
+	y ^= y >> 11;
+	y ^= (y << 7) & 0x9d2c5680u;
+	y ^= (y << 15) & 0xefc60000u;
+	return y ^ (y >> 18);
+}
+
+/* Sony's index draw: (int)(r * 2^-32 * n) (0x18031a2e0). */
+static int mt_index(struct mt19937 *m, int n)
+{
+	return (int)(mt_next(m) * (1.0 / 4294967296.0) * n);
+}
+
+/* Real roots of a4 x^4 + ... + a0 (Durand-Kerner, then Newton polish). */
+struct cx { double re, im; };
+static struct cx cx_mul(struct cx a, struct cx b)
+{
+	return (struct cx){ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
+}
+
+static int quartic_roots(const double a[5], double x[4])
+{
+	struct cx z[4] = { { 1, 0 }, { 0.4, 0.9 } };
+	double p[5];
+	int n = 0;
+
+	if (fabs(a[4]) < 1e-12)
+		return 0;
+	for (int i = 0; i < 5; i++)
+		p[i] = a[i] / a[4];
+	z[2] = cx_mul(z[1], z[1]);
+	z[3] = cx_mul(z[2], z[1]);
+	for (int it = 0; it < 100; it++) {
+		double move = 0;
+		for (int i = 0; i < 4; i++) {
+			struct cx num = { 1, 0 }, den = { 1, 0 }, q;
+			double dd;
+			for (int k = 3; k >= 0; k--) {	/* Horner, monic */
+				num = cx_mul(num, z[i]);
+				num.re += p[k];
+			}
+			for (int j = 0; j < 4; j++)
+				if (j != i)
+					den = cx_mul(den, (struct cx){ z[i].re - z[j].re, z[i].im - z[j].im });
+			dd = den.re * den.re + den.im * den.im;
+			if (dd < 1e-300)
+				continue;
+			q.re = (num.re * den.re + num.im * den.im) / dd;
+			q.im = (num.im * den.re - num.re * den.im) / dd;
+			z[i].re -= q.re;
+			z[i].im -= q.im;
+			move = fmax(move, hypot(q.re, q.im) / fmax(1.0, hypot(z[i].re, z[i].im)));
+		}
+		if (move < 1e-10)
+			break;
+	}
+	for (int i = 0; i < 4; i++) {
+		double r = z[i].re;
+		if (fabs(z[i].im) > 1e-6 * fmax(1.0, hypot(z[i].re, z[i].im)))
+			continue;
+		for (int it = 0; it < 5; it++) {
+			const double f = (((r + p[3]) * r + p[2]) * r + p[1]) * r + p[0];
+			const double df = ((4 * r + 3 * p[3]) * r + 2 * p[2]) * r + p[1];
+			if (df == 0)
+				break;
+			r -= f / df;
+		}
+		x[n++] = r;
+	}
+	return n;
+}
+
+/* Rigid map of three points P onto three points X (exact for a minimal set). */
+static int pose_from_3(const double P[3][3], const double X[3][3], struct psvr2_pose3 *out)
+{
+	double Fp[9], Fx[9];
+	const double (*S[2])[3] = { P, X };
+	double *F[2] = { Fp, Fx };
+
+	for (int k = 0; k < 2; k++) {
+		double e1[3], e2[3], e3[3], w[3], n;
+		for (int i = 0; i < 3; i++) {
+			e1[i] = S[k][1][i] - S[k][0][i];
+			w[i] = S[k][2][i] - S[k][0][i];
+		}
+		n = norm(e1);
+		if (n < 1e-9)
+			return -1;
+		for (int i = 0; i < 3; i++)
+			e1[i] /= n;
+		e3[0] = e1[1] * w[2] - e1[2] * w[1];
+		e3[1] = e1[2] * w[0] - e1[0] * w[2];
+		e3[2] = e1[0] * w[1] - e1[1] * w[0];
+		n = norm(e3);
+		if (n < 1e-9)
+			return -1;
+		for (int i = 0; i < 3; i++)
+			e3[i] /= n;
+		e2[0] = e3[1] * e1[2] - e3[2] * e1[1];
+		e2[1] = e3[2] * e1[0] - e3[0] * e1[2];
+		e2[2] = e3[0] * e1[1] - e3[1] * e1[0];
+		for (int i = 0; i < 3; i++) {	/* columns e1 e2 e3 */
+			F[k][3 * i] = e1[i];
+			F[k][3 * i + 1] = e2[i];
+			F[k][3 * i + 2] = e3[i];
+		}
+	}
+	for (int i = 0; i < 3; i++)	/* R = Fx Fp^T */
+		for (int j = 0; j < 3; j++)
+			out->R[3 * i + j] = Fx[3 * i] * Fp[3 * j] + Fx[3 * i + 1] * Fp[3 * j + 1] +
+					    Fx[3 * i + 2] * Fp[3 * j + 2];
+	{
+		double Rp[3];
+		mv(out->R, P[0], Rp);
+		for (int i = 0; i < 3; i++)
+			out->t[i] = X[0][i] - Rp[i];
+	}
+	return 0;
+}
+
+/*
+ * P3P (Sony FUN_1800f43e0, up to 4 poses). Ours: Grunert's quartic in the
+ * form of Haralick et al. 1994; Sony's closed form was not ported, the
+ * poses are the same up to rounding. c: camera centre, f: unit rays (rig),
+ * P: model points. Returns the number of poses.
+ */
+static int p3p(const double c[3], const double f[3][3], const double P[3][3], struct psvr2_pose3 out[4])
+{
+	double d[3], ca, cb, cg, a2, b2, c2, A[5], v[4], K, K2;
+	int nr, n = 0;
+
+	for (int i = 0; i < 3; i++) {
+		const int j = (i + 1) % 3, k = (i + 2) % 3;
+		double e[3] = { P[j][0] - P[k][0], P[j][1] - P[k][1], P[j][2] - P[k][2] };
+		d[i] = dot(e, e);	/* d[0] = a^2 = |P2-P3|^2, d[1] = b^2, d[2] = c^2 */
+	}
+	a2 = d[0];
+	b2 = d[1];
+	c2 = d[2];
+	ca = dot(f[1], f[2]);
+	cb = dot(f[0], f[2]);
+	cg = dot(f[0], f[1]);
+	if (b2 < 1e-9)
+		return 0;
+	K = (a2 - c2) / b2;
+	K2 = K * K;
+	A[4] = (K - 1) * (K - 1) - 4 * c2 / b2 * ca * ca;
+	A[3] = 4 * (K * (1 - K) * cb - (1 - (a2 + c2) / b2) * ca * cg + 2 * c2 / b2 * ca * ca * cb);
+	A[2] = 2 * (K2 - 1 + 2 * K2 * cb * cb + 2 * (b2 - c2) / b2 * ca * ca -
+		    4 * (a2 + c2) / b2 * ca * cb * cg + 2 * (b2 - a2) / b2 * cg * cg);
+	A[1] = 4 * (-K * (1 + K) * cb + 2 * a2 / b2 * cg * cg * cb - (1 - (a2 + c2) / b2) * ca * cg);
+	A[0] = (1 + K) * (1 + K) - 4 * a2 / b2 * cg * cg;
+	nr = quartic_roots(A, v);
+	for (int r = 0; r < nr && n < 4; r++) {
+		const double den = 2 * (cg - v[r] * ca);
+		double u, s1, s[3], X[3][3], q;
+		if (v[r] <= 0 || fabs(den) < 1e-12)
+			continue;
+		u = ((K - 1) * v[r] * v[r] - 2 * K * cb * v[r] + 1 + K) / den;
+		q = 1 + v[r] * v[r] - 2 * v[r] * cb;
+		if (u <= 0 || q <= 0)
+			continue;
+		s1 = sqrt(b2 / q);
+		s[0] = s1;
+		s[1] = u * s1;
+		s[2] = v[r] * s1;
+		/* Reject spurious roots: the side c must hold too. */
+		if (fabs(s[0] * s[0] + s[1] * s[1] - 2 * s[0] * s[1] * cg - c2) > 1e-3 * fmax(c2, 1.0) ||
+		    fabs(s[1] * s[1] + s[2] * s[2] - 2 * s[1] * s[2] * ca - a2) > 1e-3 * fmax(a2, 1.0))
+			continue;
+		for (int i = 0; i < 3; i++)
+			for (int k = 0; k < 3; k++)
+				X[i][k] = c[k] + s[i] * f[i][k];
+		if (pose_from_3(P, X, &out[n]) == 0)
+			n++;
+	}
+	return n;
+}
+
+/*
+ * MSAC score in one camera (FUN_1800c2080): every LED projected (in front,
+ * inside the image; no facing test here), nearest blob within thr; a blob
+ * takes at most 2 LEDs, in LED order. cost = sum(min(d^2, thr^2)) / LEDs.
+ */
+static int ransac_score(const struct psvr2_rig_camera *cam, const struct psvr2_blob_list *b,
+			const struct psvr2_led_model *model, const struct psvr2_pose3 *pose, double thr,
+			double *cost)
+{
+	unsigned char used[PSVR2_SOLVER_BLOBS] = { 0 };
+	const double t2 = thr * thr;
+	double sum = 0;
+	int inl = 0;
+
+	for (int l = 0; l < model->count; l++) {
+		double P[3], px[2], best = t2, dep;
+		int bi = -1;
+		mv(pose->R, model->pos[l], P);
+		for (int i = 0; i < 3; i++)
+			P[i] += pose->t[i];
+		if (project_point(cam, P, px, &dep) == 0 && dep > 0)
+			for (int k = 0; k < b->count; k++) {
+				const double dx = b->xy[k][0] - px[0], dy = b->xy[k][1] - px[1];
+				const double e = dx * dx + dy * dy;
+				if (e < best) {
+					best = e;
+					bi = k;
+				}
+			}
+		if (bi >= 0 && used[bi] < 2) {
+			used[bi]++;
+			inl++;
+			sum += best;
+		} else {
+			sum += t2;
+		}
+	}
+	*cost = sum / model->count;
+	return inl;
+}
+
+/* k nearest of n points (dist2 callback), self excluded, ascending. */
+static int nearest_k(int self, int n, const unsigned char *ok, double (*d2)(const void *, int, int),
+		     const void *ctx, int k, int out[4])
+{
+	double dk[4];
+	int m = 0;
+
+	for (int j = 0; j < n; j++) {
+		double e;
+		int p;
+		if (j == self || (ok && !ok[j]))
+			continue;
+		e = d2(ctx, self, j);
+		if (m < k)
+			m++;
+		else if (e >= dk[m - 1])
+			continue;
+		for (p = m - 1; p > 0 && dk[p - 1] > e; p--) {
+			dk[p] = dk[p - 1];
+			out[p] = out[p - 1];
+		}
+		dk[p] = e;
+		out[p] = j;
+	}
+	return m;
+}
+
+static double d2_led(const void *ctx, int i, int j)
+{
+	const struct psvr2_led_model *m = ctx;
+	double e[3] = { m->pos[i][0] - m->pos[j][0], m->pos[i][1] - m->pos[j][1], m->pos[i][2] - m->pos[j][2] };
+
+	return dot(e, e);
+}
+
+static double d2_blob(const void *ctx, int i, int j)
+{
+	const struct psvr2_blob_list *b = ctx;
+
+	return (b->xy[i][0] - b->xy[j][0]) * (b->xy[i][0] - b->xy[j][0]) +
+	       (b->xy[i][1] - b->xy[j][1]) * (b->xy[i][1] - b->xy[j][1]);
+}
+
+/*
+ * Sample winding (FUN_1800c58f0): the blob triangle's turn and the LED
+ * triangle's (cross product against the summed normals) must agree, else
+ * LEDs 1 and 2 swap. The sign relation is for our camera frame (z forward,
+ * pixels a 180 deg turn of x/z, y/z), derived, not copied.
+ */
+static void fix_winding(const struct psvr2_led_model *m, const struct psvr2_blob_list *b, int s[6])
+{
+	const double *p0 = m->pos[s[0]], *p1 = m->pos[s[1]], *p2 = m->pos[s[2]];
+	double e1[3], e2[3], cr[3], ns[3];
+	const double d1x = b->xy[s[4]][0] - b->xy[s[3]][0], d1y = b->xy[s[4]][1] - b->xy[s[3]][1];
+	const double d2x = b->xy[s[5]][0] - b->xy[s[4]][0], d2y = b->xy[s[5]][1] - b->xy[s[4]][1];
+	int img, mod;
+
+	for (int i = 0; i < 3; i++) {
+		e1[i] = p1[i] - p0[i];
+		e2[i] = p2[i] - p1[i];
+		ns[i] = m->nrm[s[0]][i] + m->nrm[s[1]][i] + m->nrm[s[2]][i];
+	}
+	cr[0] = e1[1] * e2[2] - e1[2] * e2[1];
+	cr[1] = e1[2] * e2[0] - e1[0] * e2[2];
+	cr[2] = e1[0] * e2[1] - e1[1] * e2[0];
+	img = d1y * d2x < d1x * d2y;
+	mod = dot(cr, ns) < 0;
+	if (img != mod) {
+		const int t = s[1];
+		s[1] = s[2];
+		s[2] = t;
+	}
+}
+
+/*
+ * Mode 7 direction test (FUN_1800c5ac0): the image vector from blob 0 to
+ * the middle of blobs 1, 2 (mid = 1, second sampler stage) or to blob 2
+ * (mid = 0, ring stage) must be within 90 deg of the same LED vector under
+ * the IMU rotation, projected at the blobs' mean ray. Sony builds it from
+ * gravity in the image (+0x1000); ours uses the full prior rotation, which
+ * it has in this mode too.
+ */
+static int prior_direction_ok(const struct psvr2_rig_camera *cam, const struct psvr2_led_model *m,
+			      const struct psvr2_blob_list *b, const double Rp[9], const int s[6], int mid)
+{
+	double w[3], wr[3], wc[3], xy[2], u = 0, v = 0, dx, dy, ex, ey;
+
+	for (int k = 3; k < 6; k++) {
+		if (unproject_xy(&cam->model, b->xy[s[k]], xy))
+			return 1;
+		u += xy[0] / 3;
+		v += xy[1] / 3;
+	}
+	for (int i = 0; i < 3; i++)
+		w[i] = (mid ? (m->pos[s[1]][i] + m->pos[s[2]][i]) * 0.5 : m->pos[s[2]][i]) - m->pos[s[0]][i];
+	mv(Rp, w, wr);
+	mtv(cam->R, wr, wc);	/* camera <- rig */
+	/* d(-x/z), d(-y/z) at (u, v), up to the depth: pixel direction. */
+	dx = -(wc[0] - u * wc[2]);
+	dy = -(wc[1] - v * wc[2]);
+	ex = (mid ? (b->xy[s[4]][0] + b->xy[s[5]][0]) * 0.5 : b->xy[s[5]][0]) - b->xy[s[3]][0];
+	ey = (mid ? (b->xy[s[4]][1] + b->xy[s[5]][1]) * 0.5 : b->xy[s[5]][1]) - b->xy[s[3]][1];
+	return dx * ex + dy * ey >= 0;
+}
+
+/*
+ * Blob chain for the ring stage (FUN_1800c52f0): order three blobs as
+ * (end, middle, end) through the vertex where the path turns by < 90 deg,
+ * ends chosen so the turn is d_in.y d_out.x < d_in.x d_out.y; a fourth
+ * neighbour of the last blob must continue the chain (same turn, forward).
+ */
+static int blob_chain(const struct psvr2_blob_list *b, const int bn[][4], const int nbn[], const int t[3],
+		      int out[3])
+{
+	double e[4][2], in[2], dout[2], c[2];
+	int k, prev, next, first, last, mid;
+
+	for (int i = 0; i < 3; i++) {	/* e[i + 1] = p[i + 1] - p[i] */
+		const int j = (i + 1) % 3;
+		e[i + 1][0] = b->xy[t[j]][0] - b->xy[t[i]][0];
+		e[i + 1][1] = b->xy[t[j]][1] - b->xy[t[i]][1];
+	}
+	for (k = 0; k < 3; k++) {	/* vertex k: in = e[k] (e[3] for 0), out = e[k + 1] */
+		const double *pi = e[k ? k : 3], *po = e[k + 1];
+		if (po[0] * pi[0] + po[1] * pi[1] >= 0)
+			break;
+	}
+	if (k == 3)
+		return 0;
+	in[0] = e[k ? k : 3][0];
+	in[1] = e[k ? k : 3][1];
+	dout[0] = e[k + 1][0];
+	dout[1] = e[k + 1][1];
+	prev = k ? k - 1 : 2;
+	next = (k + 1) % 3;
+	mid = t[k];
+	if (in[1] * dout[0] < in[0] * dout[1]) {
+		first = t[prev];
+		last = t[next];
+	} else {
+		first = t[next];
+		last = t[prev];
+		dout[0] = -in[0];
+		dout[1] = -in[1];
+	}
+	for (int j = 0;; j++) {
+		int q;
+		if (j >= nbn[last])
+			return 0;
+		q = bn[last][j];
+		if (q == mid || q == first)
+			continue;
+		c[0] = b->xy[q][0] - b->xy[last][0];
+		c[1] = b->xy[q][1] - b->xy[last][1];
+		if (dout[1] * c[0] < dout[0] * c[1])
+			break;
+	}
+	if (c[0] * dout[0] + c[1] * dout[1] < 0)
+		return 0;
+	out[0] = first;
+	out[1] = mid;
+	out[2] = last;
+	return 1;
+}
+
+/* FUN_1800c4940 state: the ring stage's current blob chain and window. */
+struct ring_stage {
+	int chain[3], win, accepted, cap, total, ntried;
+	int tried[256];
+};
+
+/*
+ * Ring stage (FUN_1800c4940 first part): a new blob chain from a blob and
+ * two of its neighbours (up to min(4 n, 20) draws, chains already tried
+ * skipped), then the next 3-LED window of the rings (window i of a ring of
+ * n: i <= n - 4; after the last, the next ring) that passes the mode 7
+ * test. Each accepted window is one sample, at most cap of them. 0 = none
+ * left now (the random stage runs).
+ */
+static int sample_ring(struct ring_stage *rs, struct mt19937 *mt, const struct psvr2_rig_camera *cam,
+		       const struct psvr2_led_model *m, const struct psvr2_blob_list *b, int nb,
+		       const unsigned char *ok, const int bn[][4], const int nbn[], int kb, const double Rp[9],
+		       int s[6])
+{
+	if (rs->accepted >= rs->cap || !rs->total || kb < 2)
+		return 0;
+	if (rs->win < 0) {
+		const int tries = 4 * nb < 20 ? 4 * nb : 20;
+		for (int n = 0; n < tries && rs->win < 0; n++) {
+			const int b0 = mt_index(mt, nb), r1 = mt_index(mt, kb), r2 = mt_index(mt, kb);
+			int t[3], ch[3], key, dup = 0;
+			if (r1 == r2 || !ok[b0] || r1 >= nbn[b0] || r2 >= nbn[b0])
+				continue;
+			t[0] = b0;
+			t[1] = bn[b0][r1];
+			t[2] = bn[b0][r2];
+			if (!blob_chain(b, bn, nbn, t, ch))
+				continue;
+			key = (ch[0] << 16) | (ch[1] << 8) | ch[2];
+			for (int i = 0; i < rs->ntried && !dup; i++)
+				dup = rs->tried[i] == key;
+			if (dup)
+				continue;
+			if (rs->ntried < 256)
+				rs->tried[rs->ntried++] = key;
+			memcpy(rs->chain, ch, sizeof(ch));
+			rs->win = 0;
+		}
+	}
+	while (rs->win >= 0 && rs->win < rs->total) {
+		int r = 0, i = rs->win, pass;
+		while (r < m->rings && m->ring_len[r] <= i + 3) {
+			i -= m->ring_len[r];
+			r++;
+		}
+		if (r >= m->rings)
+			break;
+		s[0] = m->ring[r][i];
+		s[1] = m->ring[r][i + 1];
+		s[2] = m->ring[r][i + 2];
+		memcpy(s + 3, rs->chain, sizeof(rs->chain));
+		rs->win += m->ring_len[r] <= i + 4 ? 4 : 1;
+		pass = !Rp || prior_direction_ok(cam, m, b, Rp, s, 0);
+		if (pass) {
+			rs->accepted++;
+			return 1;
+		}
+	}
+	rs->win = -1;
+	return 0;
+}
+
+/* Best RANSAC pose in camera c; returns inliers (0 = none). */
+static int ransac_cam(const struct psvr2_solver_cfg *cfg, const struct psvr2_rig_camera cams[],
+		      int ci, const struct psvr2_blob_list *b, const struct psvr2_led_model *m,
+		      const struct psvr2_imu_prior *prior, int samples, struct psvr2_pose3 *best,
+		      double *best_cost)
+{
+	const struct psvr2_rig_camera *cam = &cams[ci];
+	const double *Rp = prior && prior->orient_valid ? prior->R : NULL;
+	struct mt19937 mt;
+	double ray[PSVR2_SOLVER_BLOBS][3];
+	unsigned char ok[PSVR2_SOLVER_BLOBS] = { 0 };
+	int bn[PSVR2_SOLVER_BLOBS][4], nbn[PSVR2_SOLVER_BLOBS], ln[PSVR2_LED_MAX][4], nln[PSVR2_LED_MAX];
+	int cand[PSVR2_LED_MAX], ncand = 0, nok = 0, best_inl = 0, nb = b->count, kb;
+	struct ring_stage rs;
+	const double fwd[3] = { cam->R[2], cam->R[5], cam->R[8] };
+	const double cos95 = cos(1.6580629);
+
+	if (nb > PSVR2_SOLVER_BLOBS)
+		nb = PSVR2_SOLVER_BLOBS;
+	*best_cost = DBL_MAX;
+	/* Blobs that undistort (FUN_1800c3c90 valid bits). */
+	for (int i = 0; i < nb; i++) {
+		ok[i] = unproject(cam, b->xy[i], ray[i]) == 0;
+		nok += ok[i];
+	}
+	if (nok < 3 || m->count < 3)
+		return 0;
+	/* 4 nearest valid blobs in the image (FUN_1800c62c0, modes 6/7). */
+	for (int i = 0; i < nb; i++)
+		nbn[i] = ok[i] ? nearest_k(i, nb, ok, d2_blob, b, 4, bn[i]) : 0;
+	/* 4 nearest LEDs in the model, all LEDs (FUN_1800c6df0). */
+	for (int l = 0; l < m->count; l++)
+		nln[l] = nearest_k(l, m->count, NULL, d2_led, m, 4, ln[l]);
+	/* Sampled LEDs (FUN_1800c3320): all of them in modes 6 and 7 (its
+	 * 95 deg facing cut applies to mode 4 only). */
+	for (int l = 0; l < m->count; l++)
+		cand[ncand++] = l;
+	rs.win = -1;
+	rs.accepted = rs.ntried = rs.total = 0;
+	/* +0xf7c = (int)(RANSACMAXSAMPLES * RANSACRINGBOOTRATIO), set before
+	 * the boot-in-track cap replaces +0x00 (FUN_1800c18a0). */
+	rs.cap = (int)(cfg->ransac_samples * cfg->ransac_ring_ratio);
+	for (int r = 0; r < m->rings; r++)
+		rs.total += m->ring_len[r];
+	kb = nok - 1 < 4 ? nok - 1 : 4;	/* +0xed8 */
+	mt_seed(&mt, 0);	/* FUN_1800d8b60 reseeds with +0x60c = 0 */
+	for (int it = 0; it < samples; it++) {
+		int s[6], tries = 0, found;
+		struct psvr2_pose3 sol[4];
+		double f[3][3], P[3][3], mean = 0;
+		int nsol;
+		found = sample_ring(&rs, &mt, cam, m, b, nb, ok, bn, nbn, kb, Rp, s);
+		/* Random stage (FUN_1800c4940 second part): LED + 2 of its
+		 * neighbours, blob + 2 of its neighbours, all distinct
+		 * (FUN_1800c61d0), then winding and the prior test. */
+		while (!found && tries++ < 64) {
+			const int l0 = cand[mt_index(&mt, ncand)], b0 = mt_index(&mt, nb);
+			int i1, i2, j1, j2;
+			if (!ok[b0] || nln[l0] < 2 || nbn[b0] < 2)
+				continue;
+			i1 = mt_index(&mt, nln[l0]);
+			i2 = mt_index(&mt, nln[l0]);
+			j1 = mt_index(&mt, nbn[b0]);
+			j2 = mt_index(&mt, nbn[b0]);
+			if (i1 == i2 || j1 == j2)
+				continue;
+			s[0] = l0; s[1] = ln[l0][i1]; s[2] = ln[l0][i2];
+			s[3] = b0; s[4] = bn[b0][j1]; s[5] = bn[b0][j2];
+			fix_winding(m, b, s);
+			if (Rp && !prior_direction_ok(cam, m, b, Rp, s, 1))
+				continue;
+			found = 1;
+		}
+		if (!found)
+			continue;
+		for (int k = 0; k < 3; k++) {
+			memcpy(f[k], ray[s[3 + k]], sizeof(f[k]));
+			memcpy(P[k], m->pos[s[k]], sizeof(P[k]));
+			mean += (b->has_angle && b->major[s[3 + k]] > 0 ? b->major[s[3 + k]] : 0) / 3;
+		}
+		nsol = p3p(cam->t, f, P, sol);
+		for (int q = 0; q < nsol; q++) {
+			double cost, thr = cfg->inlier_px, oc[3];
+			int good = 1, inl;
+			/* The 3 sampled LEDs face the camera (n . view < 0.08) and
+			 * lie within 95 deg of the optical axis. */
+			for (int k = 0; k < 3 && good; k++) {
+				double X[3], nr[3], d[3], len;
+				mv(sol[q].R, P[k], X);
+				mv(sol[q].R, m->nrm[s[k]], nr);
+				for (int i = 0; i < 3; i++)
+					d[i] = X[i] + sol[q].t[i] - cam->t[i];
+				len = norm(d);
+				for (int i = 0; i < 3; i++)
+					d[i] /= len;
+				good = dot(nr, d) < 0.08 && dot(d, fwd) >= cos95;
+			}
+			/* Hypothesis constraints (RnD::FullBootConstraints at
+			 * boot obj +0x4ca0, slot 1: FUN_1800d89f0 with close = 1). */
+			if (!good || psvr2_led_pose_check(cfg, cams, m, prior, &sol[q], NULL, 1))
+				continue;
+			/* 6 px when nearer than 200 mm with blobs > 3 px
+			 * (+0x28, +0x2c, +0x24). */
+			for (int i = 0; i < 3; i++)
+				oc[i] = sol[q].t[i] - cam->t[i];
+			if (norm(oc) < 200 && mean > 3)
+				thr = 6;
+			inl = ransac_score(cam, b, m, &sol[q], thr, &cost);
+			if (inl > best_inl || (inl == best_inl && inl > 0 && cost < *best_cost)) {
+				best_inl = inl;
+				*best_cost = cost;
+				*best = sol[q];
+			}
+		}
+	}
+	return best_inl;
+}
+
+/*
+ * Boot acceptance (FUN_1800d8b60, section 2.9). At or above
+ * MININLIERSFORBOOT the pose stands; below it, it needs gravity within
+ * 3 deg (6 deg nearer than 150 mm, FUN_1800e1f50) with >= 5 inliers, or
+ * the orientation prior within 15 deg (30 deg) nearer than 500 mm
+ * (FUN_1800e20e0) with >= 4.
+ */
+static int boot_accept(const struct psvr2_solver_cfg *cfg, const struct psvr2_imu_prior *prior,
+		       const struct psvr2_pose3 *pose, int matched)
+{
+	const double d = norm(pose->t);
+	int ok_g = 0, ok_o = 0;
+
+	if (matched >= cfg->min_inliers_boot)
+		return 1;
+	if (prior && prior->gravity_valid && prior->gravity_age_s < 10) {
+		double g[3];
+		mv(pose->R, prior->g_model, g);
+		ok_g = acos(fmax(-1.0, fmin(1.0, dot(g, prior->g_rig) / (norm(g) * norm(prior->g_rig))))) * DEG <=
+		       (d < 150 ? 6 : 3);
+	}
+	if (prior && prior->orient_valid && prior->orient_age_s < 10 && prior->gravity_age_s < 10 && d < 500)
+		ok_o = rot_angle_deg(pose->R, prior->R) <= (d < 150 ? 30 : 15);
+	return (ok_g && matched >= 5) || (ok_o && matched >= cfg->min_inliers_orientation);
+}
+
+int psvr2_led_boot_ransac(const struct psvr2_solver_cfg *cfg,
+			  const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_led_model *model,
+			  const struct psvr2_imu_prior *prior, int in_track,
+			  struct psvr2_pose3 *out, struct psvr2_solve_result *res)
+{
+	const int samples = in_track ? cfg->ransac_samples_in_track : cfg->ransac_samples;
+	int found = 0;
+
+	/*
+	 * Sony boots each camera on its own (FUN_1800d5070 -> FUN_1800d8b60:
+	 * RANSAC, refine, accept) and keeps the candidate with the most
+	 * inliers. Ours refines in all cameras and breaks ties by rms.
+	 */
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		struct psvr2_pose3 p, o;
+		struct psvr2_solve_result r;
+		double cost;
+		/* FUN_1800d8b60: fewer blobs than MININLIERS-FOR-ORIENTATIONBOOT
+		 * (+0x620) skips the camera. */
+		if (!cams[c].active || blobs[c].count < cfg->min_inliers_orientation)
+			continue;
+		if (ransac_cam(cfg, cams, c, &blobs[c], model, prior, samples, &p, &cost) < 4)
+			continue;	/* +0xa94 >= 4 */
+		if (psvr2_led_track(cfg, cams, blobs, model, &p, &o, &r) || !boot_accept(cfg, prior, &o, r.matched))
+			continue;
+		/* Ours (own_accept): a RANSAC boot needs cross-camera support
+		 * >= 0.75. In the synthetic test wrong boots (a ring turned by
+		 * one LED, mostly) score 0.23-0.78, right ones 0.69-0.95. */
+		if (cfg->own_accept && psvr2_led_support(cfg, cams, blobs, model, &o, &r) < 0.75)
+			continue;
+		if (!found || r.matched > res->matched || (r.matched == res->matched && r.rms_px < res->rms_px)) {
+			*out = o;
+			*res = r;
+			found = 1;
+		}
+	}
+	return found ? 0 : -1;
 }

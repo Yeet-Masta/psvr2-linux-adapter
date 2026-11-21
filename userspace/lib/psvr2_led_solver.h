@@ -26,12 +26,20 @@ extern "C" {
 #define PSVR2_LED_MAX		24
 #define PSVR2_SOLVER_CAMS	4
 #define PSVR2_SOLVER_BLOBS	64
+#define PSVR2_RING_MAX		16
+#define PSVR2_RING_LEN		32
 
 struct psvr2_led_model {
 	int	count;
 	double	cone_deg;		/* 170 (rev 1-3) or 180 (rev 4-7) */
 	double	pos[PSVR2_LED_MAX][3];	/* mm, controller frame */
 	double	nrm[PSVR2_LED_MAX][3];	/* unit */
+	/* LED rings for the RANSAC boot's first sampler stage: LED index
+	 * sequences, consecutive LEDs neighbours on the controller (model
+	 * block words 198.., docs/sony-re/notdone.md 2.19). */
+	int	rings;
+	int	ring_len[PSVR2_RING_MAX];
+	int	ring[PSVR2_RING_MAX][PSVR2_RING_LEN];
 };
 
 struct psvr2_rig_camera {
@@ -95,6 +103,15 @@ struct psvr2_solver_cfg {
 	 * are predicted well inside the images (FUN_1800db420, default);
 	 * 0 = it stays in the normal track step there. */
 	int	edge_state;
+	/* Sony's RANSAC boot (FUN_1800c2960): INLIERTHRESHOLD 2 px (6 px when
+	 * the sample is closer than 200 mm with blobs > 3 px), RANSACMAXSAMPLES
+	 * 200, RANSAC-BOOTINTRACK-MAXSAMPLES 50. */
+	double	inlier_px;
+	int	ransac_samples;
+	int	ransac_samples_in_track;
+	/* RANSACRINGBOOTRATIO 0.5: share of RANSACMAXSAMPLES drawn from the
+	 * LED rings (first sampler stage). */
+	double	ransac_ring_ratio;
 };
 void psvr2_solver_default_cfg(struct psvr2_solver_cfg *cfg);
 
@@ -218,6 +235,26 @@ int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
  * blob pairs per camera, solve the translation from the two rays, score in
  * every camera, refine the best. 0 = pose found.
  */
+/*
+ * Sony's boot (FUN_1800d8b60 -> FUN_1800c2960), per camera: RANSAC over
+ * 3 LEDs (one and two of its 4 nearest in the model) x 3 blobs (one and
+ * two of its 4 nearest in the image), P3P, MSAC score in that camera;
+ * the best pose over the cameras is refined in all of them. Every
+ * hypothesis passes psvr2_led_pose_check (close = 1) first. prior: with
+ * orient_valid, Sony mode 7 (only LEDs facing the camera under prior->R
+ * are sampled and the sample's image direction must agree with it), else
+ * mode 6; NULL = no IMU. in_track: booting while tracking (50 samples,
+ * else 200). Below MININLIERSFORBOOT the pose needs gravity within 3 deg
+ * (>= 5 inliers) or the orientation within 15 deg (>= 4), section 2.9 of
+ * docs/sony-re/notdone.md. 0 = pose found.
+ */
+int psvr2_led_boot_ransac(const struct psvr2_solver_cfg *cfg,
+			  const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_led_model *model,
+			  const struct psvr2_imu_prior *prior, int in_track,
+			  struct psvr2_pose3 *out, struct psvr2_solve_result *res);
+
 int psvr2_led_boot_oriented(const struct psvr2_solver_cfg *cfg,
 			    const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
 			    const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
@@ -232,6 +269,10 @@ int psvr2_led_boot_oriented(const struct psvr2_solver_cfg *cfg,
  * §2b.2); the caller does that (steamvr optical_pose.cpp), not this loader.
  */
 void psvr2_led_model_load(int rev, struct psvr2_led_model *model);
+
+/* Sony's left-hand model (FUN_1800d3ae0, mirror 'X'): x of positions and
+ * normals negated, every LED ring reversed (a mirror flips its winding). */
+void psvr2_led_model_mirror_x(struct psvr2_led_model *model);
 
 /* Project LED `led` of a pose into camera `cam`; 0 = visible, -1 = not. */
 int psvr2_led_project(const struct psvr2_rig_camera *cam,

@@ -802,9 +802,13 @@ The values are the same for all models:
    - drop outliers whose distance is > f × the best's and > 3 px:
      f = 1.5, or min(25, 900/z_mm) under 150 mm.
 4. **Boot** (single camera):
-   - RANSAC with 6-point minimal sets;
-   - iterations `n = log(1−p)/log(1−w⁶)`, with w ≤ 0.9; the cap is 200
-     cold or 50 while tracking;
+   - RANSAC over 3 LEDs × 3 blobs (P3P, up to 4 poses): first up to 100
+     samples from 3-LED windows of the model's LED rings against blob
+     chains, then an LED and two of its 4 nearest against a blob and two
+     of its 4 nearest; MSAC score in that camera, 2 px (6 px close);
+     every hypothesis passes the pose check (`notdone.md` §2.19);
+   - fixed count: 200 cold or 50 while tracking (the adaptive
+     `n = log(1−p)/log(1−w⁶)` bound is off for this object);
    - the gravity prior comes from the IMU quaternion when USEGRAVITYBOOT is
      set.
 5. **Boot checks:**
@@ -920,6 +924,7 @@ Detail: `sony-re/room.md`, `sony-re/reloc.md`.
 | tracking.md / earlier guesses | 0x54 tuning block names | `ConfigFile0.trk` keys (§9.2) |
 | tracking.md §6 | LED cone one constant | Per model, 170° or 180° |
 | tracking.md, ctrlboot.md | RANSAC 1000 iterations | 200 cold, 50 while tracking |
+| tracking.md, RESEARCH.md §9 | Boot RANSAC over 6-point minimal sets, adaptive count | 3 LEDs × 3 blobs (P3P), ring stage first; adaptive flag 0 (`notdone.md` §2.19) |
 | earlier guesses | Gravity/orientation boot limits from config | Fixed 3°/15° (6°/30° close) |
 | DEV-NOTES.md | Camera-model builder `FUN_1800c8950/8a40`, 0x180-byte struct | `FUN_180045420` + `FUN_18009d4d0`; 0x1c0 bytes; those two are RANSAC settings |
 | libpad.md | Pad +6 "connection kind" | Vibration mode (always 2) |

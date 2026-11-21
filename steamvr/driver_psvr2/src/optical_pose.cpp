@@ -215,6 +215,9 @@ OpticalPose::OpticalPose( Psvr2HmdDriver *hmd, Psvr2ControllerDriver *const cont
 		e = vr::VRSettingsError_None;
 		const bool edge = vr::VRSettings()->GetBool( kSection, "optical_edge_state", &e );
 		cfg_.edge_state = e == vr::VRSettingsError_None ? edge : 1;
+		e = vr::VRSettingsError_None;
+		const bool ransac = vr::VRSettings()->GetBool( kSection, "optical_ransac_boot", &e );
+		ransac_boot_ = e == vr::VRSettingsError_None ? ransac : true;
 	}
 	// Defaults fitted against Sony's driver (2026-11-18, ~/sony-capture-3):
 	// with them, Sony's poses need < 1 deg and < 5 mm more head <- rig
@@ -424,11 +427,7 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 		h.rev = rev;
 		psvr2_led_model_load( rev, &h.model[0] );
 		h.model[1] = h.model[0];
-		for ( int i = 0; i < h.model[1].count; i++ )
-		{
-			h.model[1].pos[i][0] = -h.model[1].pos[i][0];
-			h.model[1].nrm[i][0] = -h.model[1].nrm[i][0];
-		}
+		psvr2_led_model_mirror_x( &h.model[1] );  // x negated, LED rings reversed
 		h.tracking = false;
 		DriverLog( "psvr2: optical pose: %s: hardware rev %04x, %d LEDs", HandName( hand ), rev, h.model[0].count );
 	}
@@ -604,6 +603,35 @@ bool OpticalPose::Boot( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose
 	// this frame and keep the best; boot only near the controller's
 	// heading while its fixes are recent, else need 18 LEDs.
 	const bool locked = known && h.fix_us && frame_us - h.fix_us < 5000000;
+
+	// Sony's RANSAC boot needs no heading: with the remap known, gravity
+	// from the IMU (mode 6), plus the current heading while the fixes are
+	// recent (mode 7). Same LED floor as the sweep, which stays the fallback.
+	if ( known && ransac_boot_ )
+	{
+		double B[9], Ry[9], A[9];
+		psvr2_imu_prior gp{};
+		MatMul( Rimu, kRemap.R[h.remap], B );  // world <- model, any heading
+		FillGravity( B, Rrw, gp );
+		if ( locked )
+		{
+			vrmath::ToMatrix( vrmath::AxisAngle( 0, 1, 0, yaw_now ), Ry );
+			MatMul( Ry, B, A );
+			MatMul( Rrw, A, gp.R );  // rig <- model
+			gp.orient_valid = 1;
+		}
+		h.boots++;
+		if ( psvr2_led_boot_ransac( &cfg_, cams_, lists, &h.model[h.mirror], &gp, 0, &out, &res ) == 0 &&
+		     res.matched >= ( locked ? 12 : 18 ) )
+		{
+			h.cand_remap = h.remap;
+			if ( !quiet )
+				DriverLog( "psvr2: optical pose: %s: RANSAC boot ok (%s, %d LEDs, %.2f px)", HandName( hand ),
+				           locked ? "near the current heading" : "gravity only", res.matched, res.rms_px );
+			return true;
+		}
+	}
+
 	psvr2_pose3 best_out{};
 	psvr2_solve_result best_res{};
 	double best_yaw = 0;

@@ -46,6 +46,10 @@ struct psvr2_pose3 {
 struct psvr2_blob_list {
 	int	count;
 	double	xy[PSVR2_SOLVER_BLOBS][2];	/* pixels in the 508 model image */
+	/* Blob ellipse angles (LD record, rad; < 0 = undefined), only read
+	 * when has_angle (the grazing check). */
+	int	has_angle;
+	double	angle[PSVR2_SOLVER_BLOBS];
 };
 
 struct psvr2_solve_result {
@@ -80,6 +84,13 @@ struct psvr2_solver_cfg {
 	/* 1 = with <= 3 matched LEDs and an orientation prior, solve the
 	 * translation with the IMU rotation (Sony FUN_1800dcf00, default). */
 	int	few_led;
+	/* 1 = in the close-range states, drop grazing LEDs whose blob ellipse
+	 * is not across the LED normal (Sony FUN_1800e4ec0, default). */
+	int	grazing_check;
+	/* 1 = psvr2_led_track_state enters Sony's edge state when <= 3 LEDs
+	 * are predicted well inside the images (FUN_1800db420, default);
+	 * 0 = it stays in the normal track step there. */
+	int	edge_state;
 };
 void psvr2_solver_default_cfg(struct psvr2_solver_cfg *cfg);
 
@@ -123,6 +134,31 @@ int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
 		    const struct psvr2_led_model *model,
 		    const struct psvr2_pose3 *predicted,
 		    struct psvr2_pose3 *out, struct psvr2_solve_result *res);
+
+/*
+ * Sony's tracker states (FUN_1800db690), by the controller's distance from
+ * the nearest camera (mm) and the IMU orientation prior:
+ *   NORMAL: psvr2_led_track_ex. -> CLOSE at < 80, NEAR at < 130 (IMU set);
+ *     -> EDGE first when <= 3 LEDs are predicted well inside the images.
+ *   NEAR (-> NORMAL > 170, CLOSE < 80), CLOSE (-> NEAR > 120), EDGE
+ *     (-> NEAR < 130 with the IMU, NORMAL at 6+ matches): one gated match
+ *     at SEARCHRADIUS x scale, a nearest-blob fallback under 3 matches,
+ *     the grazing check, then the few-LED solve or the refine.
+ *   LOST: the last call failed; the next call runs as NORMAL (Sony
+ *     re-boots; the caller decides that here).
+ * *state is updated; returns as psvr2_led_track_ex.
+ */
+enum { PSVR2_TRACK_NORMAL = 0, PSVR2_TRACK_NEAR = 1, PSVR2_TRACK_CLOSE = 2, PSVR2_TRACK_EDGE = 3,
+       PSVR2_TRACK_LOST = 4 };
+int psvr2_led_track_state(const struct psvr2_solver_cfg *cfg,
+			  const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_led_model *model,
+			  const struct psvr2_pose3 *predicted,
+			  const struct psvr2_imu_prior *prior, double dt_s, int *state,
+			  struct psvr2_pose3 *out, struct psvr2_solve_result *res);
+/* The state after a boot (FUN_1800d5070): CLOSE < 100 mm, NEAR < 150. */
+int psvr2_led_boot_state(const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS], const struct psvr2_pose3 *pose);
 
 /*
  * Cross-camera support of a pose (FUN_1800e27a0 / FUN_1800efd70): per

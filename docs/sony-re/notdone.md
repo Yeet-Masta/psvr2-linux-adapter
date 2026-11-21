@@ -837,6 +837,49 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
   of all patches. Two LEDs ~6 px apart at 600 mm with 0.3 px noise give
   20–35 mm depth error from the geometry alone.
 
+### 2.18 Close-range and edge states (`FUN_1800db690`, `FUN_1800dbda0`, `FUN_1800dc210`, `FUN_1800dc680`, `FUN_1800db420`, `FUN_1800ddb90`, `FUN_1800f1950`, `FUN_1800e4ec0`) [sure unless tagged]
+
+Corrects §1.8: "close" there is the IMU orientation flag `a1[822]` (as
+in §2.17), d = |translation| in the camera frame (controller origin),
+the match count in state 3 is `+0x49c` and must be > **5** to leave.
+
+- State 0 enters state 3 before solving when `FUN_1800db420` ≤ **3**: LEDs
+  visible at association mode 3 (cone × 0.8) whose prediction lies
+  ≥ **20** px inside the image rectangle and within **1.2391838·fx** of
+  the principal point (camera model `+0x6b0` fx, `+0x6b8` cx, cy).
+- States 1–3 (one solver each, same shape): association mode 2 (state 1,
+  174°), 0 (state 2, model cone) or 1 (state 3, 174°); one gated match
+  (§2.11) with gate = support radius = min(SEARCHRADIUS·scale,
+  10·SEARCHRADIUS) (`+0x65c`, scaled when `+0x64a`; 10 at
+  `0x180319954`), no dt scaling, no refine before it. Under 3 matches:
+  association mode 0 and `FUN_1800ddb90`: each LED takes its nearest blob
+  within the same gate (`FUN_1800f32c0`) and remembers the second
+  (`FUN_1800f35c0`); `FUN_1800f1950` then splits shared blobs: a
+  squared-distance gap ≥ **400** drops the farther LED, else LEDs
+  matched in the previous frame (`+0x2128` mask, flag `+0x258c`) win, else
+  the LED whose second blob is nearer moves to it.
+- Then `FUN_1800e4ec0` (flag `0x1803517c3` = 1): a matched LED with view
+  angle (`+0x51c`) ≥ **140°**, ≤ **300** mm from the camera and a blob
+  angle ≥ 0 (blob list `+0x88`) is dropped when the blob ellipse axis is
+  more than **25°** from perpendicular to the projected LED normal (camera
+  Jacobian `FUN_180103580`). 0 left → fail.
+- Then `FUN_1800dcf00` (few-LED, §2.17, else `FUN_1800dd2f0`: LM refine
+  with ≥ 3 matches, method 1). No pose check (`FUN_1800d89f0`) in these
+  states; the 25° orientation flag test after it is as in state 0.
+- Our port: `psvr2_led_track_state` (state per hand in the driver,
+  `HandState::state`; after a boot `psvr2_led_boot_state`), our joint
+  solve: d = nearest camera that matched, the inner count summed over
+  cameras. Not modelled: the previous-frame preference; Sony's state 4
+  (re-boot at once) — the driver keeps its 6-miss tolerance and the next
+  call runs as state 0. Driver settings `optical_sony_states`,
+  `optical_edge_state` (both default true); blobs carry the LD ellipse
+  angle for the grazing check.
+- Test (`test_led_solver`, `run_close`): controller 90–170 mm in front of
+  a camera: 65–85 % right (5 mm / 4°) vs 15–43 % for the normal step,
+  ≤ 1 gross. Controller near an image corner, one camera: the edge state
+  is right 57–68 % vs 81–84 % for the normal step, 3–7 % gross vs
+  2–5 %; blobs cut by the border are not simulated.
+
 ### 2.15 Leftovers (item 2)
 
 These no longer block a port:

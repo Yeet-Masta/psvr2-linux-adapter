@@ -80,6 +80,11 @@
 		"//sonymatch": "LED-blob matching: true = Sony's three-pass match with neighbour support",
 		"//sonymatch2": "(FUN_1800df5b0), false = our image-shift consensus (better when few LEDs show).",
 		"optical_sony_match": true,
+		"//sonystates": "true = Sony's close-range (< 170 mm from a camera) and image-edge track states",
+		"//sonystates2": "(FUN_1800db690); false = the normal track step everywhere.",
+		"optical_sony_states": true,
+		"//edgestate": "Sony's edge state (<= 3 LEDs predicted inside the images); less accurate in simulation.",
+		"optical_edge_state": true,
 
 		"optical_ukf": true,
 		"optical_ukf_hold_ms": 300,

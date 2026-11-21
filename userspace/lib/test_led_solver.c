@@ -65,6 +65,18 @@ static void perturb(const struct psvr2_pose3 *in, double rad, double mm_sd, stru
 		out->t[i] = in->t[i] + mm_sd * gauss();
 }
 
+/* Off by more than 20 mm or 10 deg. */
+static int gross(const struct psvr2_pose3 *a, const struct psvr2_pose3 *b)
+{
+	double d = 0, tr = 0;
+
+	for (int i = 0; i < 3; i++)
+		d += (a->t[i] - b->t[i]) * (a->t[i] - b->t[i]);
+	for (int i = 0; i < 9; i++)
+		tr += a->R[i] * b->R[i];
+	return sqrt(d) > 20 || acos(fmax(-1, fmin(1, (tr - 1) / 2))) * 180 / M_PI > 10;
+}
+
 /* 1 = right, 0 = wrong. */
 static int right(const struct psvr2_pose3 *a, const struct psvr2_pose3 *b)
 {
@@ -75,6 +87,134 @@ static int right(const struct psvr2_pose3 *a, const struct psvr2_pose3 *b)
 	for (int i = 0; i < 9; i++)
 		tr += a->R[i] * b->R[i];
 	return sqrt(d) < 5 && acos(fmax(-1, fmin(1, (tr - 1) / 2))) * 180 / M_PI < 4;
+}
+
+/*
+ * Sony's close-range and edge states (psvr2_led_track_state). Blobs carry
+ * ellipse angles across the projected LED normal (5 deg noise), as the
+ * grazing check expects.
+ *  close: the controller 90-170 mm in front of camera 0, tracked from a
+ *    prediction 2 deg / 3 mm off with an IMU orientation 1 deg off;
+ *  edge: one camera, the controller 500 mm away towards an image corner
+ *    (outside 1.24 fx of the centre), so <= 3 LEDs are predicted inside.
+ * Each compares the state machine with the normal track step on the same
+ * input. Right: within 5 mm / 4 deg; gross: off by > 20 mm or > 10 deg.
+ * Pass: <= 5 % gross (edge: 10 %; the normal step has 2-5 % there);
+ * close: right at least as often as the normal step
+ * less 5 %. The edge state is less accurate than the normal step here
+ * (fewer LEDs per solve, one match round); blobs cut by the image border,
+ * which it is for on hardware, are not simulated.
+ */
+static void blobs_for(const struct psvr2_rig_camera cams[], const struct psvr2_led_model *mod,
+		      const struct psvr2_pose3 *truth, struct psvr2_blob_list bl[])
+{
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		struct psvr2_blob_list *b = &bl[c];
+		memset(b, 0, sizeof(*b));
+		b->has_angle = 1;
+		if (!cams[c].active)
+			continue;
+		for (int l = 0; l < mod->count && b->count < PSVR2_SOLVER_BLOBS; l++) {
+			double px[2], q[2], va;
+			struct psvr2_pose3 moved = *truth;
+			if (psvr2_led_project(&cams[c], mod, truth, l, px, &va, NULL) || va >= 100)
+				continue;
+			/* The image direction of the LED normal: project the LED
+			 * moved 1 mm along it (pose shifted by R n). */
+			for (int i = 0; i < 3; i++)
+				moved.t[i] += truth->R[3 * i] * mod->nrm[l][0] + truth->R[3 * i + 1] * mod->nrm[l][1] +
+					      truth->R[3 * i + 2] * mod->nrm[l][2];
+			b->angle[b->count] = -1;
+			if (psvr2_led_project(&cams[c], mod, &moved, l, q, NULL, NULL) == 0 &&
+			    hypot(q[0] - px[0], q[1] - px[1]) > 1e-6)
+				b->angle[b->count] = atan2(q[1] - px[1], q[0] - px[0]) + M_PI / 2 + 2 * M_PI +
+						     0.087 * gauss();
+			b->xy[b->count][0] = px[0] + 0.3 * gauss();
+			b->xy[b->count][1] = px[1] + 0.3 * gauss();
+			b->count++;
+		}
+	}
+}
+
+static int run_close(int rev, const struct psvr2_rig_camera cams_in[])
+{
+	struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS];
+	struct psvr2_led_model mod;
+	struct psvr2_solver_cfg cfg;
+	int ok = 1;
+
+	psvr2_led_model_load(rev, &mod);
+	psvr2_solver_default_cfg(&cfg);
+	if (getenv("LED_SONY"))
+		cfg.sony_match = atoi(getenv("LED_SONY"));
+	srand(2);
+	for (int edge = 0; edge < 2; edge++) {
+		int st_ok = 0, st_gross = 0, ex_ok = 0, ex_gross = 0, entered = 0, n = 0;
+		memcpy(cams, cams_in, sizeof(cams));
+		if (edge)
+			for (int c = 1; c < PSVR2_SOLVER_CAMS; c++)
+				cams[c].active = 0;
+		for (int trial = 0; trial < TRIALS; trial++) {
+			struct psvr2_blob_list bl[PSVR2_SOLVER_CAMS];
+			struct psvr2_pose3 truth, start, out;
+			struct psvr2_solve_result res;
+			struct psvr2_imu_prior pr = { 0 };
+			const struct psvr2_pose3 id = { { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, { 0 } };
+			double dir[3], dc[3];
+			int state;
+
+			perturb(&id, 0.4, 0, &truth);
+			if (edge) {
+				/* Camera-frame direction ~65-80 deg off axis, towards a corner. */
+				const double th = (65 + 15 * rand() / (double)RAND_MAX) * M_PI / 180;
+				const double ph = (rand() % 4) * M_PI / 2 + M_PI / 4;
+				dc[0] = sin(th) * cos(ph);
+				dc[1] = sin(th) * sin(ph);
+				dc[2] = cos(th);
+			} else {
+				dc[0] = 0.1 * gauss();
+				dc[1] = 0.1 * gauss();
+				dc[2] = 1;
+			}
+			for (int i = 0; i < 3; i++)
+				dir[i] = cams[0].R[3 * i] * dc[0] + cams[0].R[3 * i + 1] * dc[1] + cams[0].R[3 * i + 2] * dc[2];
+			{
+				const double dn = sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+				const double d = edge ? 500 : 90 + 80 * rand() / (double)RAND_MAX;
+				for (int i = 0; i < 3; i++)
+					truth.t[i] = cams[0].t[i] + d * dir[i] / dn;
+			}
+			blobs_for(cams, &mod, &truth, bl);
+			if (bl[0].count < 3)
+				continue;
+			perturb(&truth, 0.035, 3, &start);
+			{
+				struct psvr2_pose3 g;
+				perturb(&truth, 0.017, 0, &g);
+				memcpy(pr.R, g.R, sizeof(pr.R));
+				pr.orient_valid = 1;
+			}
+			n++;
+			state = edge ? PSVR2_TRACK_NORMAL : psvr2_led_boot_state(cams, &truth);
+			{
+				const int st0 = state;
+				if (psvr2_led_track_state(&cfg, cams, bl, &mod, &start, &pr, 1.0 / 60, &state, &out, &res) == 0) {
+					st_ok += right(&out, &truth);
+					st_gross += gross(&out, &truth);
+				}
+				entered += edge ? state == PSVR2_TRACK_EDGE : st0 != PSVR2_TRACK_NORMAL;
+			}
+			if (psvr2_led_track_ex(&cfg, cams, bl, &mod, &start, &pr, 1.0 / 60, &out, &res) == 0) {
+				ex_ok += right(&out, &truth);
+				ex_gross += gross(&out, &truth);
+			}
+		}
+		printf("rev %d: %s %d trials (%s %d): states %d right, %d gross; normal step %d right, %d gross\n",
+		       rev, edge ? "edge" : "close", n, edge ? "edge state after" : "started near/close", entered,
+		       st_ok, st_gross, ex_ok, ex_gross);
+		ok &= (edge ? 10 : 20) * st_gross <= n && (edge || 20 * st_ok >= 19 * ex_ok - n);
+	}
+	return ok;
 }
 
 static int run_model(int rev)
@@ -248,6 +388,7 @@ static int run_model(int rev)
 			}
 		}
 	}
+	const int close_ok = run_close(rev, cams);
 	printf("rev %d: few-LED (1-3 seen) %d/%d right, %d wrong\n", rev, few_ok, few_n, few_wrong);
 	printf("rev %d: track %3d/%d right, %d wrong; boot %3d/%d right, %d wrong; %.1f LEDs matched, "
 	       "support %.2f (%d < 0.5)\n",
@@ -256,7 +397,7 @@ static int run_model(int rev)
 	       track_ok + track_wrong ? support_sum / (track_ok + track_wrong) : 0.0, support_low);
 	return track_ok >= TRIALS * 85 / 100 && boot_ok >= TRIALS * 90 / 100 &&
 	       40 * track_wrong <= TRIALS && 40 * boot_wrong <= TRIALS &&
-	       (!cfg.few_led || (few_ok >= few_n * (cfg.sony_match ? 50 : 80) / 100 && 20 * few_wrong <= few_n));
+	       (!cfg.few_led || (few_ok >= few_n * (cfg.sony_match ? 50 : 80) / 100 && 20 * few_wrong <= few_n)) && close_ok;
 }
 
 int main(void)

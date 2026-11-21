@@ -209,6 +209,12 @@ OpticalPose::OpticalPose( Psvr2HmdDriver *hmd, Psvr2ControllerDriver *const cont
 		vr::EVRSettingsError e = vr::VRSettingsError_None;
 		const bool sony = vr::VRSettings()->GetBool( kSection, "optical_sony_match", &e );
 		cfg_.sony_match = e == vr::VRSettingsError_None ? sony : 1;
+		e = vr::VRSettingsError_None;
+		const bool states = vr::VRSettings()->GetBool( kSection, "optical_sony_states", &e );
+		sony_states_ = e == vr::VRSettingsError_None ? states : true;
+		e = vr::VRSettingsError_None;
+		const bool edge = vr::VRSettings()->GetBool( kSection, "optical_edge_state", &e );
+		cfg_.edge_state = e == vr::VRSettingsError_None ? edge : 1;
 	}
 	// Defaults fitted against Sony's driver (2026-11-18, ~/sony-capture-3):
 	// with them, Sony's poses need < 1 deg and < 5 mm more head <- rig
@@ -352,8 +358,11 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 			return int( blobs[c].w[a] ) * blobs[c].h[a] < int( blobs[c].w[b] ) * blobs[c].h[b];
 		} );
 		lists[c].count = std::min( n, PSVR2_SOLVER_BLOBS );
+		lists[c].has_angle = 1;
 		for ( int k = 0; k < lists[c].count; k++ )
 		{
+			// Ellipse angle (+ 2 pi; -1 = undefined) for the grazing check.
+			lists[c].angle[k] = blobs[c].angle[idx[k]];
 			// LD blob x reads 4 px (508 image) left of the calibrated model
 			// on every camera; PSVR2Toolkit compensates in Sony's driver by
 			// moving cx 8 px left in the 1016 calibration (ir_tracker_hooks.cpp).
@@ -465,7 +474,12 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 		prior.orient_age_s = dt;
 		prior.spin_rad_s = dt > 1e-3 ? vrmath::Angle( d ) / dt : 0.0;
 		prior.p1p_frames = h.p1p;
-		ok = psvr2_led_track_ex( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior, dt, &out, &res ) == 0;
+		// Sony's state machine (FUN_1800db690): close-range and edge states
+		// beside the normal track step.
+		ok = ( sony_states_ ? psvr2_led_track_state( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior,
+		                                             dt, &h.state, &out, &res )
+		                    : psvr2_led_track_ex( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior, dt,
+		                                          &out, &res ) ) == 0;
 		// Sony (FUN_1800dcf00): count consecutive one-LED tracks.
 		h.p1p = ok && res.method == 3 ? h.p1p + 1 : 0;
 		// Sony (FUN_1800d5070): the boot also runs while tracking, and its
@@ -519,6 +533,8 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 			h.span_ref = q_imu;
 			h.vel = {};
 			h.last_us = 0;
+			h.p1p = 0;
+			h.state = psvr2_led_boot_state( cams_, &out );
 		}
 	}
 	if ( !ok )

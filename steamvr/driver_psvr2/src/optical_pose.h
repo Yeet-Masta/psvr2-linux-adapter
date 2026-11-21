@@ -94,6 +94,7 @@ private:
 		int frames = 0, solved = 0, boots = 0, fixes = 0, matched = 0;
 		int reboots = 0;  // tracked frames where a boot replaced the track
 		int p1p = 0;      // consecutive one-LED (P1P) tracks; > 5 stops them (Sony)
+		int state = 0;    // Sony's tracker state (PSVR2_TRACK_*), FUN_1800db690
 		double rms = 0;
 	};
 
@@ -115,6 +116,7 @@ private:
 	bool have_rig_ = false;
 	psvr2_rig_camera cams_[PSVR2_SOLVER_CAMS] = {};
 	psvr2_solver_cfg cfg_{};
+	bool sony_states_ = true;  // optical_sony_states: close-range / edge states
 
 	// head <- rig (settings optical_rig_offset_x/y/z in m, head axes, and
 	// optical_rig_tilt_deg about the head's x axis).

@@ -45,6 +45,8 @@ void psvr2_solver_default_cfg(struct psvr2_solver_cfg *cfg)
 	cfg->own_accept = 1;
 	cfg->sony_match = 1;
 	cfg->few_led = 1;
+	cfg->grazing_check = 1;
+	cfg->edge_state = 1;
 }
 
 static float bits_to_float(uint32_t b)
@@ -196,8 +198,9 @@ struct vis {
 	double px[PSVR2_LED_MAX][2], angle[PSVR2_LED_MAX], depth[PSVR2_LED_MAX];
 };
 
+/* limit: the view-angle cut (Sony's association modes, FUN_1800daff0). */
 static void associate(const struct psvr2_rig_camera *cam, const struct psvr2_led_model *model,
-		      const struct psvr2_pose3 *pose, struct vis *v)
+		      const struct psvr2_pose3 *pose, double limit, struct vis *v)
 {
 	struct vis all = { 0 };
 	double origin_depth, opx[2];
@@ -206,7 +209,9 @@ static void associate(const struct psvr2_rig_camera *cam, const struct psvr2_led
 	v->n = 0;
 	for (i = 0; i < model->count; i++) {
 		const int k = all.n;
-		if (psvr2_led_project(cam, model, pose, i, all.px[k], &all.angle[k], &all.depth[k]) == 0)
+		all.angle[k] = 1e9;	/* stays when the LED does not project */
+		psvr2_led_project(cam, model, pose, i, all.px[k], &all.angle[k], &all.depth[k]);
+		if (all.angle[k] < limit)
 			all.led[all.n++] = i;
 	}
 	project_point(cam, pose->t, opx, &origin_depth);
@@ -734,10 +739,15 @@ static double scale_for(const struct psvr2_pose3 *pose)
 	return fmin(1.0 / fmax(d_m, 1e-3), 10.0);
 }
 
-/* s_rad: Sony's support radius; sony: use match_sony, else match. */
-static int match_all(const struct psvr2_rig_camera cams[], const struct psvr2_blob_list blobs[],
-		     const struct psvr2_led_model *model, const struct psvr2_pose3 *pose, double gate,
-		     double s_rad, int sony, struct problem *p, double dist[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX])
+static int match_nearest(const struct vis *v, const struct psvr2_blob_list *b, double gate,
+			 int led_blob[PSVR2_LED_MAX], double dist[PSVR2_LED_MAX]);
+
+/* s_rad: Sony's support radius; mode 1: match_sony, 0: match, 2:
+ * match_nearest; limit: the view-angle cut. */
+static int match_all_ex(const struct psvr2_rig_camera cams[], const struct psvr2_blob_list blobs[],
+			const struct psvr2_led_model *model, const struct psvr2_pose3 *pose, double gate,
+			double s_rad, int mode, double limit, struct problem *p,
+			double dist[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX])
 {
 	p->n = p->expected = 0;
 	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
@@ -747,14 +757,22 @@ static int match_all(const struct psvr2_rig_camera cams[], const struct psvr2_bl
 			p->led_blob[c][l] = -1;
 		if (!cams[c].active || !blobs[c].count)
 			continue;
-		associate(&cams[c], model, pose, &v);
+		associate(&cams[c], model, pose, limit, &v);
 		for (int i = 0; i < v.n; i++)
 			p->expected += v.angle[i] < 70;
 		project_point(&cams[c], pose->t, opx, &od);
-		p->n += sony ? match_sony(&v, &blobs[c], gate, s_rad, od, p->led_blob[c], dist[c])
-			     : match(&v, &blobs[c], gate, od, p->led_blob[c], dist[c]);
+		p->n += mode == 1 ? match_sony(&v, &blobs[c], gate, s_rad, od, p->led_blob[c], dist[c])
+			: mode == 2 ? match_nearest(&v, &blobs[c], gate, p->led_blob[c], dist[c])
+				    : match(&v, &blobs[c], gate, od, p->led_blob[c], dist[c]);
 	}
 	return p->n;
+}
+
+static int match_all(const struct psvr2_rig_camera cams[], const struct psvr2_blob_list blobs[],
+		     const struct psvr2_led_model *model, const struct psvr2_pose3 *pose, double gate,
+		     double s_rad, int sony, struct problem *p, double dist[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX])
+{
+	return match_all_ex(cams, blobs, model, pose, gate, s_rad, sony ? 1 : 0, model->cone_deg, p, dist);
 }
 
 static void finish(const struct problem *p, const struct psvr2_pose3 *pose, double T,
@@ -987,7 +1005,7 @@ static int few_led_solve(const struct psvr2_rig_camera cams[], const struct psvr
 		}
 	if (pairs == 0) {
 		/* Rays only in different cameras: least-squares intersection. */
-		double A[9] = { 0 }, bv[3] = { 0 }, e[3];
+		double A[36] = { 0 }, bv[6] = { 0 }, x[6], e[3];
 		for (int q = 0; q < n; q++) {
 			const double r[3] = { xy[q][0], xy[q][1], 1 };
 			const struct psvr2_rig_camera *C = &cams[cam[q]];
@@ -1005,8 +1023,9 @@ static int few_led_solve(const struct psvr2_rig_camera cams[], const struct psvr
 					bv[i] += ((i == j) - d[i] * d[j]) * o[j];
 				}
 		}
-		if (solve_spd(3, A, bv, out->t))
+		if (solve_spd(3, A, bv, x))
 			return -1;
+		memcpy(out->t, x, sizeof(double) * 3);
 		for (int i = 0; i < 3; i++)
 			e[i] = out->t[i] - predicted->t[i];
 		return dot(e, e) < 10000.0 ? n : -1;
@@ -1107,6 +1126,269 @@ int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
 		    struct psvr2_pose3 *out, struct psvr2_solve_result *res)
 {
 	return psvr2_led_track_ex(cfg, cams, blobs, model, predicted, NULL, 1.0 / 60, out, res);
+}
+
+/* ---- close-range and edge states (FUN_1800db690) ------------------------ */
+
+/* Camera distance of the controller origin: the nearest camera, among
+ * those that matched LEDs when res is given (Sony: per-camera trackers,
+ * |translation| in that camera's frame). */
+static double cam_dist(const struct psvr2_rig_camera cams[], const struct psvr2_pose3 *pose,
+		       const struct psvr2_solve_result *res, int nleds)
+{
+	double best = DBL_MAX;
+
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		double v[3];
+		int used = !res;
+		if (!cams[c].active)
+			continue;
+		for (int l = 0; l < nleds && !used; l++)
+			used = res->led_blob[c][l] >= 0;
+		if (!used)
+			continue;
+		for (int i = 0; i < 3; i++)
+			v[i] = pose->t[i] - cams[c].t[i];
+		best = fmin(best, norm(v));
+	}
+	return best;
+}
+
+/*
+ * FUN_1800db420: LEDs visible at cone x 0.8 (association mode 3) whose
+ * prediction lies 20 px inside the image and within 1.2391838 fx of the
+ * principal point. Summed over the cameras (Sony: per camera).
+ */
+static int inner_count(const struct psvr2_rig_camera cams[], const struct psvr2_led_model *model,
+		       const struct psvr2_pose3 *pose)
+{
+	int n = 0;
+
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		const struct psvr2_cam_model *m = &cams[c].model;
+		const double r = 1.2391838 * m->fx;
+		struct vis v;
+		if (!cams[c].active)
+			continue;
+		associate(&cams[c], model, pose, model->cone_deg * 0.8, &v);
+		for (int i = 0; i < v.n; i++) {
+			const double x = v.px[i][0], y = v.px[i][1], dx = x - m->cx, dy = y - m->cy;
+			n += x >= 20 && x < m->width - 20 && y >= 20 && y < m->height - 20 && dx * dx + dy * dy <= r * r;
+		}
+	}
+	return n;
+}
+
+/*
+ * FUN_1800ddb90 + FUN_1800f1950: every visible LED takes its nearest blob
+ * within `gate` (blobs may be shared); then for two LEDs on one blob: a
+ * squared-distance gap >= 400 px^2 drops the farther; else the one whose
+ * second-nearest blob is nearer moves there (one without a second drops,
+ * the farther when neither has one). Sony prefers LEDs matched in the
+ * previous frame first; not modelled.
+ */
+static int match_nearest(const struct vis *v, const struct psvr2_blob_list *b, double gate,
+			 int led_blob[PSVR2_LED_MAX], double dist[PSVR2_LED_MAX])
+{
+	int first[PSVR2_LED_MAX], second[PSVR2_LED_MAX], n = 0;
+	double d1[PSVR2_LED_MAX], d2[PSVR2_LED_MAX];
+
+	for (int i = 0; i < PSVR2_LED_MAX; i++)
+		led_blob[i] = -1;
+	for (int i = 0; i < v->n; i++) {
+		int cand[2];
+		const int nc = nearest(b, v->px[i][0], v->px[i][1], gate, 2, cand);
+		first[i] = nc > 0 ? cand[0] : -1;
+		second[i] = nc > 1 ? cand[1] : -1;
+		d1[i] = d2[i] = 1e18;
+		for (int k = 0; k < nc; k++) {
+			const double dx = b->xy[cand[k]][0] - v->px[i][0], dy = b->xy[cand[k]][1] - v->px[i][1];
+			(k ? d2 : d1)[i] = dx * dx + dy * dy;
+		}
+	}
+	for (int i = 0; i < v->n; i++)
+		for (int j = i + 1; j < v->n && first[i] >= 0; j++) {
+			int loser;
+			if (first[j] != first[i])
+				continue;
+			if (fabs(d1[i] - d1[j]) >= 400.0) {
+				loser = d1[i] >= d1[j] ? i : j;
+				first[loser] = -1;
+				continue;
+			}
+			if (second[i] >= 0 && second[j] >= 0)
+				loser = d2[i] > d2[j] ? j : i;
+			else if (second[i] >= 0 || second[j] >= 0)
+				loser = second[i] >= 0 ? i : j;
+			else {
+				loser = d1[i] >= d1[j] ? i : j;
+				first[loser] = -1;
+				continue;
+			}
+			first[loser] = second[loser];
+			d1[loser] = d2[loser];
+			second[loser] = -1;
+		}
+	for (int i = 0; i < v->n; i++)
+		if (first[i] >= 0) {
+			led_blob[v->led[i]] = first[i];
+			dist[v->led[i]] = sqrt(d1[i]);
+			n++;
+		}
+	return n;
+}
+
+/*
+ * FUN_1800e4ec0 (flag 0x1803517c3, set in this build): a matched LED seen
+ * >= 140 deg off its axis and <= 300 mm from the camera images as an
+ * ellipse whose major axis is across the projected LED normal; it is
+ * dropped when that axis is more than 25 deg from perpendicular. Needs the
+ * blob angles (blobs[c].has_angle). Returns the matches left.
+ */
+static int grazing(const struct psvr2_rig_camera cams[], const struct psvr2_blob_list blobs[],
+		   const struct psvr2_led_model *model, const struct psvr2_pose3 *pose, struct problem *p)
+{
+	for (int c = 0; c < PSVR2_SOLVER_CAMS; c++) {
+		if (!blobs[c].has_angle)
+			continue;
+		for (int l = 0; l < model->count; l++) {
+			const int k = p->led_blob[c][l];
+			double px[2], q[2], va = 0, P[3], n[3], v[3], d, e[2], a, dep;
+			if (k < 0 || k >= blobs[c].count || blobs[c].angle[k] < 0)
+				continue;
+			if (psvr2_led_project(&cams[c], model, pose, l, px, &va, NULL) || va < 140)
+				continue;
+			mv(pose->R, model->pos[l], P);
+			for (int i = 0; i < 3; i++) {
+				P[i] += pose->t[i];
+				v[i] = P[i] - cams[c].t[i];
+			}
+			if (norm(v) > 300)
+				continue;
+			/* Projected normal: image step of a 1 mm move along it. */
+			mv(pose->R, model->nrm[l], n);
+			for (int i = 0; i < 3; i++)
+				P[i] += n[i];
+			if (project_point(&cams[c], P, q, &dep))
+				continue;
+			e[0] = q[0] - px[0];
+			e[1] = q[1] - px[1];
+			d = hypot(e[0], e[1]);
+			if (!(d > 0))
+				continue;
+			a = acos(fmax(-1.0, fmin(1.0, (cos(blobs[c].angle[k]) * e[0] + sin(blobs[c].angle[k]) * e[1]) / d))) * DEG;
+			if (fabs(a - 90.0) > 25.0) {
+				p->led_blob[c][l] = -1;
+				p->n--;
+			}
+		}
+	}
+	return p->n;
+}
+
+/*
+ * States 1-3 (FUN_1800dbda0, FUN_1800dc210, FUN_1800dc680): one gated
+ * match, gate = support radius = SEARCHRADIUS x scale (scale capped at
+ * 10), LEDs visible to 174 deg (states 1, 3) or the model cone (state 2);
+ * under 3 matches the nearest-blob fallback; the grazing check; then the
+ * few-LED solve or the refine (FUN_1800dcf00 / FUN_1800dd2f0). No pose
+ * check (Sony runs none in these states); our acceptance check applies.
+ */
+static int track_close(const struct psvr2_solver_cfg *cfg, const struct psvr2_rig_camera cams[],
+		       const struct psvr2_blob_list blobs[], const struct psvr2_led_model *model,
+		       const struct psvr2_pose3 *predicted, const struct psvr2_imu_prior *prior, int st,
+		       struct psvr2_pose3 *out, struct psvr2_solve_result *res)
+{
+	struct problem p = { .cams = cams, .blobs = blobs, .model = model };
+	double dist[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX];
+	struct psvr2_pose3 pose = *predicted;
+	const double gate = cfg->search_radius_px * scale_for(&pose);
+	const double limit = st == PSVR2_TRACK_CLOSE ? model->cone_deg : 174.0;
+	int n = match_all_ex(cams, blobs, model, &pose, gate, gate, cfg->sony_match ? 1 : 0, limit, &p, dist);
+
+	res->method = 0;
+	if (n < 3)
+		n = match_all_ex(cams, blobs, model, &pose, gate, gate, 2, model->cone_deg, &p, dist);
+	if (cfg->grazing_check)
+		n = grazing(cams, blobs, model, &pose, &p);
+	if (n <= 0)
+		return -1;
+	if (cfg->few_led && prior && prior->orient_valid && norm(predicted->t) < 700 && n <= 3) {
+		const int m = few_led_solve(cams, blobs, model, &p, predicted, prior->R, &pose);
+		if (m < 1 || (m == 1 && prior->p1p_frames > 5))
+			return -1;
+		finish(&p, &pose, cfg->pothole * scale_for(&pose), res);
+		res->expected = p.expected;
+		res->method = m == 1 ? 3 : 2;
+		if (cfg->own_accept && res->rms_px > 1.5)
+			return -1;
+		*out = pose;
+		return 0;
+	}
+	if (n < 3 || refine(&p, cfg->max_iterations, &pose))
+		return -1;
+	finish(&p, &pose, cfg->pothole * scale_for(&pose), res);
+	res->expected = p.expected;
+	if (cfg->own_accept &&
+	    (p.n < cfg->min_inliers_orientation || 4 * p.n < 3 * p.expected || res->rms_px > 1.5))
+		return -1;
+	*out = pose;
+	return 0;
+}
+
+/* FUN_1800db690's transitions; d in mm, imu = orientation prior set. */
+static int next_state(int st, int valid, int imu, double d, int matched)
+{
+	if (!valid)
+		return PSVR2_TRACK_LOST;
+	switch (st) {
+	case PSVR2_TRACK_NORMAL:
+		if (!imu || d >= 130)
+			return st;
+		return d < 80 ? PSVR2_TRACK_CLOSE : PSVR2_TRACK_NEAR;
+	case PSVR2_TRACK_NEAR:
+		if (d > 170)
+			return PSVR2_TRACK_NORMAL;
+		return imu && d < 80 ? PSVR2_TRACK_CLOSE : st;
+	case PSVR2_TRACK_CLOSE:
+		return d <= 120 ? st : PSVR2_TRACK_NEAR;
+	case PSVR2_TRACK_EDGE:
+		if (imu && d < 130)
+			return PSVR2_TRACK_NEAR;
+		return matched > 5 ? PSVR2_TRACK_NORMAL : st;
+	}
+	return st;
+}
+
+int psvr2_led_track_state(const struct psvr2_solver_cfg *cfg,
+			  const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
+			  const struct psvr2_led_model *model,
+			  const struct psvr2_pose3 *predicted,
+			  const struct psvr2_imu_prior *prior, double dt_s, int *state,
+			  struct psvr2_pose3 *out, struct psvr2_solve_result *res)
+{
+	int st = *state, r;
+
+	if (st < PSVR2_TRACK_NORMAL || st >= PSVR2_TRACK_LOST)
+		st = PSVR2_TRACK_NORMAL;
+	if (st == PSVR2_TRACK_EDGE && !cfg->edge_state)
+		st = PSVR2_TRACK_NORMAL;
+	if (st == PSVR2_TRACK_NORMAL && cfg->edge_state && inner_count(cams, model, predicted) <= 3)
+		st = PSVR2_TRACK_EDGE;
+	r = st == PSVR2_TRACK_NORMAL ? psvr2_led_track_ex(cfg, cams, blobs, model, predicted, prior, dt_s, out, res)
+				     : track_close(cfg, cams, blobs, model, predicted, prior, st, out, res);
+	*state = next_state(st, r == 0, prior && prior->orient_valid,
+			    r == 0 ? cam_dist(cams, out, res, model->count) : cam_dist(cams, predicted, NULL, 0),
+			    r == 0 ? res->matched : 0);
+	return r;
+}
+
+int psvr2_led_boot_state(const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS], const struct psvr2_pose3 *pose)
+{
+	const double d = cam_dist(cams, pose, NULL, 0);
+
+	return d < 100 ? PSVR2_TRACK_CLOSE : d < 150 ? PSVR2_TRACK_NEAR : PSVR2_TRACK_NORMAL;
 }
 
 /* ---- orientation-prior boot (RESEARCH.md §9.3 step 6) -------------------- */

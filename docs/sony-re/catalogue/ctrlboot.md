@@ -148,6 +148,39 @@ controllers in distance order (`0x1800a5e30`), and for each:
 | `0x1800d1c80` | 254 | RnD::Vector of 8-byte items: resize with fill [sure] |
 | `0x1800e3e80` | 477 | copy-construct a blob store (11 RnD::Vectors, as `0x1800a0480`) [sure] |
 
+## Solver classes: vtable slots [sure for the map, likely for slot roles]
+
+The refine and multi-camera solves (`notdone.md` §2.10, entry
+`0x1800f7970`) use these classes. Robustifier slot meanings are in
+`ctrlboot.md`; here are their addresses.
+
+| Class (vtable) | Slots |
+|----------------|-------|
+| `RobustifierHuber` (`0x180319680`) | 0 `0x180109fb0`, 1 `0x18010a090`, 2 `0x18010a140`, 3 `0x180109db0`, 4 `0x180109dc0`, 5 `0x180109de0`, 6 `0x18010a010`, 7 `0x18010a040` |
+| `RobustifierClip` (`0x180319648`) | 0 `0x18010a210`, 1 `0x18010a270`, 2 `0x18010a2c0`, 3 `0x180109e40`, 4 `0x180109e50`, 5 `0x180109e70` |
+| `RobustifierTukey` (`0x180319610`) | 0 `0x18010a320`, 1 `0x18010a380`, 2 `0x18010a3d0`, 3 `0x180109ec0`, 4 `0x180109ed0`, 5 `0x180109ef0` |
+| `Robustifier` base (`0x1803195d8`) | 0–4 pure, 5 `0x180109d00` (destructor) |
+| `WeightedLMSolver<PoseCost,6>` (`0x180319518`) | 0 `0x1800f8f80` copy-assign (parameter scales, packed normal-equation buffers), 1 `0x1800f94f0` cost: residuals through the cost object, weighted sum, 2 `0x1800f9600` clear both flags `+0x210/+0x211`, 3 `0x1800f9610` clear `+0x211`, 4 `0x1800f9810` copy the parameter vector out (`0x180101a40`), 5 `0x1800fbcd0` destructor (`0x1800f7c70` frees the buffers), 6 `0x1800f9620` one iteration: robust weights (`0x180105ed0`), Jacobian and normal equations (`0x1800f69a0`, `0x1800f6b30`, `0x1800f6c90`, `0x1800fd060`–`0x1800fd3a0`, `0x180106610`) |
+| `WeightedLMSolver<PoseCostMultiCam,6>` (`0x180319470`) | same pattern: 0 `0x1800fa7d0`, 1 `0x1800fad40`, 2 `0x1800fae50`, 3 `0x1800fae60`, 4 `0x1800fb040`, 5 `0x1800fbd30`, 6 `0x1800fae70` |
+| `LMSolver<PoseCost,6>` (`0x180319558`) | 0–3 pure, 4 `0x1800f8420` (returns 0), 5 `0x1800f84a0` destructor |
+| `LMSolver<PoseCostMultiCam,6>` (`0x1803194d0`) | 0–3 pure, 4 `0x1800f83f0`, 5 `0x1800f8470` |
+| `PoseCost` (`0x180319590`), `PoseCostMultiCam` (`0x1803194c0`) | destructors `0x1800f73b0` (`0x1800f71d0`), `0x1800f7660` (`0x1800f7480`) |
+| `LeastSquaresCost<…>` (`0x1803195a0`, `0x1803194b0`) | destructors `0x1800f8500`, `0x1800f84d0` |
+| `FullBootConstraints` (`0x1803191e0`) | 0 `0x1800e5a90`, 1 `0x1800e5ae0` |
+| `SatisfyConstraintsAbstract` (`0x1803193e8`) | 0 `0x1800d0820`, 1 pure |
+| `Spots` (`0x180319410`) | 0 `0x1800ea090` (destructor) |
+
+Other solver helpers:
+
+| Function | Lines | Role |
+|----------|-------|------|
+| `0x1800f5df0` | 391 | real roots of a quartic for the P3P step (`0x1800f43e0`), via the cubic `0x1800f41e0`; tolerances 1e-5, 1e5 [likely] |
+| `0x1800f7e20` | 199 | multi-camera LM driver called from `0x1800cfd90`: builds the cost (`0x1800f8260`), runs the solver (`0x1800fb090`, `0x1800fb2b0`, `0x1800fa4a0`, `0x180107280`), constant 0.4 [likely] |
+| `0x1800fb2b0` | 465 | solver iteration loop with a `pow`-based step rule [likely] |
+| `0x1800f8c50`, `0x1800fa4a0` | 130 | resize of solver work buffers (`0x1800fe9e0`) [likely] |
+| `0x1800fbe40`, `0x1800fdd90` | 146, 167 | recursive helpers (sort / partition) [guess] |
+| `0x1800f2cc0` | 149 | 32 points on a circle (step 2π/32) for a caller with no caller (`0x1800e9f30`) [likely: debug] |
+
 ## Multi-camera frame step (`0x180048690`, tracking frontend) [sure unless tagged]
 
 Called by the per-frame core `0x18004b0a0`. Order of work:

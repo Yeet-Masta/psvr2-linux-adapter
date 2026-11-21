@@ -98,6 +98,7 @@ for va, f in feat.items():
     if any(UI.match(i) for i in f["imps"]):
         seed(va, "fluff", "app", "Windows UI/process: " + ",".join(i for i in f["imps"] if UI.match(i))); continue
 
+SUBAREA = {"ctrl-boot": "ctrlboot"}
 NOPROP = {"lib", "init", "platform"}  # library / initialiser / OS wrappers call everything; do not inherit from them
 # propagate down the call graph (callers -> callees)
 changed = True
@@ -115,7 +116,9 @@ while changed and it < 50:
                 continue
             cur = label.get(c)
             if cur is None or RANK[v] > RANK[cur[0]]:
-                label[c] = (v, area, f"helper of {va} ({area})", "prop")
+                # area follows the callee's own module where that is clean, not the first caller
+                a2 = SUBAREA.get(sub_of.get(c, ""), area)
+                label[c] = (v, a2, f"helper of {va} ({area})", "prop")
                 changed = True
 
 # leftovers, round 1: a wrapper of core/ref code inherits upward (iterate)

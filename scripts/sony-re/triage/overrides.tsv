@@ -58,3 +58,10 @@
 0x1801211c0	-	core	room	map-state field copy under lock (map id -> pending id)
 0x18012bce0	0x18012be20	fluff	lib	std::string construct from C string
 0x180185ef0	-	fluff	debug	debug status text (per-controller state, battery, per-camera counters) for the debug page
+0x1800474f0	-	fluff	debug	camera-image debug overlay (BE Luma / Extract Mode text, draws via 0x1800d5fc0)
+0x180048190	-	fluff	debug	per-stage processing-time log every 1800 frames
+0x180048450	-	fluff	debug	UpdateMultiCamBootStats log
+0x18004cac0	-	ref	tracking	boot statistics (bootStats ratio/confidence); logging only (tracking.md 5.3 stage 9)
+0x180046f40	-	core	tracking	default tracker-settings struct (3, 3, 20, 7, 5, 5, ...)
+0x18004c9c0	-	fluff	debug	debug draw of one camera image through the overlay object (vtable slot 4)
+0x18004d610	-	ref	tracking	tracker statistics snapshot (ratios, frame counts, copy of a global std::map)

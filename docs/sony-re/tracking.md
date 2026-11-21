@@ -205,9 +205,49 @@ Pulls the output filter toward the VIO filter. Mode (`blender[0]`, set by
   When **stationary** use mode 1 blending; after a **shock** (< 3 s) use mode
   1 with α scaled ×4.
 
-Per-axis deadband / minimum gain / snap thresholds live at blender
-`+0x70..+0xb4`; instance `+0x470` has deadband 0 (`FUN_180182960`). Their
-defaults were not found in the init path (open question).
+Per-axis parameters (6 axes: position x, y, z, then rotation x, y, z) are
+set when the blender is bound to its storage (`FUN_180181400`) [sure]:
+
+| Field | Default | Role in mode 0 |
+|-------|---------|----------------|
+| `+0x70..+0x78` | 0.0005 | minimum gain, position axes |
+| `+0x7c..+0x84` | 1e-6 | minimum gain, rotation axes |
+| `+0x88..+0x9c` | 0 | deadband (all axes; `FUN_180182960` sets them again on `+0x470`) |
+| `+0xa0..+0xa8` | 0.5 m | snap threshold, position (also mode 1's position gate) |
+| `+0xac..+0xb4` | 0.1 rad | snap threshold, rotation (also mode 1's rotation gate) |
+
+**Which mode runs on PC** [sure]: binding sets the mode word to 0, and the
+only mode setter (`FUN_180175690`, through `FUN_18017af40`) has no caller
+in the DLL. So the output blender at `+0x3b0` runs **mode 0** (adaptive);
+`+0x470` is switched to mode 1 by `FUN_18017c680`.
+
+Mode 0 per call, with `dt` and the angular rate ω passed by the INS step
+[sure for the formulas; the exact frames of the two error logs are
+likely]:
+
+```
+A      = (0, 0, 0, |ω_x|·dt, |ω_y|·dt, |ω_z|·dt)      // per-axis motion
+ē      = ē + (e_raw − ē)·0.05                           // error EMA (+0x68; 0.01 on +0x470)
+e      = log(error pose built from ē), 6 values
+snap   = any |e_i| > snap_i
+r_i    = max(0, |e_i| − deadband_i)
+target gains:
+  pos x: max(min_0, A_0) + 20·A_4 + 20·A_5
+  pos y: max(min_1, A_1) + 20·A_5 + 20·A_3
+  pos z: max(min_2, A_2) + 20·A_3 + 20·A_4
+  rot i: max(min_i, 4·A_i)
+g_i    = g_i + (target_i − g_i)·k                        // k = +0x60 = 1.0 → g = target
+c_i    = sign(e'_i) · r_i · g_i                          // e' a second error log, same pose pair
+if snap or any c_i is NaN: output = target, c = 0
+else: output = output ⊗ exp(c), quaternion renormalised
+```
+
+So corrections happen only while the head turns: position is pulled in at
+20 × the rotation swept about the two other axes per frame, rotation at
+4 × the rotation swept about that axis, plus a tiny floor (0.05 % of the
+error per call for position). A still head keeps its small SLAM offsets
+until it moves, which hides the corrections. Stationary and shock cases
+fall back to the mode-1 blend (shock: α from 4·dt).
 
 Biases and anchor are copied VIO → output after each blend.
 
@@ -338,8 +378,8 @@ section reader; do not commit them.
   snap on 3DoF→6DoF. Synthetic test (`test_ins.c`): pose error at now
   0.008° / 0.06 mm vs 0.17° / 0.6 mm for SLAM + finite-difference
   extrapolation. Not yet run on hardware.
-- Still missing on the headset path: Sony's mode-0 adaptive blender (its
-  gains are open question 2), the stillness / shock switches (§3.1 step
+- Still missing on the headset path: Sony's mode-0 adaptive blender (the
+  one PC runs on the output filter; gains now in §5.2), the stillness / shock switches (§3.1 step
   6), tilt correction `FUN_180171400`, the SLAM `+0x188` good-frame count.
 - Validity: Sony treats `state == 3 || flag0e == 1 || substate == 5` as
   valid; check what the Linux code gates on.
@@ -365,9 +405,8 @@ section reader; do not commit them.
    reported order, so `RemapPose` is unchanged. The driver log line
    `headset INS running (quaternion order N, ...)` answers the question on
    hardware: order 0 = Sony's x,y,z,w, order 1 = the uapi's w,x,y,z.
-2. Blender per-axis deadband / min gain / snap thresholds (`+0x70..+0xb4`)
-   are not set in `FUN_180175290`; find their writer (constructor via
-   `FUN_18017c590` or config).
+2. ~~Blender per-axis deadband / min gain / snap thresholds~~ answered
+   (2026-11-21): set by the bind function `FUN_180181400`, see §5.2.
 3. Meaning of SLAM `+0x188` (used only when sub-state 5) and `+0x0f`.
 4. UKF limits at UKF `+0x798..+0x7a0` (velocity / bias divergence limits),
    `+0x784`, `+0x864`: values come from config; not read.

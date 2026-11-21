@@ -77,6 +77,10 @@
 		"//broaddiv2": "Both are decoded and logged ('ledsync: BROAD decodes'); this picks the one acted on.",
 		"optical_broad_divider": 1,
 
+		"//sonymatch": "LED-blob matching: true = Sony's three-pass match with neighbour support",
+		"//sonymatch2": "(FUN_1800df5b0), false = our image-shift consensus (better when few LEDs show).",
+		"optical_sony_match": true,
+
 		"optical_ukf": true,
 		"optical_ukf_hold_ms": 300,
 		"optical_ukf_rot_sigma_mm": 1.0,

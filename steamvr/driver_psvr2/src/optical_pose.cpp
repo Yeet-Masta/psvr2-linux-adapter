@@ -146,6 +146,20 @@ void MatT( const double A[9], double T[9] )
 			T[3 * i + j] = A[3 * j + i];
 }
 
+// Gravity for Sony's pose check: measured in the model frame (from the
+// gravity-aligned IMU orientation, world <- model with any heading) and
+// expected in the rig frame. OpenVR world: +y up.
+void FillGravity( const double world_from_model[9], const double rig_from_world[9], psvr2_imu_prior &p )
+{
+	for ( int i = 0; i < 3; i++ )
+	{
+		p.g_model[i] = -world_from_model[3 + i];  // R^T (0, -1, 0)
+		p.g_rig[i] = -rig_from_world[3 * i + 1];
+	}
+	p.gravity_valid = 1;
+	p.gravity_age_s = 0;
+}
+
 // Pose (quaternion, m) <-> Rt (mm).
 Rt ToRt( const vrmath::Pose &p )
 {
@@ -191,6 +205,11 @@ OpticalPose::OpticalPose( Psvr2HmdDriver *hmd, Psvr2ControllerDriver *const cont
 	controllers_[0] = controllers[0];
 	controllers_[1] = controllers[1];
 	psvr2_solver_default_cfg( &cfg_ );
+	{
+		vr::EVRSettingsError e = vr::VRSettingsError_None;
+		const bool sony = vr::VRSettings()->GetBool( kSection, "optical_sony_match", &e );
+		cfg_.sony_match = e == vr::VRSettingsError_None ? sony : 1;
+	}
 	// Defaults fitted against Sony's driver (2026-11-18, ~/sony-capture-3):
 	// with them, Sony's poses need < 1 deg and < 5 mm more head <- rig
 	// correction, and the right hand matches Sony to 2.7 mm / 1.6 deg (median).
@@ -322,6 +341,7 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 	// Blob lists: drop degenerate/empty and large blobs (room lights; an LED
 	// is a few pixels across), keep the smallest PSVR2_SOLVER_BLOBS.
 	psvr2_blob_list lists[PSVR2_SOLVER_CAMS];
+	float wt[PSVR2_SOLVER_CAMS][PSVR2_SOLVER_BLOBS];
 	for ( int c = 0; c < PSVR2_SOLVER_CAMS; c++ )
 	{
 		int idx[PSVR2_LD_MAX_BLOBS], n = 0;
@@ -339,6 +359,7 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 			// moving cx 8 px left in the 1016 calibration (ir_tracker_hooks.cpp).
 			lists[c].xy[k][0] = blobs[c].x[idx[k]] + kLdBlobOffsetX;
 			lists[c].xy[k][1] = blobs[c].y[idx[k]];
+			wt[c][k] = blobs[c].weight[idx[k]];
 		}
 	}
 
@@ -354,7 +375,7 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 			continue;
 		}
 		h.frames++;
-		SolveHand( hand, frame_us, world_from_rig, lists );
+		SolveHand( hand, frame_us, world_from_rig, lists, wt );
 	}
 
 	const uint64_t now = NowMicros();
@@ -378,7 +399,8 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 }
 
 void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &world_from_rig,
-                             psvr2_blob_list lists[PSVR2_SOLVER_CAMS] )
+                             psvr2_blob_list lists[PSVR2_SOLVER_CAMS],
+                             float wt[PSVR2_SOLVER_CAMS][PSVR2_SOLVER_BLOBS] )
 {
 	Hand &h = hands_[hand];
 	Psvr2ControllerDriver *ctrl = controllers_[hand];
@@ -430,13 +452,35 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 		psvr2_pose3 predicted;
 		std::memcpy( predicted.R, rp.R, sizeof( rp.R ) );
 		std::memcpy( predicted.t, rp.t, sizeof( rp.t ) );
-		ok = psvr2_led_track( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &out, &res ) == 0;
+		// Sony's track step (FUN_1800db980): gates scaled by the time since
+		// the last fix, then its gravity (20 deg), orientation (30 deg from
+		// the prediction) and depth checks (FUN_1800d89f0).
+		double Rnow[9], Bm[9];
+		vrmath::ToMatrix( q_imu, Rnow );
+		MatMul( Rnow, P, Bm );  // world <- model, heading aside
+		psvr2_imu_prior prior{};
+		FillGravity( Bm, rig_from_world.R, prior );
+		prior.orient_valid = 1;
+		std::memcpy( prior.R, predicted.R, sizeof( prior.R ) );
+		prior.orient_age_s = dt;
+		prior.spin_rad_s = dt > 1e-3 ? vrmath::Angle( d ) / dt : 0.0;
+		ok = psvr2_led_track_ex( &cfg_, cams_, lists, &h.model[h.mirror], &predicted, &prior, dt, &out, &res ) == 0;
 		if ( !ok && ++h.fails >= 6 )
 			h.tracking = false;
 	}
 	if ( !h.tracking )
 	{
 		ok = Boot( hand, h, frame_us, world_from_rig, q_imu, yaw_now, lists, out, res );
+		if ( ok && h.remap >= 0 )
+		{
+			// Sony checks gravity on boot results too (FUN_1800d89f0).
+			double Rnow[9], Bm[9];
+			vrmath::ToMatrix( q_imu, Rnow );
+			MatMul( Rnow, kRemap.R[h.remap], Bm );
+			psvr2_imu_prior prior{};
+			FillGravity( Bm, rig_from_world.R, prior );
+			ok = psvr2_led_pose_check( &cfg_, cams_, &h.model[h.mirror], &prior, &out, &res, 0 ) == 0;
+		}
 		if ( ok )
 		{
 			h.tracking = true;
@@ -450,6 +494,18 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 	if ( !ok )
 		return;
 	h.fails = 0;
+	// Sync view: matched blob weight and view angle per camera and LED.
+	h.view_us = frame_us;
+	for ( int c = 0; c < PSVR2_SOLVER_CAMS; c++ )
+		for ( int l = 0; l < PSVR2_LED_MAX; l++ )
+		{
+			const int k = res.led_blob[c][l];
+			double px[2], va = 180.0;
+			h.view_w[c][l] = l < h.model[h.mirror].count && k >= 0 && k < lists[c].count ? wt[c][k] : -1.0f;
+			if ( h.view_w[c][l] >= 0 )
+				psvr2_led_project( &cams_[c], &h.model[h.mirror], &out, l, px, &va, nullptr );
+			h.view_deg[c][l] = float( va );
+		}
 	Accept( hand, h, frame_us, world_from_rig, out, q_imu, res );
 	if ( !h.tracking )
 		return;
@@ -467,6 +523,7 @@ void OpticalPose::SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &wo
 			{
 				lists[c].xy[n][0] = lists[c].xy[k][0];
 				lists[c].xy[n][1] = lists[c].xy[k][1];
+				wt[c][n] = wt[c][k];
 				n++;
 			}
 		lists[c].count = n;

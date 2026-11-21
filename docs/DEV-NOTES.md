@@ -210,8 +210,25 @@ STABLE (`optical_tracking` must be on).
   and pulls `yaw_offset_` toward the optical heading; head-based
   recentering is off while fixes arrive. With no fix yet, the arm model
   stays.
-- Open: one controller syncs at a time, so the second is only tracked
-  after the first reached STABLE; boot costs ~5 ms, one hypothesis per
+- LED-sync input from the pose (Sony, notdone.md §3.1): a hand solved
+  < 1 s ago feeds LED sync from this frame's pose association: the sync
+  LED is the most face-on model LED with a matched blob (view angle / 2 in
+  (0, 45]), kept while seen within 1 s; per camera its blob weight, count
+  1; a frame without a solve or match reads as unseen (Sony's w = 0). Such
+  a hand does not use or own the blink finder, so both hands can sync at
+  once. The pose is solved before LED sync each frame, and with
+  `optical_sync_broad` also in BROAD/BG/PRESCAN while LEDs are in view.
+  Not yet checked on hardware.
+- Pose check: tracking passes gravity (from the fused IMU orientation and
+  the learned mount) and the prediction as the orientation prior to
+  Sony's check; boots with a learned mount get the gravity check.
+- Two controllers without a pose: one syncs (BROAD/BG) at a time, sharing
+  the blink finder. While the other syncs, a STABLE controller counts as in view
+  when its optical fix is < 1 s old, and its 100 s BG re-check waits (own
+  rules; before, the other hand's sync made it look unseen and it fell to
+  PRESCAN after 15 s). Not yet checked on hardware.
+- Open: the second controller is only tracked after the first reached
+  STABLE; boot costs ~5 ms, one hypothesis per
   frame (up to ~10 s to learn the remap); no UKF.
 
 ## Controller filter (steamvr/driver_psvr2/src/controller_ukf.cpp)
@@ -252,26 +269,52 @@ Status: builds, in libpsvr2.a, `make check` passes. NOT wired into
 OpticalTracker yet.
 
 - Implements RESEARCH.md §9: cone visibility, 120 mm self-occlusion cull,
-  face-on-first gated match with Sony's outlier cut, Huber-IRLS LM (Nielsen),
-  MSAC score, orientation-prior 2-point boot over Sony's LED-pair table,
-  Sony's < 7-inlier boot rule (15/30 deg to the IMU prior, < 500 mm).
+  Huber-IRLS LM (Nielsen), MSAC score, orientation-prior 2-point boot over
+  Sony's LED-pair table, Sony's < 7-inlier boot rule (15/30 deg to the IMU
+  prior, < 500 mm).
+- Sony's gated match (`match_sony`, notdone.md §2.11, `cfg.sony_match`,
+  default; driver setting `optical_sony_match`): three passes with
+  neighbour support, anchors, and Sony's one-blob-two-LEDs cleanup.
+- Sony's track step (`psvr2_led_track_ex`, notdone.md §2.16): first gate
+  3 x SEARCHRADIUS x scale per 60 Hz frame since the prediction, second
+  1.5 x POTHOLE x scale; then Sony's pose check
+  (`psvr2_led_pose_check`): gravity 20 deg, orientation 30 deg to the
+  prior, LED 0 depth 5-1500 mm.
 - Own additions (not traced in Sony's code):
-  - per-camera image-shift consensus before matching (LEDs are ~6 px apart
-    at 0.5 m; plain nearest-blob cascades into off-by-one matches);
-  - track acceptance: >= 4 matches, >= 3/4 of the LEDs facing a camera
-    (< 70 deg) matched, rms <= 1.5 px. On -1 the caller should boot.
+  - our gated match (`cfg.sony_match = 0`): per-camera image-shift
+    consensus, then nearest blob, Sony's outlier cut;
+  - track acceptance on top of Sony's (`cfg.own_accept`, default on):
+    >= 4 matches, >= 3/4 of the LEDs facing a camera (< 70 deg) matched,
+    rms <= 1.5 px. On -1 the caller should boot.
 - LED models: `scripts/sony-re/extract_led_header.py <dll> userspace/lib/psvr2_led_models.h`
   generates the header (raw float bits from the DLL);
   `psvr2_led_model_load(rev, &model)` fills a model.
-- `make check` (`test_led_solver.c`): Sony models rev 2..7, 4 cameras near
+- `make check` (`test_led_solver.c`): Sony models rev 1..7, 4 cameras near
   the rig positions, 200 random poses each, 0.3 px noise, 2 clutter blobs
-  per camera. Typical: track 177-186/200 right from a ~2 deg / 9 mm
-  prediction, boot 191-199/200 from an IMU orientation ~5 deg off, 0-4
-  wrong poses accepted per 200 (near-planar ring ambiguity; the IMU fusion
-  must catch those).
+  per camera, blobs for LEDs < 100 deg off-axis (28 LEDs matched per pose,
+  as on the recorded hardware frame). With Sony's match and track step:
+  track 199-200/200 right from a ~2 deg / 9 mm prediction, 0 wrong; boot
+  198-200/200 from an IMU orientation ~5 deg off, 0-2 wrong. Before
+  (our match, fixed 3 px gate): track 177-186, boot 191-199.
+- Sony's match needs neighbours: with blobs only < 80 deg off-axis
+  (`LED_VA=80`, 18 LEDs per pose) it drops to track 166-188/200 and fails
+  the check, while ours keeps 192-200. If hardware shows few LEDs per
+  camera, set `optical_sony_match` false. The IMU priors (`LED_PRIOR=1`)
+  change nothing in the test: its wrong poses are small misses, not the
+  flips the 20/30 deg checks catch.
 - Open:
-  - rev 1 (20 LEDs): boot only ~120/200 with 12 wrong; not understood.
-  - hand: both hands get the same model; Sony's hand-1 descriptor byte
-    0x58 is probably a mirror flag but is not traced. No mirroring applied.
-  - The gravity-only boot path (3/6 deg) is not implemented.
+  - rev 1 (20 LEDs): was boot ~120/200 with 12 wrong. Cause: Sony's
+    boot pair table fits the 17-LED layout; its back-trio pairs (0,16),
+    (16,15) miss rev 1's back trio (0, 18, 19), and Sony does not remap
+    (notdone.md §2.13). Own fix in `boot_led()`: 15 -> 18, 16 -> 19 on
+    20-LED models. Now 195/200, 0 wrong. Sony's multi-camera boot has the
+    same gap (its single-camera RANSAC boot runs first).
+  - hand: answered. The hand-1 descriptor byte is the char 'X': Sony
+    mirrors the left model in x (positions and normals) and reverses its
+    LED index lists (opticalpose.md §2b.2). `optical_pose.cpp` mirrors the
+    left model; our model has no index lists, so nothing to reverse.
+  - Sony's gravity check (3/6 deg, accepts 5-6 inlier boots) is not in
+    the solver. Not needed by the driver: `optical_pose.cpp` already boots
+    from the gravity-aligned IMU orientation with a heading sweep and
+    needs >= 12 LEDs (18 without a recent fix), above Sony's 7.
 - Needs hardware before wiring: rig camera poses, blob pixel scale vs 508.

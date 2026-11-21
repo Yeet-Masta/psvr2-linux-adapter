@@ -49,6 +49,23 @@ public:
 	void Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_CAMERAS], const int counts[PSVR2_LD_CAMERAS],
 	            const bool synced[2] );
 
+	// Frame time of the last fix handed to controller `hand`; 0 = none.
+	uint64_t LastFixUs( int hand ) const { return hands_[hand].fix_us; }
+
+	// LED-sync input from the pose solve (Sony feeds LED sync from its
+	// pose association, FUN_1801999f0): true when `hand` was solved in
+	// frame `frame_us`. Then, per camera and model LED, the weight of the
+	// matched blob (< 0 = no blob) and the LED's view angle (deg, 0 =
+	// face-on).
+	bool HasSyncView( int hand, uint64_t frame_us ) const
+	{
+		return hands_[hand].view_us && hands_[hand].view_us == frame_us;
+	}
+	uint64_t LastViewUs( int hand ) const { return hands_[hand].view_us; }
+	int LedCount( int hand ) const { return hands_[hand].rev >= 0 ? hands_[hand].model[0].count : 0; }
+	float ViewWeight( int hand, int cam, int led ) const { return hands_[hand].view_w[cam][led]; }
+	float ViewAngle( int hand, int cam, int led ) const { return hands_[hand].view_deg[cam][led]; }
+
 private:
 	struct Hand
 	{
@@ -67,6 +84,10 @@ private:
 		vr::HmdQuaternion_t q_last = vrmath::Identity();  // fused IMU at last
 		int fails = 0, good = 0;
 		uint64_t fix_us = 0;  // frame time of the last fix handed to the controller
+		// Sync view of the last solved frame (HasSyncView).
+		uint64_t view_us = 0;
+		float view_w[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX] = {};
+		float view_deg[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX] = {};
 		vr::HmdQuaternion_t span_ref = vrmath::Identity();
 		double span = 0;
 		// Stats for the periodic log.
@@ -74,8 +95,9 @@ private:
 		double rms = 0;
 	};
 
+	// wt: blob weight per list entry, kept parallel to lists.
 	void SolveHand( int hand, uint64_t frame_us, const vrmath::Pose &world_from_rig,
-	                psvr2_blob_list lists[PSVR2_SOLVER_CAMS] );
+	                psvr2_blob_list lists[PSVR2_SOLVER_CAMS], float wt[PSVR2_SOLVER_CAMS][PSVR2_SOLVER_BLOBS] );
 	bool Boot( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const vr::HmdQuaternion_t &q_imu, double yaw_now,
 	           const psvr2_blob_list lists[PSVR2_SOLVER_CAMS], psvr2_pose3 &out, psvr2_solve_result &res );
 	void Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Pose &world_from_rig, const psvr2_pose3 &rig_pose,

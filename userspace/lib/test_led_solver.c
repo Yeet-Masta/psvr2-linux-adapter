@@ -3,7 +3,9 @@
  * Synthetic check of the LED pose solver with Sony's LED models: four
  * cameras near the built-in rig positions, random poses 0.4-1 m out, 0.3 px
  * blob noise and two clutter blobs per camera. Blobs exist only for LEDs
- * facing a camera (< 80 deg), as the controller body hides the rest.
+ * facing a camera (< 100 deg; LED_VA), as the controller body hides the
+ * rest. Env: LED_REV (one model), LED_SONY (0 = our gated match),
+ * LED_OWN (0 = Sony's acceptance only), LED_PRIOR (IMU priors).
  *
  * Pass, per model: track and boot succeed often enough, and at most 2.5% of
  * trials accept a wrong pose. A near-planar LED ring seen by one camera has
@@ -85,6 +87,10 @@ static int run_model(int rev)
 	struct psvr2_led_model mod;
 	struct psvr2_solver_cfg cfg;
 	int track_ok = 0, track_wrong = 0, boot_ok = 0, boot_wrong = 0;
+	/* Blobs for LEDs < 100 deg off-axis: that gives 28 matches per pose,
+	 * as on a recorded hardware frame (28-30, DEV-NOTES.md). LED_VA sets it. */
+	const double max_va = getenv("LED_VA") ? atof(getenv("LED_VA")) : 100;
+	double matched_sum = 0;
 
 	for (int c = 0; c < 4; c++) {
 		struct psvr2_cam_model *m = &cams[c].model;
@@ -101,6 +107,10 @@ static int run_model(int rev)
 	}
 	psvr2_led_model_load(rev, &mod);
 	psvr2_solver_default_cfg(&cfg);
+	if (getenv("LED_SONY"))
+		cfg.sony_match = atoi(getenv("LED_SONY"));
+	if (getenv("LED_OWN"))
+		cfg.own_accept = atoi(getenv("LED_OWN"));
 	srand(1);
 	for (int trial = 0; trial < TRIALS; trial++) {
 		struct psvr2_blob_list bl[PSVR2_SOLVER_CAMS] = { 0 };
@@ -116,7 +126,7 @@ static int run_model(int rev)
 			struct psvr2_blob_list *b = &bl[c];
 			for (int l = 0; l < mod.count; l++) {
 				double px[2], va;
-				if (psvr2_led_project(&cams[c], &mod, &truth, l, px, &va, NULL) == 0 && va < 80) {
+				if (psvr2_led_project(&cams[c], &mod, &truth, l, px, &va, NULL) == 0 && va < max_va) {
 					b->xy[b->count][0] = px[0] + 0.3 * gauss();
 					b->xy[b->count][1] = px[1] + 0.3 * gauss();
 					b->count++;
@@ -134,9 +144,24 @@ static int run_model(int rev)
 				memcpy(b->xy[j], t, sizeof(t));
 			}
 		}
-		/* Track from a prediction ~2 deg / 9 mm off. */
+		/* Track from a prediction ~2 deg / 9 mm off. LED_PRIOR=1 adds IMU
+		 * priors: gravity ~1 deg off, orientation ~3 deg off. */
 		perturb(&truth, 0.02, 5, &start);
-		if (psvr2_led_track(&cfg, cams, bl, &mod, &start, &out, &res) == 0) {
+		struct psvr2_imu_prior pr = { 0 };
+		{
+			struct psvr2_pose3 g;
+			const double up[3] = { 0, -1, 0 };
+			perturb(&truth, 0.017, 0, &g);
+			pr.gravity_valid = pr.orient_valid = 1;
+			memcpy(pr.g_rig, up, sizeof(up));
+			for (int i = 0; i < 3; i++)	/* g_model = R^T up */
+				pr.g_model[i] = g.R[i] * up[0] + g.R[3 + i] * up[1] + g.R[6 + i] * up[2];
+			perturb(&truth, 0.05, 0, &g);
+			memcpy(pr.R, g.R, sizeof(pr.R));
+		}
+		if (psvr2_led_track_ex(&cfg, cams, bl, &mod, &start, getenv("LED_PRIOR") ? &pr : NULL, 1.0 / 60,
+				       &out, &res) == 0) {
+			matched_sum += res.matched;
 			if (right(&out, &truth))
 				track_ok++;
 			else
@@ -151,18 +176,22 @@ static int run_model(int rev)
 				boot_wrong++;
 		}
 	}
-	printf("rev %d: track %3d/%d right, %d wrong; boot %3d/%d right, %d wrong\n",
-	       rev, track_ok, TRIALS, track_wrong, boot_ok, TRIALS, boot_wrong);
+	printf("rev %d: track %3d/%d right, %d wrong; boot %3d/%d right, %d wrong; %.1f LEDs matched\n",
+	       rev, track_ok, TRIALS, track_wrong, boot_ok, TRIALS, boot_wrong,
+	       track_ok + track_wrong ? matched_sum / (track_ok + track_wrong) : 0.0);
 	return track_ok >= TRIALS * 85 / 100 && boot_ok >= TRIALS * 90 / 100 &&
 	       40 * track_wrong <= TRIALS && 40 * boot_wrong <= TRIALS;
 }
 
 int main(void)
 {
-	int ok = 1;
+	int ok = 1, lo = 1, hi = 7;
+	const char *one = getenv("LED_REV");
 
-	/* Rev 1 (20 LEDs) is left out: its boot is weak, see DEV-NOTES.md. */
-	for (int rev = 2; rev <= 7; rev++)
+	/* LED_REV=n runs model n only. */
+	if (one)
+		lo = hi = atoi(one);
+	for (int rev = lo; rev <= hi; rev++)
 		ok &= run_model(rev);
 	printf("%s\n", ok ? "PASS" : "FAIL");
 	return !ok;

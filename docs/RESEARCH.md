@@ -885,15 +885,15 @@ Detail: `sony-re/room.md`, `sony-re/reloc.md`.
 | 1–3 | Camera size, extrinsic direction, camera index: answered, §8.4 | – |
 | 4 | HID origin of the controller "preset" (libpad state +0x6f) | Trace libpad input parse |
 | 5 | Time unit of the drift-fit t; does BROAD shift slot −1 into its 3-history? | `FUN_180196ff0` caller, `FUN_180198240` |
-| 6 | Candidate score inside the gated match; LM stop tolerances; the 0.25 option | `FUN_1800f0a50`, `FUN_1800f7970` |
+| 6 | Candidate score inside the gated match: answered (`sony-re/notdone.md` §2.11). Open: LM stop tolerances; the 0.25 option | `FUN_1800f7970` |
 | 7 | Unit of the multi-camera boot error e | `FUN_1800e49b0` |
 | 8 | Cross-controller cleanup | `FUN_1800a5e30` → `FUN_1800ad2b0` |
 | 9 | UKF config limits (`+0x798..+0x7a0`, `+0x784`, `+0x864`) and the exact process noise | `ctrltracker.md`, config reader |
 | 10 | `FUN_1800e1c90` "20° cone" (`cos 0.349`) vs the 170°/180° view-angle limit: two different tests? | Read both call sites |
 | 11 | Meaning of the Set `0x1f` table and the `0x14` A value | – |
-| 12 | Hand-1 descriptor byte `0x58`: does it mirror the LED model (and which axis)? Both hands get the same model address | Trace the tracker's read of descriptor `+0x58` |
-| 13 | Sony's per-frame tracking acceptance rule (our port uses its own: ≥ 3/4 of facing LEDs matched, rms ≤ 1.5 px) | `FUN_1800d5070` tracking path |
-| 14 | Sony's blob → sync-LED assignment before a controller has a pose (our port uses BlinkFinder, a periodic-blink detector) | `FUN_180194f70` callers: who fills node `+0x24` |
+| 12 | Hand-1 descriptor byte `0x58`: answered, it is the char `'X'`; the left model is mirrored in x (`sony-re/opticalpose.md` §2b.2) | – |
+| 13 | Per-frame tracking acceptance: answered. ≥ 3 matches, then gravity 20°, orientation 30°, depth 5–1500 mm (`sony-re/notdone.md` §2.16). Our stricter 3/4-facing / 1.5 px rule stays on top (`own_accept`) | – |
+| 14 | Blob → sync-LED assignment: answered. There is none without a pose: `FUN_1801999f0` fills node `+0x24` from the pose tracker's LED → blob map, else 0 (`sony-re/notdone.md` §3.1). BlinkFinder stays as our fallback for a hand without a pose | – |
 
 ## 12. Errata (superseded statements)
 

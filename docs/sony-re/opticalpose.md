@@ -223,8 +223,10 @@ solve through A. Its translation-like floats at `+0x28..+0x30` are used
   object `+0x1978`.
 - `FUN_1800d3ae0` (model load): the model's own byte at model `+0x31e`
   wins unless it is 0 or `'0'`; then the descriptor byte is used. For
-  every LED: `'X'`/`'x'` negates x of the position (`+0x1918`) and the
-  normal (`+0x18f8`); `'Y'`/`'y'`/`'1'` negates y; `'Z'`/`'z'` negates z.
+  every LED: `'X'`/`'x'` negates x of the position (`+0x18f8`) and the
+  normal (`+0x1918`); `'Y'`/`'y'`/`'1'` negates y; `'Z'`/`'z'` negates z.
+  (`FUN_1800e2a00` transforms `+0x18f8` entries as points and dots
+  `+0x1918` entries with view rays, so `+0x18f8` = positions.)
   After mirroring it **reverses the order of every LED index list** at
   `+0x19c8` (winding/ring order flips with a mirror).
 - So: hand 0 = right uses the model as stored; hand 1 = left uses it

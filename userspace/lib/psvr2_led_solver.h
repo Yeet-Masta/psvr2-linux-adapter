@@ -63,13 +63,51 @@ struct psvr2_solver_cfg {
 	int	min_inliers_boot;	/* 7 */
 	int	min_inliers_orientation;/* 4 */
 	int	max_iterations;		/* LM, 250 */
+	double	min_depth_mm;		/* LED 0 camera depth window, 5 */
+	double	max_depth_mm;		/* 1500 (boot object +0x688/+0x68c) */
+	/*
+	 * Our acceptance check on top of Sony's (>= 3/4 of the facing LEDs
+	 * matched, rms <= 1.5 px). 1 = on (default), 0 = Sony's rule only.
+	 */
+	int	own_accept;
+	/* 1 = Sony's three-pass gated match with neighbour support
+	 * (FUN_1800df5b0); 0 = ours (image-shift consensus, nearest blob). */
+	int	sony_match;
 };
 void psvr2_solver_default_cfg(struct psvr2_solver_cfg *cfg);
 
 /*
+ * IMU priors for Sony's pose check (FUN_1800d89f0). Gravity directions are
+ * unit vectors: measured in the controller (LED model) frame, and expected
+ * in the rig frame. The orientation prior is rig <- controller.
+ */
+struct psvr2_imu_prior {
+	int	gravity_valid;
+	double	g_model[3], g_rig[3];
+	double	gravity_age_s;		/* checked only when < 10 s */
+	int	orient_valid;
+	double	R[9];
+	double	orient_age_s;		/* checked only when < 5 s */
+	double	spin_rad_s;		/* skipped at >= pi rad/s */
+};
+
+/*
+ * Sony's pose rejection, in its order: 0 = ok; 2 = gravity more than 20 deg
+ * off; 1 = rotation more than 30 deg from the orientation prior; 3 = LED 0
+ * outside [min_depth, max_depth] in a camera that matched LEDs (the minimum
+ * is not applied when `close`). prior may be NULL (depth check only).
+ */
+int psvr2_led_pose_check(const struct psvr2_solver_cfg *cfg,
+			 const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+			 const struct psvr2_led_model *model,
+			 const struct psvr2_imu_prior *prior,
+			 const struct psvr2_pose3 *pose,
+			 const struct psvr2_solve_result *res, int close);
+
+/*
  * Track from a predicted pose: associate, match, refine. 0 = pose found
  * (out, res filled), -1 = fewer than 3 matches, the refine failed, or the
- * result fails the acceptance check (res still filled; boot again).
+ * result fails a check (res still filled; boot again).
  */
 int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
 		    const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
@@ -77,6 +115,21 @@ int psvr2_led_track(const struct psvr2_solver_cfg *cfg,
 		    const struct psvr2_led_model *model,
 		    const struct psvr2_pose3 *predicted,
 		    struct psvr2_pose3 *out, struct psvr2_solve_result *res);
+
+/*
+ * Sony's track step (FUN_1800db980): first gate SEARCHRADIUS x scale x
+ * 3 x (dt / 16.7 ms), refine; second gate 1.5 x POTHOLE x scale, >= 3
+ * matches, refine; then psvr2_led_pose_check with `prior` (may be NULL),
+ * then our acceptance check when cfg->own_accept. psvr2_led_track is this
+ * with dt = 1/60 s and no prior.
+ */
+int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
+		       const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
+		       const struct psvr2_blob_list blobs[PSVR2_SOLVER_CAMS],
+		       const struct psvr2_led_model *model,
+		       const struct psvr2_pose3 *predicted,
+		       const struct psvr2_imu_prior *prior, double dt_s,
+		       struct psvr2_pose3 *out, struct psvr2_solve_result *res);
 
 /*
  * Boot with a known orientation (from the controller IMU): try LED pairs x
@@ -92,9 +145,9 @@ int psvr2_led_boot_oriented(const struct psvr2_solver_cfg *cfg,
 
 /*
  * Fill `model` with Sony's LED model for Sense hardware rev `rev` (feature
- * 0x20 +0x18; 1..6, anything else = the "other" model). Both hands use the
- * same model; what Sony's hand-1 descriptor flag changes is not traced
- * (docs/RESEARCH.md §11), so no mirroring is applied.
+ * 0x20 +0x18; 1..6, anything else = the "other" model), as stored (right
+ * hand). Sony mirrors it in x for the left hand (docs/sony-re/opticalpose.md
+ * §2b.2); the caller does that (steamvr optical_pose.cpp), not this loader.
  */
 void psvr2_led_model_load(int rev, struct psvr2_led_model *model);
 

@@ -62,6 +62,7 @@ private:
 	void DecodeBlobs( const psvr2_ld_packet &pkt, const Header &h );
 	int GlobalPreset();
 	LedObservation Observe( int hand, int phase_owner );
+	LedObservation ObserveByPose( int hand );
 	void RunSyncers( uint64_t now_us );
 	void SolvePoses( uint64_t now_us );
 	void SaveOffset( uint64_t now_us );
@@ -126,5 +127,10 @@ private:
 	BlobStats blob_stats_[PSVR2_LD_CAMERAS];
 	// Logical sync LED per hand; moves on after a failed BROAD round.
 	int sync_led_[2] = { 0, 0 };
+	// Pose-driven sync (ObserveByPose): model LED per hand (-1 none), the
+	// last frame it was seen, and which hands use the blink finder.
+	int sync_model_led_[2] = { -1, -1 };
+	uint64_t sync_seen_us_[2] = { 0, 0 };
+	bool uses_finder_[2] = { true, true };
 	LedSyncer::Phase last_phase_[2] = { LedSyncer::kInit, LedSyncer::kInit };
 };

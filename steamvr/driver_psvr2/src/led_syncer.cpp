@@ -244,7 +244,7 @@ void LedSyncer::Frame( uint64_t now_us, int preset, const LedObservation &obs )
 		SetGood( obs.visible, now_us );
 		if ( !good_ && InState( now_us ) >= 15 * kSec )
 			Enter( kPrescan, now_us );
-		else if ( good_ && now_us - phase_since_ >= 100 * kSec )
+		else if ( good_ && !hold_bg_ && now_us - phase_since_ >= 100 * kSec )
 			Enter( kBg, now_us );  // periodic phase re-check
 		break;
 	}

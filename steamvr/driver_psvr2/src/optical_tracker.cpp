@@ -303,8 +303,10 @@ void OpticalTracker::Run()
 				}
 				g_sweep_hold = now - lit_at_us_ < 3 * kSec;
 				SaveOffset( now );
-				RunSyncers( now );
+				// Pose first: LED sync reads this frame's pose association,
+				// as Sony's LedSync reads the tracker's (FUN_1801999f0).
 				SolvePoses( now );
+				RunSyncers( now );
 			}
 		}
 		else if ( r < 0 && errno != EINTR )
@@ -559,10 +561,15 @@ void OpticalTracker::SolvePoses( uint64_t now_us )
 		rig_try_us_ = now_us;
 		pose_->BuildRig( dev_ );
 	}
-	// Lit: STABLE, or held PRESCAN with LEDs in view.
+	// Lit: STABLE, or PRESCAN/BROAD/BG with LEDs in view. Sony tracks in
+	// every phase: its LED sync reads the pose association (FUN_1801999f0).
+	// Full sync needs it from PRESCAN on; held PRESCAN tracked already.
 	auto lit = [&]( int i ) {
 		const auto p = syncers_[i]->Current();
-		return p == LedSyncer::kStable || ( !full_sync_ && p == LedSyncer::kPrescan && now_us - lit_at_us_ < 500000 );
+		if ( p == LedSyncer::kStable )
+			return true;
+		const bool phase = p == LedSyncer::kPrescan || ( full_sync_ && ( p == LedSyncer::kBroad || p == LedSyncer::kBg ) );
+		return phase && now_us - lit_at_us_ < 500000;
 	};
 	const bool synced[2] = { !see_through_ && !led_test_ && lit( 0 ), !see_through_ && !led_test_ && lit( 1 ) };
 	TraceInputs( synced );
@@ -595,15 +602,91 @@ void OpticalTracker::TraceInputs( const bool synced[2] )
 	std::fputc( '\n', trace_ );
 }
 
-LedObservation OpticalTracker::Observe( int hand, int phase_owner )
+// Sony's LED-sync input (FUN_1801999f0, RESEARCH.md §7.14), from this
+// frame's pose association. One sync LED (Sony's default count). The LED
+// is kept while it was seen less than 1 s ago, else the most face-on LED
+// with a matched blob is chosen (view angle / 2 in (0, 45]). Per camera:
+// that LED's matched blob weight, count 1; nothing when unmatched or
+// turned away (Sony's w = 0 then, which LedSyncer reads as a short history).
+LedObservation OpticalTracker::ObserveByPose( int hand )
 {
 	LedObservation o;
+	const int n = pose_->LedCount( hand );
+	auto metric = [&]( int c, int l ) -> float {
+		if ( pose_->ViewWeight( hand, c, l ) <= 1e-6f )
+			return -1.0f;
+		const float m = 0.5f * pose_->ViewAngle( hand, c, l );
+		return m > 1e-6f && m <= 45.0f ? m : -1.0f;
+	};
+	int &led = sync_model_led_[hand];
+	if ( led < 0 || led >= n || frame_us_ - sync_seen_us_[hand] > kSec )
+	{
+		float best = 1e9f;
+		int pick = -1;
+		for ( int l = 0; l < n; l++ )
+			for ( int c = 0; c < kLedCameras; c++ )
+			{
+				const float m = metric( c, l );
+				if ( m >= 0 && m < best )
+				{
+					best = m;
+					pick = l;
+				}
+			}
+		if ( pick >= 0 )
+			led = pick;
+	}
+	if ( led < 0 || led >= n )
+	{
+		o.sync_leds[0] = SyncLedPhysical( sync_led_[hand] );
+		return o;
+	}
+	// Logical (model) LED -> physical: k -> k, 0 -> the LED count (0x180260aa0).
+	o.sync_leds[0] = uint8_t( led == 0 ? n : led );
+	if ( !pose_->HasSyncView( hand, frame_us_ ) )
+		return o;  // not solved this frame: Sony's untracked case, w = 0
+	for ( int c = 0; c < kLedCameras; c++ )
+	{
+		const float w = pose_->ViewWeight( hand, c, led );
+		if ( w <= 1e-6f || 0.5f * pose_->ViewAngle( hand, c, led ) > 45.0f )
+			continue;
+		o.count[c] = 1;
+		o.sync_weight[c] = w;
+		o.visible = true;
+	}
+	if ( o.visible )
+		sync_seen_us_[hand] = frame_us_;
+	return o;
+}
+
+LedObservation OpticalTracker::Observe( int hand, int phase_owner )
+{
+	// [heuristic] Pose association while the hand was solved < 1 s ago (a
+	// missed frame then reads as unseen, as in Sony's driver); the blink
+	// finder only for a hand without a pose.
+	const uint64_t view = pose_ ? pose_->LastViewUs( hand ) : 0;
+	uses_finder_[hand] = !( pose_ && pose_->LedCount( hand ) > 0 && view && frame_us_ >= view && frame_us_ - view < kSec );
+	if ( !uses_finder_[hand] )
+		return ObserveByPose( hand );
+	LedObservation o;
 	o.sync_leds[0] = SyncLedPhysical( sync_led_[hand] );
+	// [heuristic] A STABLE controller with a recent optical fix is in view:
+	// its pose explains its LEDs, so the blink finder (shared, and reset
+	// when the other hand starts BROAD) is not needed. Without this, the
+	// other hand's BROAD/BG made it look unseen and dropped it to PRESCAN
+	// after 15 s. Sony uses its pose association here (RESEARCH.md §7.8).
+	const uint64_t fix = pose_ ? pose_->LastFixUs( hand ) : 0;
+	const bool pose_seen = syncers_[hand]->Current() == LedSyncer::kStable && fix &&
+	                       frame_us_ >= fix && frame_us_ - fix < kSec;
 	// [heuristic] One controller syncs at a time; the other waits in
 	// PRESCAN while the owner is in BROAD/BG.
 	if ( phase_owner >= 0 && phase_owner != hand )
+	{
+		o.visible = pose_seen;
 		return o;
-	// Without a pose, the sync LED is the blob that blinks (BlinkFinder).
+	}
+	// Without a pose, the sync LED is the blob that blinks (BlinkFinder, our
+	// own method).
 	// Dark frames report a small weight with count 1, so the history stays
 	// valid and the frame reads as dark (RESEARCH.md §7.8).
 	bool any = false;
@@ -618,6 +701,7 @@ LedObservation OpticalTracker::Observe( int hand, int phase_owner )
 		o.count[c] = 1;
 		o.sync_weight[c] = present ? w : 0.01f;
 	}
+	o.visible |= pose_seen;
 	// PRESCAN only needs to know the headset sees the LEDs: they do not blink
 	// yet, so no site qualifies. A lone stray blob does not count.
 	if ( syncers_[hand]->Current() == LedSyncer::kPrescan )
@@ -666,10 +750,12 @@ void OpticalTracker::RunSyncers( uint64_t now_us )
 		return;
 	}
 	const int preset = GlobalPreset();
+	// [heuristic] Only the blink finder is shared: a hand syncing from its
+	// pose association does not own it and is not held back by its owner.
 	auto owning = []( LedSyncer::Phase p ) { return p == LedSyncer::kBroad || p == LedSyncer::kBg; };
 	int owner = -1;
 	for ( int i = 0; i < 2; i++ )
-		if ( owning( syncers_[i]->Current() ) )
+		if ( owning( syncers_[i]->Current() ) && uses_finder_[i] )
 			owner = i;
 	for ( int i = 0; i < 2; i++ )
 	{
@@ -685,17 +771,21 @@ void OpticalTracker::RunSyncers( uint64_t now_us )
 			syncers_[i]->ForceInit();
 			continue;
 		}
-		syncers_[i]->Frame( now_us, preset, Observe( i, owner ) );
+		// [heuristic] No 100 s BG re-check while the other hand owns the
+		// blink finder: both in BG would read each other's LED.
+		const LedObservation obs = Observe( i, owner );
+		syncers_[i]->HoldBg( owner >= 0 && owner != i && uses_finder_[i] );
+		syncers_[i]->Frame( now_us, preset, obs );
 		const auto p = syncers_[i]->Current();
 		if ( last_phase_[i] == LedSyncer::kBroad && p == LedSyncer::kPrescan )
 			sync_led_[i]++;  // that LED never decoded; try the next one
-		// A new BROAD round starts from fresh blink history, and claims
-		// ownership at once so the other hand cannot enter BROAD on the
-		// same frame.
-		if ( p == LedSyncer::kBroad && last_phase_[i] != LedSyncer::kBroad )
+		// A new BROAD round on the blink finder starts from fresh blink
+		// history, and claims ownership at once so the other hand cannot
+		// enter BROAD on the same frame.
+		if ( uses_finder_[i] && p == LedSyncer::kBroad && last_phase_[i] != LedSyncer::kBroad )
 			for ( auto &f : finders_ )
 				f.Reset();
-		if ( owning( p ) && owner < 0 )
+		if ( uses_finder_[i] && owning( p ) && owner < 0 )
 			owner = i;
 		last_phase_[i] = p;
 	}

@@ -658,6 +658,44 @@ Arguments: gate radius R (pixels) and an optional second radius
      else MIN(25, 1.5·4·150/z_mm) (`0x180319928` = 4, `0x18031997c` = 25).
 5. Returns the match count.
 
+Details (2026-11-20, `FUN_1800df5b0`, `FUN_1800f0a50`, `FUN_1800f0cc0`,
+`FUN_1800f1ce0`, `FUN_1800f17d0`, `FUN_1800f1340`) [sure unless tagged]:
+
+- Arguments: support radius S (4th, xmm3) and gate R (5th). Track step:
+  first call S = SEARCHRADIUS·scale, R = 3·S·(dt / 16.67 ms); second call
+  S = R = 1.5·POTHOLE·scale (§2.16).
+- `need` = 2, or 3 when the pose's flag `+0x4ad` is set; back to 2 when
+  `+0x4ae` is also set and the depth is < 150 mm. `+0x4ad` is the flag
+  `FUN_1800d89f0` gets as "close" [likely].
+- **Support score** of candidate blob b for LED i (`FUN_1800f0a50`):
+  k = clamp(visible − 2, 2, 5). Walk the other visible LEDs j by
+  predicted-pixel distance to i, nearest first, at most 7. For each, q =
+  b + (p_j − p_i); m = smallest squared distance from q to a blob other
+  than b, starting at S² (`FUN_1800f1ce0`). m < S² counts as found: add m;
+  stop at k found. Missing ones add (k − found)·S²/2. Score = sum / found
+  (the sum when none). Lower is better; the found count is the rank.
+- **Pass 1**: every visible LED in view-angle order; candidates = up to 7
+  nearest blobs within R (blobs other LEDs took are not excluded). Keep
+  the lowest score with rank ≥ need. Record (`FUN_1800f17d0`): blob, pixel
+  distance |p − blob| (`+0x2bc`), score (`+0x2b8`), rank (`+0x2c6`).
+  Cleanup.
+- **Pass 2**: anchors = up to 5 matched LEDs in order of rising distance.
+  Every visible unmatched LED re-scores up to 7 nearest blobs not taken by
+  a matched LED, the support coming from the anchors first, then from the
+  nearest other LEDs (`FUN_1800f0cc0`, `FUN_1800f0720`). Cleanup.
+- **Pass 3**: mean pixel distance of the matched LEDs; each visible
+  unmatched LED takes its nearest blob not taken before this pass when the
+  squared distance is < (1.5·mean)². Taken blobs are not updated within
+  the pass. Cleanup.
+- **Cleanup** (`FUN_1800f1340`, the same in all three calls): for two
+  matched LEDs i, j on one blob: when rank_j ≤ rank_i and j is no better
+  in score and distance, j loses; else when rank_j < rank_i, or i is better
+  in score or distance, both lose; else i loses. Then the outlier cut of
+  step 4, the reference being the matched LED with rank ≥ the best so far
+  and the smallest distance·score.
+- Our port: `match_sony` in `userspace/lib/psvr2_led_solver.c` (setting
+  `optical_sony_match`, default on).
+
 ### 2.12 Pose score (`FUN_1800e0690`) [sure]
 
 Not a count: an **MSAC** score. For each matched LED, d = pixel distance
@@ -681,7 +719,10 @@ position is searched.
    entries, read as (t[i], t[i^1])): (3,4), (5,6), (7,8), (8,9), (9,10),
    (10,11), (11,12), (12,13), (13,14), (0,16), (16,15), each in both orders.
    Skip a pair unless both LED normals, rotated by the prior, face the
-   camera. `FUN_1800d1240` solves the translation from the two
+   camera. The table indexes the model arrays directly for every model
+   (no per-model remap; `FUN_1800d3ae0` loads LEDs in stored order), so
+   on the 20-LED rev 1 the pairs (0,16), (16,15) are not the back trio
+   (0, 18, 19) as on the 17-LED models [sure]. `FUN_1800d1240` solves the translation from the two
    blob↔LED rays with the rotation fixed (2-point). Candidates go to the
    list at `+0x3fd8` (0x30-byte entries).
 4. Score each candidate in **all** cameras (`FUN_1800e49b0`): matches m,
@@ -724,13 +765,47 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
 `+0xf0`, `+0x110` f32 [unknown]; `+0xb0` flag byte; `+0xd0` weight = 1.0;
 `+0x130` u16; `+0x150` original index.
 
+### 2.16 Track step and pose check (`FUN_1800d5070`, `FUN_1800db690`, `FUN_1800db980`, `FUN_1800d89f0`, `FUN_1800e1d50`) [sure unless tagged]
+
+- `FUN_1800d5070` per camera and frame: when the controller is tracked,
+  `FUN_1800db690` runs the state's track solver (state 0:
+  `FUN_1800db980`). The boot (§2.9) can still run; a boot result replaces
+  the track result when the track's cross-camera support
+  (`FUN_1800e27a0`) is below **0.5** (`0x1803517ac`) and the boot has 2+
+  more inliers, a score lower by 2, or lies nearer the last pose [likely
+  for the exact combination]. Boot candidates with score > 0.34 are
+  dropped. The status string is "Boot", "T" or "-".
+- State 0 track (`FUN_1800db980`): predict (`FUN_1800da320`); blob set by
+  depth (thresholds 100/200/300 mm, compared squared); associate mode 0;
+  gated match + refine (`FUN_1800d9d50`) with S = SEARCHRADIUS·scale and
+  R = 3·S·dt / (1/60 s); gated match with S = R = 1.5·POTHOLE·scale,
+  < 3 matches → fail (code 8); refine (`FUN_1800dcf00`); pose check.
+- **Pose check** (`FUN_1800d89f0`), in this order:
+  1. gravity: when the prior flag `+0x3360` is set and its age `+0x35e0`
+     is < **10** s: the measured gravity (`+0x3310`) rotated by the pose,
+     dotted with the expected one (`+0x3300`), must be > cos **20°**
+     (`0x180319880` = 0.349 rad), else code 2;
+  2. orientation (`FUN_1800e1d50`, limit **30°** `0x18031998c`): angle
+     between the pose rotation and the IMU orientation prior (`+0x33c0`);
+     skipped when either prior age (`+0x35e0`, `+0x35e4`) is ≥ 5 s or the
+     rate `+0x33d0` is ≥ π rad/s; else code 1;
+  3. depth: model LED 0 in the camera frame must be ≤ **1500** mm
+     (`+0x68c`) and, unless the "close" argument is set, ≥ **5** mm
+     (`+0x688`); both written by `FUN_1800d2360`; else code 3.
+- Our port: `psvr2_led_track_ex` and `psvr2_led_pose_check`; the driver
+  passes gravity from the fused IMU orientation and the prediction as the
+  orientation prior. Our joint 4-camera solve replaces Sony's per-camera
+  trackers, so the cross-camera support and the track/boot arbitration
+  are not ported.
+
 ### 2.15 Leftovers (item 2)
 
 These no longer block a port:
 
 | Gap | Where |
 |---|---|
-| Candidate score inside the gated match | `FUN_1800f0a50` → `FUN_1800f1ce0` |
+| Candidate score inside the gated match | answered, §2.11 |
+| Track-vs-boot arbitration, cross-camera support | `FUN_1800d5070`, `FUN_1800e27a0` → `FUN_1800e25a0` → `FUN_1800efd70` |
 | Exact LM stop thresholds (cost tol, gain tol) | `FUN_1800f9a80` fields `+0x1c`, `+0x24`; set from the option block in `FUN_1800f7970` |
 | The 0.25 in the option block | `FUN_1800f7970` (candidate: minimum robust scale `+0x18`) |
 | Unit of the multi-camera error e | `FUN_1800e49b0` |
@@ -776,7 +851,20 @@ return 1;
 ```
 
 So **2 = "lit"**: the blob is brighter than the midpoint of the window's
-range. **0 = "dark or absent"**. 1 is never written here.
+range.
+
+**Where w and cnt come from** (`FUN_1801999f0`, 2026-11-20) [sure]: the
+node is a copy of a per-frame global block (`FUN_18019c500` copies
+`0x1803629c0..`), whose w is `0x1803629d8 + (ctrl·31 + cam)·4` and cnt
+`0x1803629c4 + …`. `FUN_1801999f0` writes them from the **pose
+tracker's** per-camera LED → blob map (IR frame struct `+0x1438`, §2.1):
+w = mean weight of the blobs matched to the sync LEDs whose blob state is
+1 and whose view metric·0.5 ≤ 45, cnt = their number. When the controller
+has no tracked pose in this frame (block `+0x10` clear) both are 0, so the
+window is short (status 4). There is no pose-free detector: a dark sync
+LED must still show as a dim matched blob. Sync LEDs are logical (model)
+indices; the chosen camera and LEDs are kept while a candidate was found
+less than 1 s ago (`0x180362e90`). **0 = "dark or absent"**. 1 is never written here.
 
 Other status codes, stored per camera at `0x180362ac8`:
 

@@ -56,6 +56,8 @@ public:
 	// Stay in PRESCAN (all LEDs lit, base re-synced every 1 s) instead of
 	// going on to BROAD. Own method, see OpticalTracker.
 	void HoldPrescan( bool on ) { hold_prescan_ = on; }
+	// Defer STABLE's periodic BG re-check (while another controller syncs).
+	void HoldBg( bool on ) { hold_bg_ = on; }
 	// BROAD code frame divider: 1 = one code frame per LD frame (Sony);
 	// 3 = one per three LD frames (hypothesis for firmware 0x0306, which
 	// lights the sync LED on every third LD frame in BROAD; DEV-NOTES).
@@ -103,6 +105,7 @@ private:
 	int preset_ = 1;
 	bool good_ = false;
 	bool hold_prescan_ = false;
+	bool hold_bg_ = false;
 	uint64_t sub_since_ = 0, phase_since_ = 0, last_frame_ = 0;
 	int retries_ = 0;
 	uint8_t leds_[4] = { 0xff, 0xff, 0xff, 0xff };

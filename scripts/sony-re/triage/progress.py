@@ -16,7 +16,7 @@ import collections, glob, os, re, sys
 
 def _txt(path, t):
     """Doc text to scan for VAs; generated tables count their first column only."""
-    if path.replace("\\", "/").endswith("catalogue/trivial.md"):
+    if path.replace("\\", "/").endswith(("catalogue/trivial.md", "catalogue/library.md")):
         return chr(10).join(l.split("|")[1] for l in t.splitlines() if l.startswith("| `0x"))
     return t
 

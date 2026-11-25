@@ -17,7 +17,9 @@
  *   wants n > 30 good samples and a +0x188 value we do not get).
  * - 3DoF tilt correction is a plain complementary step (Sony's
  *   FUN_180171400 is not ported). The output position is held in 3DoF.
- * - Blender: mode 1 only (Sony's mode-0 adaptive gains are not known).
+ * - Blender: mode 1 on the pose only. Sony's mode-0 blender moves the
+ *   output's delta pose toward the VIO delta from the SLAM sample
+ *   (controller-tracking.md §A.5.2); here both deltas stay the identity.
  */
 #ifndef PSVR2_INS_H
 #define PSVR2_INS_H

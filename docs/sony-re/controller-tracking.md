@@ -238,6 +238,61 @@ only mode setter (`FUN_180175690`, through `FUN_18017af40`) has no caller
 in the DLL. So the output blender at `+0x3b0` runs **mode 0** (adaptive);
 `+0x470` is switched to mode 1 by `FUN_18017c680`.
 
+**What each blender moves** (`FUN_18017ca00`, 2026-11-25) [sure]. A filter
+view is a table of pointers: `+0x00` pose, `+0x08` velocity, `+0x10` gyro
+bias, `+0x18` accel bias, `+0x20` anchor, `+0x40` a second 7-float pose,
+here called the **delta**. The reported pose is `delta ∘ pose`
+(`FUN_18011e190`, `p = p_d + R(q_d)·p`, `q = q_d ⊗ q`).
+
+1. Blender `+0x3b0` (mode 0) moves the output's **delta** toward the VIO
+   filter's delta. Its rate input is the IMU rate turned into world axes
+   by the output orientation (`ω_w = R(q_out)·ω`). The stationary flag is
+   passed; the shock flag is passed as a constant 0, so on PC the shock
+   window never reaches a blender.
+2. Blender `+0x470` (mode 1) moves the output **pose** toward the VIO pose
+   (gates 0.5 m / 0.1 rad, α = min(4·dt, 1)). This is the blend the Linux
+   INS already runs.
+3. If blender 1 snapped (returned 1), the reported-pose jump is recorded
+   (`FUN_18017b2a0`/`FUN_18017b520`, the same pair as at a latch). Then
+   gyro bias, accel bias and anchor are copied VIO → output.
+
+The VIO delta comes from the SLAM sample: the reset `FUN_18017b850` calls
+`FUN_180180200(vio, X, Y, vel, gyro bias, accel bias, anchor)`, which
+stores X as the delta and Y as the pose, where X and Y are the two poses of
+the sample (record `+0x10` and `+0x2c`, §A.2.1). X is the record's second
+pose `+0x2c` and Y the main pose `+0x10` [likely: the sample's pointer
+table, filled outside the ingest function, is read as pos, vel, quat (slots
+0, 3, 6), then the second pose (9, 12), the biases (15, 18) and the anchor
+(23, 26); Y = slots 0/6 matches the pose the Linux INS already uses]. Since
+`delta ∘ pose` must be a world pose, the second pose would then be a frame
+offset (odometry → map correction), not a "previous pose" as §A.2.1 guesses.
+At a latch the output gets the same delta (`FUN_180180610`), so the output
+starts with no offset; later SLAM samples move only the VIO delta, and the
+mode-0 blender carries that change into the output while the head turns.
+
+Port status: the kernel's `struct psvr2_pose_sample` does not carry the
+`+0x2c` pose, and no capture of it exists here. Hardware check: log
+`+0x2c..+0x47` next to `+0x10`; if it is the identity at rest and jumps on
+a relocalisation, add it to the sample and run mode 0 on it.
+
+**Mode-0 details** checked against `FUN_180181dd0` [sure]. The "log" and
+"exp" above are not the SE(3) maps. The error is the 6-vector
+(position, quaternion vector part with w made ≥ 0) of a pose
+(`FUN_180182ad0`); its inverse builds w = √(1 − ‖v‖²) (`FUN_180182a10`).
+
+```
+E      = target ∘ out⁻¹                        // world-frame error pose
+ē      = ē + (vec6(E) − ē)·0.05
+Ē      = pose6(ē)
+e      = vec6(R(q_out)ᵀ·p_Ē,  q_out⁻¹ ⊗ q_Ē ⊗ q_out)   // into out's body axes
+e'     = the same with E instead of Ē                  // only its signs are used
+c_i    = sign(e'_i) · max(0, |e_i| − deadband_i) · g_i
+out    = out ∘ pose6(c),  q renormalised;  velocity ← target velocity
+```
+
+The snap test uses `e`. Inputs that are NaN, or invalid poses, skip the
+update.
+
 Mode 0 per call, with `dt` and the angular rate ω passed by the INS step
 [sure for the formulas; the exact frames of the two error logs are
 likely]:
@@ -2034,8 +2089,10 @@ bit-exact kernels `psvr2_ins_core.c` (quat_mul `0x1801805a0`, rotinc
 libpsvr2 (`psvr2_imu_stream_*`), and the driver path in `pose_source.cpp`
 (setting `headset_ins`). Test `test_ins.c` (part of `make check`).
 
-Left: mode-0 adaptive blender (gains unknown), stillness and shock
-switches (now §A.5.2 and §A.5.7), Sony's 3DoF tilt correction `FUN_180171400` (§A.5.7), the `+0x188`
+Left: mode-0 adaptive blender on the delta pose (gains and inputs in
+§A.5.2; it changes nothing while both deltas are the identity, so it
+waits on which SLAM pose feeds the VIO delta), the stillness switch
+(§A.5.7; shock is not used on PC, §A.5.2), Sony's 3DoF tilt correction `FUN_180171400` (§A.5.7), the `+0x188`
 good-frame gate; the VD type 12 layout is read from code only (the
 driver rejects it if its diagonal is not within 20 % of the IIO scale).
 

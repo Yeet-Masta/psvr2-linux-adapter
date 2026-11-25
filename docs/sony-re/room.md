@@ -679,7 +679,15 @@ Pose-graph problem built from the map:
 - Edges: keyframe indices A, B (`loc+0x14e0`), relative translation
   (`+0x14f0`, 3 floats), rotation (`+0x1500`, 3 × 3), 6 × 6 information
   (`+0x1510`, 36 floats), and a per-edge sign: −1.0 for edge types 1–3,
-  +1.0 otherwise (`+0x1520`) [meaning open].
+  +1.0 otherwise (`+0x1520`): the robust-kernel switch (below).
+- Cost per edge (`FUN_180211b10`) [sure]: residual r = translation
+  difference plus rotation log (`FUN_1802000f0`) of the measured vs the
+  current relative pose, e = rᵀ Ω r with the edge's information Ω. Type 0
+  edges have weight 1. Edges marked −1 (types 1–3) get a Cauchy weight
+  `w = c / (e + c)` with `c = 10² = 100` (`0x1805e355c`, set by a static
+  initializer). The weight is computed once, on the first pass, and
+  stored as −w in the sign slot; later iterations reuse it. The residual
+  is scaled by √w and the cost adds `w · e`.
 - Solver `FUN_18021d4d0` (5887 lines, with a sparse symbolic analysis
   `FUN_18020c770`/`FUN_1802177d0` and a sparse factor `FUN_1802158c0`):
   at most **8 iterations**; stop early when the step norm is below
@@ -695,7 +703,7 @@ iteration and stop rules are what to copy.
 
 Still open: the query
 builder's minimum keypoint count (`+0x04`), the map query rules behind
-the prune, and the solver's exact cost (robust kernel or not).
+the prune.
 
 ### RP frame (unpack of the EP 0x8a record) — `FUN_1801ab410`
 

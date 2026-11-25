@@ -9,6 +9,7 @@ Parts:
 - [Part C: CLAPACK](#part-c-clapack)
 - [Part D: Trivial functions](#part-d-trivial-functions)
 - [Part E: Library and runtime code](#part-e-library-and-runtime-code)
+- [Part F: libpad internals](#part-f-libpad-internals)
 
 ---
 
@@ -2586,3 +2587,208 @@ part C.
 |----------|---------|----------|-----------------|---------|
 | `0x180048450` | fluff | string | uses 'UpdateMultiCamBootStats : %d frames', 'device %d:accum: %4d(%3.1f %%), current %4d(%3.1f %%) [singl' | debug |
 <!-- gen:library:end -->
+
+---
+
+## Part F: libpad internals
+
+Gap-fill rows for the statically linked libpad (`controllers.md` part A
+describes its behaviour). Names of the public entry points are not in the
+binary; roles are from the bodies.
+
+Layout used below:
+
+- **pad slots**: six 0x3410-byte records from `0x1805974e0` (in use at
+  `+0`, VID `+2`, PID `+4`, handle `+0x10`, user/index `+0x14`, HID device
+  id `+0x1c`, flags `+0x6c`, device record pointer `+0x170`, pending output
+  buffer `+0x29f8` with local copy `+0x2978`).
+- **HID device slots**: 0x2200-byte records from `0x1805b1580` (handle
+  `+0x10`, VID/PID `+0x20`/`+0x22`, firmware `+0x24`), up to `0x1805cad80`.
+- **API frame**: almost every entry point checks "initialised"
+  (`0x1805974c0`, else `0x80920005`), its arguments (`0x80920001`), takes
+  the libpad lock (`0x1801d4280`, `0x809200ff` on failure), validates the
+  handle (`0x1801c7630`, else `0x80920003`), short-cuts the special
+  "virtual pad" handle in `0x1805974c8` (returns neutral data), finds the
+  device (`0x1801c8280`, else `0x80920007`), then releases the lock
+  (`0x1801d42b0`). Rows below give only what happens inside that frame.
+- PID predicates: `0x0ce6` DualSense, `0x0df2` DualSense Edge, `0x0ce7` /
+  `0x0e45` / `0x0e46` VR controller, `0x05c4` / `0x09cc` DS4 (VID
+  `0x054c`).
+- Output buffer flags: byte 0 = 2 marks the buffer dirty; bytes 1 and 2
+  are the DualSense `valid_flag0` / `valid_flag1` bits as in Linux
+  `hid-playstation`.
+
+### F.1 Read path and state conversion [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801bb160` | 160 | validate a trigger-effect parameter block: mode bits only in the low two, per-mode limits (for example position ≤ 9, strength ≤ 8); caller `0x1801bf060` |
+| `0x1801bb330` | 151 | fill the extended controller-information record for a device: DualSense firmware ≥ `0x1003c`, Edge, DS4 v2 firmware gate `0x1801c95f0` and VR controller cases set different capability bits; callers `0x1801bd420`, `0x1801bd5d0` |
+| `0x1801bb650` | 161 | read up to `n` buffered input states for a handle (capped by the ring count `+0x160`), converting each through `0x1801bc270`; zero states when the device record is gone |
+| `0x1801bb9d0` | 129 | read the latest input state (single-state variant of `0x1801bb650`) |
+| `0x1801bbc50` | 172 | read up to `n` states in the extended format (second layout, for the VR controller path) |
+| `0x1801bbfd0` | 108 | latest state in the extended format |
+| `0x1801bc210` | 27 | neutral input state: sticks 0x80, identity orientation, zero motion |
+| `0x1801bc270` | 102 | convert one internal state into the output layout: button mask (`0x80009502`/`…503` filter for the "intercepted" flag), sticks, triggers, motion, touch |
+| `0x1801bc450` | 28 | map device button bits 3–7 to the output button word, swapping cross/circle when the "enter button" flag is set |
+| `0x1801bdd70` | 33 | API: read up to 1..64 states (`0x1801bb650`); neutral state for the virtual pad |
+| `0x1801be510` | 32 | API: read the latest state (`0x1801bb9d0`) |
+| `0x1801bf880` | 69 | API: read states in the extended format; with a virtual pad it reads the real pad behind it (`0x1805974c8` high dword) |
+| `0x1801bfa20` | 187 | API: read and merge the states of two handles (left and right VR controllers) into one extended record |
+| `0x1801bfd70` | 67 | API: latest state in the extended format, virtual-pad aware |
+
+### F.2 Information and settings entry points [likely unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801bc570` | 42 | API (caller `0x18011a0f0`): for a VR controller in mode 1, reset its HID output state (`0x1801ca780`) or mark it for re-init (`0x1801ca9d0`) |
+| `0x1801bcc90` | 41 | API: read a 2-entry record (count must be 2) from the HID layer (`0x1801caa40`); caller `0x18011bae0` |
+| `0x1801bcd90` | 42 | API: copy the device's product string (`0x1801caeb0`) into the caller's buffer |
+| `0x1801bcea0` | 46 | API: report whether the handle's device is connected (0/1) [sure] |
+| `0x1801bcfa0` | 75 | API: controller information (connection type, sticks dead zone, touch-pad size) into a 32-byte record |
+| `0x1801bd120` | 45 | API: device type for a handle (0 for the virtual pad) |
+| `0x1801bd240` | 30 | API: look up a pad slot by user index 1..4 (`0x1801c9410`); returns `0x80920008` when no pad there [sure] |
+| `0x1801bd2d0` | 49 | API: per-family capability word (DualSense, Edge, VR) |
+| `0x1801bd420` | 71 | API: extended information through `0x1801bb330` |
+| `0x1801bd5d0` | 62 | API: second extended information variant through `0x1801bb330` |
+| `0x1801bd840` | 60 | API: init with the default allocator (`malloc`/`free`): set the allocator hooks (`0x1801d2860`, `0x1801d2830`), mode `0x1801d2880`, timer period 1 ms, start the threads (`0x1801ca700`) [sure] |
+| `0x1801bd950` | 61 | API: init with a caller-supplied allocator pair; fails if either pointer is null [sure] |
+| `0x1801bdb60` | 54 | API: firmware-feature check, for example DualSense firmware below `0x390` |
+| `0x1801be5d0` | 31 | API: reset the orientation of a pad (`0x1801c2f50`) |
+| `0x1801be660` | 35 | API: return a per-pad setting from the device record |
+| `0x1801be720` | 37 | API: set or clear flag bit 0 of the pad settings word (`0x1801d4610` / `0x1801d4680`) [sure for the bit] |
+| `0x1801be7d0` | 45 | API: same for the real pad behind a virtual one |
+| `0x1801be8e0` | 19 | API: set the global byte `0x180351661` [sure] |
+| `0x1801be930` | 20 | API: set the global audio/volume word (`0x1801cc640`), then push it to every device (`0x1801c8e60`) [sure for the flow] |
+| `0x1801bea30` | 51 | API: write a 3-byte light-bar colour for a DualSense or VR pad (`0x1801c4030`); values above 12 rejected for others |
+| `0x1801bebb0` | 41 | API: set a 0/1/2 mode through `0x1801c3d20` (light-bar or player-LED brightness) |
+| `0x1801beda0` | 52 | API: set a 0/1/2 mode through `0x1801c54c0` (mic-mute LED) |
+| `0x1801beeb0` | 19 | API: set the global byte `0x1805b1572` (`0x1801cc680`) [sure] |
+| `0x1801bef50` | 45 | API: set or clear flag bit 2 of the pad settings word [sure for the bit] |
+| `0x1801bf3d0` | 34 | API: vibration on a pad (`0x1801c3020`, two motor bytes) [sure] |
+| `0x1801bf4a0` | 31 | API: set the vibration mode 1..5 (`0x1801c5730`) [sure] |
+| `0x1801bf850` | 15 | API: return the libpad version word (`0x1801c8210`); called from many driver paths [sure] |
+| `0x1801bfee0` | 34 | API: store a value > 1 at `+0x2a4c` of the device record [sure] |
+| `0x1801bffb0` | 63 | API: when pads 5 and 6 are both present, re-initialise both (`0x1801c8ca0`) [sure for the flow] |
+| `0x1801c0160` | 12 | API: set the boolean `0x180351658` (`0x1801c17f0`) for values > 1 [sure] |
+| `0x1801c0190` | 19 | API: forward a value to `0x1801d2850` [sure] |
+| `0x1801c01e0` | 12 | API: register the time callback (`0x1801c1810`) [sure] |
+| `0x1801c0490` | 12 | API: register a second callback (`0x1801c1800`) [sure] |
+| `0x1801c04b0` | 23 | API: set a 0..4 value globally (`0x1801d27f0`) and apply it to every VR pad (`0x1801c8ea0`) [sure for the flow] |
+| `0x1801c0690` | 19 | API: forward a value to `0x1801d2890` [sure] |
+| `0x1801c0a80` | 15 | call the registered time callback (`0x1805974d0`) and return its value, 0 when none [sure] |
+| `0x1801c15b0` | 20 | return one of two globals (`0x180351648`/`0x180351650`) under the lock [sure] |
+| `0x1801c15f0` | 26 | default LED-sync record: phase 5, frame cycle 16 683 350, offset −1, width 1000, step 105, half-width 1575; caller `0x1801c7b10` [sure] |
+| `0x1801c17f0` | 9 | setter of `0x180351658` [sure] |
+| `0x1801c1810` | 9 | setter of the time callback `0x1805974d8` [sure] |
+
+### F.3 Output helpers (DualSense / VR output fields) [likely unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801c2aa0` | 47 | read feature `0x12` (16 bytes) and return the 6-byte device address, byte-reversed [sure] |
+| `0x1801c2ba0` | 47 | same report, the second address in it (paired host) [sure for the read] |
+| `0x1801c2f50` | 38 | reset orientation: VR controllers via `0x1801c9710`, DualSense by rewriting the light-bar state and output (`0x1801c4030`) |
+| `0x1801c34d0` | 197 | set `valid_flag1` bits for light-bar setup and power-save (bits 2, 1, 4) with byte 36 = 1, then queue the output (`0x1801cbeb0`); caller `0x1801c8d50` |
+| `0x1801c3640` | 178 | audio control bits 6–7 of `+8` (DualSense only), pending buffer created at `+0x2978` if none |
+| `0x1801c37a0` | 217 | audio output-path bits 4–5 of `+8`, with `valid_flag0` bit 7 |
+| `0x1801c3ac0` | 27 | write feature `0x13` with a 6-byte address (byte-reversed) and a 16-byte key (`0x1801cb7d0`): pairing info [likely] |
+| `0x1801c3d20` | 175 | light-bar / player-LED brightness 0..2 for DualSense and VR controllers |
+| `0x1801c4030` | 170 | light-bar colour (three bytes) into the pending output; VR controllers use their own field |
+| `0x1801c4310` | 63 | power-save / haptics bits of `+8` by mode 0..2, reading the device capability at `+0x89` |
+| `0x1801c50c0` | 52 | VR controller output: `valid_flag0` bit 3 and a 2-bit field at byte 4, bit 7 when `+0xa` (vibration level) is 0 |
+| `0x1801c5200` | 104 | mic-mute LED and related bits (argument bit 2 selects the path) |
+| `0x1801c54c0` | 45 | mic-mute LED mode into byte 9 with `valid_flag1` bit 0 |
+| `0x1801c5610` | 37 | set the "output disabled" byte `+7` and clear the pending buffer |
+| `0x1801c5e00` | 107 | speaker volume: `valid_flag0` bit 5 and byte 6 from the table at `0x180269890` |
+| `0x1801c6a40` | 28 | parse a trigger-effect request (`0x1801c65f0`) and report whether each trigger is in a feedback mode (types 4..6) |
+
+### F.4 Pad slots, HID devices and threads [likely unless tagged; the container rows are sure]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801c7630` | 25 | validate a handle against the six pad slots (in-use only when asked); `0x80010002` when not found [sure] |
+| `0x1801c8280` | 47 | find the in-use pad slot for a handle and return it with its device record; error when none [sure] |
+| `0x1801c7680` | 21 | for the pad with HID id `n`: when its "measure" flag is set, stamp the time with `QueryPerformanceCounter` |
+| `0x1801c7e90` | 12 | free the pad slot that belongs to HID id `n` |
+| `0x1801c7ef0` | 22 | find the pad slot for a handle among the six and reset it (`0x1801c8b20`) |
+| `0x1801c7fa0` | 14 | BCD (4 digits, each clamped to 9) → integer |
+| `0x1801c8450` | 42 | reset the per-slot default output state of all pads (light-bar 13/0/0 etc. by slot type) |
+| `0x1801c8570` | 141 | build and send the initial output report for a DualSense or Edge (report `0x05`/BT `0x31`, flags by connection type) [likely] |
+| `0x1801c8a40` | 37 | pad slot defaults on connect (light-bar `0x0503`, mode 9, vibration level 2, `0x2b0c` …), then the initial output `0x1801c8570` |
+| `0x1801c8b20` | 53 | on disconnect, send a final "all off" output report (`0x82 0x53` or `0x57` header by type) |
+| `0x1801c8ca0` | 19 | re-initialise the pad slot that has handle `n` (`0x1801c8a40`) |
+| `0x1801c8e60` | 7 | push the global volume setting to every HID device (`0x1801d2ef0`) |
+| `0x1801c8ea0` | 7 | apply a VR-controller output field to every VR pad slot (`0x1801c50c0`) |
+| `0x1801c8ef0` | 10 | stop vibration on every DualSense / Edge (`0x1801c3020(h, 0, 0)`) |
+| `0x1801c8f80` | 6 | send the "all off" output to every pad (`0x1801c8b20`) |
+| `0x1801c8fc0` | 13 | read feature `0x02` (48 bytes for DualSense and VR, else none) through `0x1801cba20`: calibration request |
+| `0x1801c93b0` | 13 | find a pad slot by handle (optionally only in-use slots, VR range) |
+| `0x1801c9410` | 7 | find a pad slot by user index |
+| `0x1801c94b0` | 10 | VR controller PID test with a hand filter (`0x0e45` left, `0x0e46` right) |
+| `0x1801c9530` | 10 | "DualSense family or VR controller" PID test |
+| `0x1801c95f0` | 5 | DS4 (`0x05c4`, `0x09cc`) with firmware ≥ 23 |
+| `0x1801c9630` | 6 | DS4 v2 firmware test (≥ `0x3000`, high nibble not 3, 4, 5, 8 or 9) |
+| `0x1801c9710` | 27 | VR controller orientation-reset field by connection kind (values 13, `0x0d00`, …) |
+| `0x1801c9800` | 25 | `std::wstring` less-than (map key compare) |
+| `0x1801c9870` | 17 | recursive free of a `std::map<wstring, …>` subtree with the libpad allocator |
+| `0x1801c9930` | 38 | `std::map<wstring, …>` lower-bound search |
+| `0x1801c99f0` | 31 | `std::map<wstring, …>` insert (72-byte nodes through the libpad allocator) |
+| `0x1801c9b30` | 32 | `std::wstring` from a C wide string with the libpad allocator |
+| `0x1801c9c30` | 26 | `std::wstring` copy constructor with the libpad allocator |
+| `0x1801c9d10` | 6 | free a buffer with the libpad free hook |
+| `0x1801c9d50` | 6 | same, second instance |
+| `0x1801c9d80` | 11 | `std::wstring` destructor (libpad free hook) |
+| `0x1801c9dd0` | 7 | `std::map` destructor |
+| `0x1801c9e10` | 11 | `std::wstring` destructor (duplicate) |
+| `0x1801c9e60` | 145 | red-black tree erase-and-rebalance |
+| `0x1801ca200` | 107 | red-black tree insert-and-rebalance |
+| `0x1801ca540` | 42 | count connected devices by family (DualSense, DS4, VR) for a device-path filter |
+| `0x1801ca700` | 14 | start libpad once: init locks and defaults, then the scanner (`0x1801cfe40`) and writer (`0x1801cdd40`) threads |
+| `0x1801ca780` | 14 | find the HID device with id `n` and reset its output state (`0x1801ca7e0`) |
+| `0x1801ca7e0` | 50 | reset a HID device's output: pick the report id and length by type (DS4 `0x11`/BT, DualSense `0x02`/48), check `HidD_GetPreparsedData`, send |
+| `0x1801ca9d0` | 11 | mark HID device `n` for re-initialisation (`+0x178` = 1) under the device lock |
+| `0x1801caa40` | 223 | read a feature-backed record for HID device `n` (two entries), under the device lock |
+| `0x1801caeb0` | 33 | copy the product string of HID device `n` (`wcsncpy_s`) |
+| `0x1801caf90` | 7 | `HidD_GetFeature` wrapper; `0x8001002b` on failure |
+| `0x1801cb010` | 67 | read the 16-bit firmware/config word of HID device `n` |
+| `0x1801cb6d0` | 34 | send a raw output block of up to 42 bytes with header `0x0e08` (and BT CRC seed `0x53` when asked, `0x1801d4490`) |
+| `0x1801cc640` | 12 | store the global volume word `0x1805b1574` and mark it set |
+| `0x1801cc670` | 2 | setter of `0x1805b1571` |
+| `0x1801cc680` | 2 | setter of `0x1805b1572` |
+| `0x1801cc690` | 44 | stop libpad: send "all off", stop the scanner and writer threads (5 s wait, then `TerminateThread`), close handles |
+| `0x1801cc830` | 7 | add an event handle to the 12-entry wait list (`0x80010037` when full) |
+| `0x1801cc9f0` | 12 | input-report length check by family |
+| `0x1801cca80` | 75 | DS4 firmware ≥ 19: search the HID capability list for the vendor usage that marks a newer report layout |
+| `0x1801ce480` | 65 | writer thread step: for each device with pending output, write it |
+| `0x1801ce6c0` | 14 | close and clear one HID device record (0x2200 bytes) |
+| `0x1801ce730` | 42 | remove all map entries that belong to device `n` |
+| `0x1801ce8a0` | 7 | remove an event handle from the wait list |
+| `0x1801cf8a0` | 21 | find a HID device by its 6-byte address |
+| `0x1801cfb90` | 20 | read a device registry property (`SetupDiGetDeviceRegistryPropertyW`, property `0x24`) |
+| `0x1801d1ce0` | 7 | true when every entry of the 4-slot table at `0x1805d2e40` is empty |
+| `0x1801d23c0` | 109 | decode a trigger-effect type nibble (0..15) into the output flag bits at `+0x14` [likely] |
+| `0x1801d27f0` | 8 | store a global value `0x1805e3498` and mark it set |
+| `0x1801d2820` | 2 | setter of `0x180351661` |
+| `0x1801d2830` | 7 | set the libpad free hook (default `free`) |
+| `0x1801d2860` | 7 | set the libpad malloc hook (default `malloc`) |
+| `0x1801d2880` | 2 | setter of the mode word `0x1805b157c` |
+| `0x1801d28a0` | 44 | build a feature/output command `0x80 a b` with up to 57 payload bytes and send it; logs `SCE_PAD_ERROR_FATAL` when the lock fails |
+| `0x1801d2ef0` | 18 | send the global volume to HID device `n` (Edge firmware ≥ `0x110`, DualSense) |
+| `0x1801d2fb0` | 167 | rebuild the device-path map from a scan (`std::map<wstring, …>`) [likely] |
+| `0x1801d3750` | 36 | VR controller: write the vibration levels into output byte 35 (`valid_flag1` bit 4) |
+| `0x1801d3870` | 45 | read a 3+-byte feature from a DualSense / Edge / VR device |
+| `0x1801d3a60` | 6 | set the timer period (`uPeriod`) when non-zero |
+| `0x1801d3a80` | 29 | decide whether a DualSense / Edge output needs the compatibility flags (connection kinds 2..5) |
+| `0x1801d3b90` | 108 | register a newly found HID device (1..12) into a free slot, copying its identity |
+| `0x1801d4080` | 59 | post the device's pending events to the wait list (4 or 8 handles by family) |
+| `0x1801d4360` | 4 | delete the libpad critical sections |
+| `0x1801d4610` | 6 | read the pad settings word (`+0x6c`) of a handle |
+| `0x1801d4650` | 4 | init a {0, 1.0} record (orientation w) |
+| `0x1801d4660` | 4 | zero a 16-byte record |
+| `0x1801d4670` | 5 | init a quaternion record to identity |
+| `0x1801d4680` | 6 | write the pad settings word of a handle |
+| `0x1801d46b0` | 6 | write the pad word at `+0x150` |
+| `0x1801d46f0` | 47 | rotate the reported orientation by a correction when the gravity vector is near unit length (‖g‖ within 0.08 of 1) [likely] |
+| `0x1801d5750` | 28 | 3×3 matrix inverse (adjugate / determinant) |
+| `0x1801d59e0` | 18 | per-axis difference of a vector from a stored reference |

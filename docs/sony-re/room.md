@@ -646,8 +646,30 @@ After RunLocalizer, per frame:
    "Drop Keyframe Description"), and `FUN_1801f0b80` prunes keyframe
    poses and edges ("Prune KeyframePose and PoseGraph").
 
-Not read in detail: the candidate check, how edge information matrices
-are filled, and the prune rule.
+Details [sure unless tagged]:
+
+- **Keyframe check** (`FUN_1801ecd60`): rotate the frame's reference
+  axis (9 floats at frame `0x9af64`, in the misc-state block) by the
+  candidate pose and take the middle component. The keyframe is accepted
+  only if it is ≥ cos 1° (0.99985), i.e. the new keyframe's vertical axis
+  is within 1° of the frame's [likely: gravity] direction. The three
+  components go to `loc+0x136c..0x1374`, the flag to `loc+0x1368`.
+- **Edges** (`FUN_180225970` stores one; an existing edge between the same
+  two keyframes is removed first). Three types:
+
+  | Type | Made by | Between | Relative pose / information |
+  |---|---|---|---|
+  | 0 | `FUN_1801ed9f0` (on insert) | tracking-state anchor (`+0x10c`) → new keyframe | the state's stored relative pose `+0x114` and 6 × 6 information `+0x144`; when a keyframe's camera index is ≥ 2, corrected through the 52-byte camera records at `+0x3b4` |
+  | 1 | `FUN_1801ed4f0` (loop / third flag) | new keyframe ↔ each matched keyframe not yet linked | the slot's solved pose (`+0xc4`), inverted |
+  | 2 | `FUN_1801ed6c0` | pairs of matched keyframes, using the graph distance (`FUN_1802269c0`) | [likely] closes the loop between distant parts of the graph |
+
+  OptimizeMap gives types 1–3 the sign −1 and type 0 +1.
+- **Prune** (`FUN_1801f0b80`) runs two map queries: query 6 lists
+  keyframes whose pose is removed (`FUN_180227140`) unless it is the
+  tracking anchor; query 3 lists keyframes whose description is dropped
+  from the database (`FUN_1801f71d0`) and whose pose is then removed. The
+  rules inside the query engine (`FUN_180232180`, `FUN_180230d40`) were
+  not read [likely: state 2 "deleted" and unused keyframes].
 
 ### OptimizeMap (`FUN_1801ded40` → `FUN_1801efb90` → `FUN_18021d4d0`) [sure for the problem; likely for the solver]
 
@@ -672,9 +694,8 @@ same nodes, edges and information matrices fills this role; the 8
 iteration and stop rules are what to copy.
 
 Still open: the query
-builder's minimum keypoint count (`+0x04`), the UpdateMap
-candidate check and prune rule, edge information, and the solver's exact
-cost (robust kernel or not).
+builder's minimum keypoint count (`+0x04`), the map query rules behind
+the prune, and the solver's exact cost (robust kernel or not).
 
 ### RP frame (unpack of the EP 0x8a record) — `FUN_1801ab410`
 

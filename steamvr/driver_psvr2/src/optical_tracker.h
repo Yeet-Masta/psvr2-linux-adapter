@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Headset side of controller optical tracking (docs/sony-re/ledsync.md).
+// Headset side of controller optical tracking (docs/sony-re/controllers.md part C).
 //
 // Reads the headset's LED-detection packets ("LD", /dev/psvr2-ld), keeps the
 // headset's blob-detection settings (Set 0x09 / 0x14) in the state Sony's
@@ -84,14 +84,14 @@ private:
 	struct psvr2_clock clock_ {};
 	uint64_t clock_at_us_ = 0;
 
-	// Blob-detection mode (ledsync.md §4.3): 0 Normal, 1 Many Blob.
+	// Blob-detection mode (docs/sony-re/controllers.md §C.4.3): 0 Normal, 1 Many Blob.
 	int blob_mode_ = 0;
 	int quiet_frames_ = 0;
 	uint32_t last_09_counter_ = 0;
 	bool pushed_09_ = false;
 	int pushed_14_preset_ = 0;
 
-	// Headset-wide preset (ledsync.md §2.4) and its owner hand (-1 none).
+	// Headset-wide preset (docs/sony-re/controllers.md §C.2.4) and its owner hand (-1 none).
 	int preset_ = 0, preset_owner_ = -1;
 
 	bool see_through_ = false;

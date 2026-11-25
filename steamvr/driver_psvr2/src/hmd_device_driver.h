@@ -38,7 +38,7 @@ struct Psvr2DisplayConfig
 	// Direct mode (default): report the panel as a real, NON-desktop display so
 	// SteamVR's compositor acquires it directly via DRM leasing (no TTY, desktop
 	// keeps running). When false, the panel is treated as an extended desktop
-	// monitor instead (the bring-up scaffold — see docs/steamvr.md).
+	// monitor instead (the bring-up scaffold — see docs/getting-started.md part C).
 	bool    direct_mode = true;
 };
 
@@ -177,7 +177,7 @@ private:
 	int see_through_poll_ = 0;
 	bool chaperone_written_ = false;
 	std::atomic<uint64_t> universe_id_{ 0 };
-	// Not-worn throttle (docs/sony-re/display.md 5.5).
+	// Not-worn throttle (docs/sony-re/steamvr-and-display.md §B.5.5).
 	vr::DriverPose_t ref_pose_{};
 	std::chrono::steady_clock::time_point ref_time_{};
 	bool have_ref_ = false;

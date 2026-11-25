@@ -4,13 +4,14 @@ Usage: coverage.py [--min LINES] [--verdict core] [--list]
 Scans the adapter repo docs for each VA (0x... or FUN_...) and reports
 how many triaged functions no doc names yet.
 """
-import argparse, glob, os, re, collections
+import sys, argparse, glob, os, re, collections
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from docscan import doc_text, splice, CATALOGUE  # noqa: E402
 
 def _txt(path, t):
     """Doc text to scan for VAs; generated tables count their first column only."""
-    if path.replace("\\", "/").endswith(("catalogue/trivial.md", "catalogue/library.md")):
-        return chr(10).join(l.split("|")[1] for l in t.splitlines() if l.startswith("| `0x"))
-    return t
+    return doc_text(t)
 
 ADAPTER = r"C:\Users\Yeet Masta\Claude\psvr2-linux-adapter"
 TRIAGE = os.path.join(os.path.dirname(__file__), "..", "out", "triage.tsv")

@@ -16,7 +16,7 @@
 static const char *kSettingsSection = "driver_psvr2";
 
 // PSVR2 panel EDID identity, decoded from the Sony SIE OSS panel EDID (see
-// docs/references.md): manufacturer bytes 0x4D 0xD9 = "SNY", product id 0xA205,
+// docs/development.md part D): manufacturer bytes 0x4D 0xD9 = "SNY", product id 0xA205,
 // monitor name "SIE  VRH". SteamVR uses these to match and DRM-lease the
 // physical connector in direct mode.
 static constexpr int32_t kEdidVendorId = 0x4DD9;   // "SNY"
@@ -124,7 +124,7 @@ Psvr2HmdDriver::~Psvr2HmdDriver()
 	psvr2_close( dev_ );
 }
 
-// Sony's EDID choice (docs/sony-re/display.md 3.2): expose the 90/120 Hz
+// Sony's EDID choice (docs/sony-re/steamvr-and-display.md §B.3.2): expose the 90/120 Hz
 // EDID only when SteamVR runs at 120 Hz, the 90 Hz-only one otherwise, and
 // give the DisplayPort sink a second to re-enumerate after a switch.
 void Psvr2HmdDriver::SelectEdid( const char *why )
@@ -208,7 +208,7 @@ vr::EVRInitError Psvr2HmdDriver::Activate( uint32_t unObjectId )
 	}
 	DriverLog( "psvr2: display refresh %.2f Hz", display_frequency_ );
 	vr::VRProperties()->SetFloatProperty( c, vr::Prop_UserHeadToEyeDepthMeters_Float, 0.0f );
-	// Panel timing as Sony's driver reports it (docs/sony-re/display.md).
+	// Panel timing as Sony's driver reports it (docs/sony-re/steamvr-and-display.md part B).
 	const bool hz120 = display_frequency_ > 105.0f;
 	// Display timing. Like Sony's "debug/vsync to photons" and "debug/photons
 	// to vblank" keys, settings in microseconds override both values (a
@@ -477,7 +477,7 @@ void Psvr2HmdDriver::GazeThread()
 	}
 }
 
-// Sony's not-worn throttle (docs/sony-re/display.md 5.5): while the headset
+// Sony's not-worn throttle (docs/sony-re/steamvr-and-display.md §B.5.5): while the headset
 // is off the head, a pose that has not moved is only re-sent for half a
 // second, so SteamVR can idle; any motion or state change sends again.
 void Psvr2HmdDriver::SubmitPose( const vr::DriverPose_t &pose, bool worn )
@@ -500,7 +500,7 @@ void Psvr2HmdDriver::SubmitPose( const vr::DriverPose_t &pose, bool worn )
 		vr::VRServerDriverHost()->TrackedDevicePoseUpdated( device_index_, pose, sizeof( pose ) );
 }
 
-// Play area for SteamVR, as Sony's driver provides one (docs/sony-re/room.md
+// Play area for SteamVR, as Sony's driver provides one (docs/sony-re/room.md part A
 // 1, 2.5): a chaperone_info file (version 5) with one universe, published
 // through Prop_DriverProvidedChaperonePath and Prop_CurrentUniverseId.
 // Without Sony's relocaliser the tracker's origin is wherever the headset
@@ -609,7 +609,7 @@ bool Psvr2DisplayComponent::IsDisplayOnDesktop()
 {
 	// Direct mode (default): NOT on the desktop, so SteamVR's compositor
 	// acquires the panel directly via DRM leasing. Extended mode: on the desktop
-	// as an ordinary monitor. See docs/steamvr.md.
+	// as an ordinary monitor. See docs/getting-started.md part C.
 	return !config_.direct_mode;
 }
 

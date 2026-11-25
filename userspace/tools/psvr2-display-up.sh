@@ -6,7 +6,7 @@
 # The headset enumerates as a DRM "non-desktop" / lease output, so a normal
 # desktop won't draw to it. This flips the connector's non-desktop property off
 # and enables the 4000x2040 mode. (Under Wayland this is compositor-specific and
-# not handled here — see docs/display.md.)
+# not handled here — see docs/getting-started.md part B.)
 #
 # Usage:
 #   psvr2-display-up.sh            # detect the PSVR2 output and enable it
@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
 done
 
 command -v xrandr >/dev/null 2>&1 || {
-	echo "error: xrandr not found. This helper is X11-only; under Wayland see docs/display.md." >&2
+	echo "error: xrandr not found. This helper is X11-only; under Wayland see docs/getting-started.md part B." >&2
 	exit 1
 }
 [ -n "${DISPLAY:-}" ] || { echo "error: no X DISPLAY set." >&2; exit 1; }

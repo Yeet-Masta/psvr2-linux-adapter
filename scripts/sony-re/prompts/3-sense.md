@@ -1,6 +1,6 @@
-# Topic: Sense controllers (`docs/sony-re/sense.md`) — priority 3
+# Topic: Sense controllers (`controllers.md` part B) — priority 3
 
-Read `common.md` first. Earlier notes: `docs/sony-re/libpad.md`.
+Read `common.md` first. Earlier notes: `controllers.md` part A.
 
 Scope: Sony's libpad (`0x1801b0000–0x1801dffff`) and the controller manager
 that uses it (`FUN_18011bae0`, `FUN_18011d0c0`). That covers enumeration

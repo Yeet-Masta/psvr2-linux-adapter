@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-// Per-controller LED-sync state machine (docs/sony-re/ledsync.md §3, §4, §5).
+// Per-controller LED-sync state machine (docs/sony-re/controllers.md §C.3, §C.4, §C.5).
 //
 // The headset only reports LED blobs; it never tells the controller when its
 // camera shutters open. The PC finds that time offset and passes it to the
 // controller in every output report. This class decides the phase
 // (INIT -> PRESCAN -> BROAD -> BG -> STABLE) and emits the small libpad
-// commands (ledsync.md §2.1) that SenseHid turns into the output report's
+// commands (docs/sony-re/controllers.md §C.2.1) that SenseHid turns into the output report's
 // LED block.
 //
 // Written from the behavioural spec; timing constants are the values the doc
@@ -47,9 +47,9 @@ public:
 
 	explicit LedSyncer( Send send ) : send_( std::move( send ) ) {}
 
-	// preset: 1 or 2 (ledsync.md §2.4). now_us: host CLOCK_MONOTONIC µs.
+	// preset: 1 or 2 (docs/sony-re/controllers.md §C.2.4). now_us: host CLOCK_MONOTONIC µs.
 	void Frame( uint64_t now_us, int preset, const LedObservation &obs );
-	// Forced transitions (ledsync.md §3.2).
+	// Forced transitions (docs/sony-re/controllers.md §C.3.2).
 	void ForceInit();
 	void ForceAllOff();
 	Phase Current() const { return phase_; }
@@ -72,7 +72,7 @@ private:
 	};
 	static Preset Timing( int preset );
 
-	// Drift fit (ledsync.md §5.5): runs of equal values, then one
+	// Drift fit (docs/sony-re/controllers.md §C.5.5): runs of equal values, then one
 	// least-squares slope over all runs but the first, latched until reset.
 	struct DriftFit
 	{
@@ -110,7 +110,7 @@ private:
 	int retries_ = 0;
 	uint8_t leds_[4] = { 0xff, 0xff, 0xff, 0xff };
 
-	// Per-camera frame history (newest last), RESEARCH.md §7.8.
+	// Per-camera frame history (newest last), docs/sony-re/overview.md §A.7.8.
 	static constexpr int kHist = 33;  // BG 20, BROAD 11 (33 with divider 3)
 	float w_[kLedCameras][kHist] = {};
 	uint16_t n_[kLedCameras][kHist] = {};

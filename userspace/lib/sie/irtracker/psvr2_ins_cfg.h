@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * INS tuning parameters and covariance helpers. Field meanings are our best
- * reading of how each value is used [likely]; see docs/sony-re/irtracker.md.
+ * reading of how each value is used [likely]; see docs/sony-re/headset.md part B.
  */
 #ifndef PSVR2_SIE_INS_CFG_H
 #define PSVR2_SIE_INS_CFG_H

@@ -9,11 +9,12 @@ Callers/callees named in a doc get '*'. Library/CRT callees are dropped.
 """
 import argparse, glob, json, os, re, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from docscan import doc_text, splice, CATALOGUE  # noqa: E402
+
 def _txt(path, t):
     """Doc text to scan for VAs; generated tables count their first column only."""
-    if path.replace("\\", "/").endswith(("catalogue/trivial.md", "catalogue/library.md")):
-        return chr(10).join(l.split("|")[1] for l in t.splitlines() if l.startswith("| `0x"))
-    return t
+    return doc_text(t)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "out")

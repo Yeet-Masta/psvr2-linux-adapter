@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 // Controller pose filter: the controller IMU fused with the optical pose
 // from the LED solver. Behaviour follows Sony's UkfManager
-// (docs/sony-re/ukf.md); the implementation is our own.
+// (docs/sony-re/controller-tracking.md part G); the implementation is our own.
 //
-// Taken from Sony (ukf.md, tracking.md 5.5, opticalpose.md 4):
+// Taken from Sony (docs/sony-re/controller-tracking.md part G, docs/sony-re/controller-tracking.md §A.5.5, docs/sony-re/controller-tracking.md §C.4):
 //   - 15-dim error state: position, velocity, attitude, gyro bias, accel bias;
 //   - symmetric sigma points (2n, weights 1/2n, spread sqrt(n): the
 //     unscented transform with alpha 1, kappa 0) for the optical update;

@@ -40,13 +40,13 @@ On top of that:
   the **Sense controllers** over Bluetooth: all inputs, PCM haptics and
   adaptive triggers, with 3DoF orientation and an arm-model position (6DoF
   controller tracking is not done yet). A PSVR2 Toolkit-compatible IPC server
-  serves Toolkit-aware apps. See [docs/steamvr.md](docs/steamvr.md).
+  serves Toolkit-aware apps. See [getting-started.md part C](docs/getting-started.md#part-c-steamvr-driver).
 
 Audio is handled by the in-tree `snd-usb-audio` driver and left untouched. The
 display is a standard DisplayPort sink driven by the GPU's DRM stack (see
-[docs/display.md](docs/display.md)).
+[getting-started.md part B](docs/getting-started.md#part-b-display-bring-up)).
 
-See [docs/roadmap.md](docs/roadmap.md) for current status and planned work.
+See [development.md part C](docs/development.md#part-c-status-and-roadmap) for current status and planned work.
 
 ## Architecture
 
@@ -65,7 +65,7 @@ never contends with `snd-usb-audio` or `usbhid`.
 | Eye / gaze tracking | **this module** → `/dev/psvr2-gaze`             |
 | VR runtime          | **`libpsvr2`** → SteamVR driver / OpenXR shims  |
 
-See [docs/hardware.md](docs/hardware.md) and [docs/protocol.md](docs/protocol.md).
+See [hardware-protocol.md part A](docs/hardware-protocol.md#part-a-hardware-and-usb-topology) and [hardware-protocol.md part B](docs/hardware-protocol.md#part-b-usb-protocol).
 
 ## Build & load
 
@@ -107,8 +107,8 @@ git pull && ./install.sh --update   # later: redo only what changed
 # Arch: cd packaging && makepkg -si  # builds the psvr2-dkms package
 ```
 
-`./uninstall.sh` reverses it (`--all` also removes libpsvr2 and the install state). See [docs/install.md](docs/install.md) for all
-install paths and [docs/display.md](docs/display.md) for the display details.
+`./uninstall.sh` reverses it (`--all` also removes libpsvr2 and the install state). See [getting-started.md part A](docs/getting-started.md#part-a-install) for all
+install paths and [getting-started.md part B](docs/getting-started.md#part-b-display-bring-up) for the display details.
 
 ## Use as a SteamVR headset
 
@@ -118,7 +118,7 @@ The SteamVR driver builds against the OpenVR SDK and links `libpsvr2`:
 steamvr/install-steamvr-driver.sh    # build + register with SteamVR
 ```
 
-Then start SteamVR. See [docs/steamvr.md](docs/steamvr.md) for how direct-mode
+Then start SteamVR. See [getting-started.md part C](docs/getting-started.md#part-c-steamvr-driver) for how direct-mode
 display works, build details, and current limitations.
 
 ## Project layout
@@ -128,7 +128,7 @@ kernel/          psvr2.ko sources, Makefile, dkms.conf, udev rule
 userspace/lib/   libpsvr2 (C API over the device nodes) + psvr2-monitor example
 userspace/tools/ smoke tests + display bring-up helpers
 steamvr/         SteamVR / OpenVR driver (driver_psvr2) + installer
-docs/            install, hardware, protocol, display, steamvr, references, roadmap
+docs/            getting-started, hardware-protocol, development; sony-re/ = Sony driver RE by topic
 patches/         amdgpu DSC/FEC EDID quirk (+ apply script) for the display path
 packaging/       Arch PKGBUILD (psvr2-dkms)
 install.sh       DKMS install / uninstall.sh to reverse
@@ -181,20 +181,20 @@ Regenerate with `python scripts/sony-re/triage/progress.py`.
 
 This is an early-stage, community-oriented project — issues, fixes, and new
 capabilities are all welcome. Good areas to help with are listed in
-[docs/roadmap.md](docs/roadmap.md) (additional camera modes, haptics, lens
+[development.md part C](docs/development.md#part-c-status-and-roadmap) (additional camera modes, haptics, lens
 distortion/FOV for the SteamVR driver, Wayland display acquisition, OpenXR/Monado
 integration, and testing across GPUs and distros). The protocol notes in
-[docs/protocol.md](docs/protocol.md) and the acknowledgments in
-[docs/references.md](docs/references.md) are good starting points.
+[hardware-protocol.md part B](docs/hardware-protocol.md#part-b-usb-protocol) and the acknowledgments in
+[development.md part D](docs/development.md#part-d-acknowledgments-and-provenance) are good starting points.
 
 ## Acknowledgments
 
 Built on substantial public prior art (Monado, Sony's PSVR2 OSS release, the
 OpenVR SDK, and community reverse-engineering work) and developed with the
 assistance of **Claude** (Anthropic). Details and credits in
-[docs/references.md](docs/references.md).
+[development.md part D](docs/development.md#part-d-acknowledgments-and-provenance).
 
 ## License
 
-GPL-2.0. See [COPYING](COPYING), and [docs/references.md](docs/references.md) for
+GPL-2.0. See [COPYING](COPYING), and [development.md part D](docs/development.md#part-d-acknowledgments-and-provenance) for
 acknowledgments and the provenance of reused protocol definitions.

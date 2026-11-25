@@ -1,4 +1,4 @@
-# Topic: headset (`docs/sony-re/headset.md`) — priority 1
+# Topic: headset (`headset.md` part A) — priority 1
 
 Read `common.md` first. This topic matters most for the kernel module.
 

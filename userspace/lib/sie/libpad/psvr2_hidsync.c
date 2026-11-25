@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Controller clock model ("HID_SYNC") and the LED-sync command handler.
- * Behaviour from docs/sony-re/libpad.md, sections "Controller clock fit"
+ * Behaviour from docs/sony-re/controllers.md part A, sections "Controller clock fit"
  * and "LED-sync commands".
  */
 #include <string.h>

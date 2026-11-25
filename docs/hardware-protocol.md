@@ -1,16 +1,117 @@
-# PSVR2 USB Protocol (host side)
+# Hardware and USB protocol
+
+The headset's USB identity, interfaces and the host-side protocol as the kernel module implements it.
+
+Parts:
+
+- [Part A: Hardware and USB topology](#part-a-hardware-and-usb-topology)
+- [Part B: USB protocol](#part-b-usb-protocol)
+
+---
+
+## Part A: Hardware and USB topology
+
+The Sony PSVR2 PC adapter presents the headset as a single USB device that
+fans out into a DisplayPort sink (handled by the GPU's DRM driver) and a
+multi-interface USB function (handled by this project's kernel module).
+
+### USB identity
+
+| Field      | Value            |
+|------------|------------------|
+| Vendor ID  | `0x054c` (Sony)  |
+| Product ID | `0x0cde`         |
+| Interfaces | 13               |
+
+### Interface map
+
+| IF  | Class            | Purpose                          | Owner                |
+|-----|------------------|----------------------------------|----------------------|
+| 0   | HID              | Control                          | usbhid (ep0 control used directly) |
+| 1   | Audio Control    | Speaker/mic control              | snd-usb-audio        |
+| 2   | Audio Streaming  | 48 kHz PCM speaker + mic         | snd-usb-audio        |
+| 3   | Vendor (subcl 1) | **SLAM 6DoF pose ("SLA" packets)** | **psvr2 (this module)** |
+| 4   | Vendor (subcl 2) | Data                             | future               |
+| 5   | Vendor (subcl 3) | **Eye / gaze tracking**          | **psvr2 (this module)** |
+| 6   | Vendor (subcl 4) | **Camera frames**                | **psvr2 (this module)** |
+| 7   | Vendor (subcl 5) | **Status header + IMU (2 kHz)**  | **psvr2 (this module)** |
+| 8   | Vendor (subcl 6) | LED detector                     | future               |
+| 9   | Vendor (subcl 7) | Relocalizer                      | future               |
+| 10  | Vendor (subcl 8) | Vendor data                      | future               |
+| 11  | Vendor (subcl 9) | Data                             | future               |
+| 12  | Vendor (subcl …) | Data                             | future               |
+
+Audio works today with the in-tree `snd-usb-audio` driver and is intentionally
+left untouched. The module matches **only the specific interfaces it implements**
+(currently IF7 and IF3) so it never contends with audio or HID. The interfaces
+share one reference-counted per-headset context.
+
+### IF7 (status / IMU) endpoint
+
+| Property        | Value                  |
+|-----------------|------------------------|
+| Alt setting     | 1                      |
+| Endpoint        | `0x88` (interrupt IN)  |
+| Transfer size   | 1024 bytes             |
+| Contents        | 1× status header (32 B) + N× IMU record (24 B), ~41 records/transfer |
+| IMU rate        | ~2000 Hz               |
+
+### IF3 (SLAM) endpoint
+
+| Property        | Value                  |
+|-----------------|------------------------|
+| Alt setting     | 0                      |
+| Endpoint        | `0x83` (bulk IN)       |
+| Transfer size   | 512-byte "SLA" records |
+| Output          | `/dev/psvr2-pose` (pose sample stream) |
+
+### IF6 (cameras) endpoint
+
+| Property        | Value                  |
+|-----------------|------------------------|
+| Alt setting     | 0                      |
+| Endpoint        | `0x87` (bulk IN)       |
+| Transfer        | one frame per bulk transfer; length selects the mode |
+| Output          | `/dev/videoN` (V4L2) — mode 1: 1280x640 `GREY` |
+
+### IF5 (eye/gaze) endpoint
+
+| Property        | Value                  |
+|-----------------|------------------------|
+| Alt setting     | 0                      |
+| Endpoint        | `0x85` (bulk IN)       |
+| Transfer        | "GS" gaze packets (~324 B used) |
+| Keepalive       | re-send enable (report 0x0c) ~1/s |
+| Output          | `/dev/psvr2-gaze` (gaze sample stream) |
+
+See [part B](#part-b-usb-protocol) for the byte-level record layouts.
+
+### Display
+
+The headset is a DisplayPort 1.4 sink (`4000x2040 @ 119.88`, needs DSC + FEC).
+This is driven by the GPU DRM stack, not by this module. See
+[getting-started.md part B](getting-started.md#part-b-display-bring-up).
+
+### Controllers
+
+The PSVR2 Sense controllers are separate Bluetooth HID devices and enumerate on
+Linux independently (as `/dev/input/js*`); they are out of scope for this module.
+
+---
+
+## Part B: USB protocol
 
 Byte layouts and control semantics used by the kernel module. Sourced from the
 Monado PSVR2 driver and cross-checked against Sony's SIE OSS headers; see
-[references.md](references.md). All multi-byte fields are little-endian.
+[development.md part D](development.md#part-d-acknowledgments-and-provenance). All multi-byte fields are little-endian.
 
-## ep0 vendor control
+### ep0 vendor control
 
 Commands are issued as USB control transfers on endpoint 0:
 
 | Direction | bmRequestType                                | bRequest | wValue     | wIndex |
 |-----------|----------------------------------------------|----------|------------|--------|
-| Set       | `VENDOR \| RECIP_ENDPOINT` (OUT)              | `0x09`   | report_id  | 0      |
+| Set       | `VENDOR \| RECIP_ENDPOINT` (OUT)              | `0x09`   | 0          | 0      |
 | Get       | `VENDOR \| RECIP_ENDPOINT \| DIR_IN`          | `0x01`   | report_id  | 0      |
 
 The payload is a `sie_ctrl_pkt`:
@@ -43,7 +144,7 @@ Known report IDs:
 | `0xa9`    | 1      | Get EDID type                   | `u8`                   |
 
 The full list, with when Sony's driver sends each one, is in
-[sony-re/headset.md](sony-re/headset.md) section 2.3. The module runs the
+[headset.md part A](sony-re/headset.md#part-a-headset-usb-behaviour) section 2.3. The module runs the
 same init sequence once IF7 binds (`psvr2_init_work`): Get `0x81` and `0xa1`,
 then Set `0x17` off, `0x22` 0 and `0x12` brightness. It exposes
 `firmware_version`, `board_stage`, `min_driver_version`, `see_through` and
@@ -53,7 +154,7 @@ No host authentication handshake is required to stream data. (Sony's
 `sieusb.h` documents a device-side challenge/response, but it is not exercised
 by the host.)
 
-## IF7: status header + IMU records
+### IF7: status header + IMU records
 
 Each interrupt transfer begins with one header, followed by an array of IMU
 records filling the remainder of the transfer.
@@ -82,7 +183,7 @@ struct psvr2_imu_record {            /* 24 bytes */
 Invalid samples are signalled either by `status & 1` or by the sentinel value
 `0x8000` in a field. The module skips these.
 
-### IMU scaling
+#### IMU scaling
 
 Raw `__s16` register values are exposed verbatim on the IIO channels; the
 physical conversion lives in the IIO `*_scale` attributes:
@@ -96,7 +197,7 @@ Axes are reported in the sensor's native order (`accel[0..2]`, `gyro[0..2]`).
 Coordinate-frame remapping (e.g. Monado's convention) is intentionally left to
 userspace.
 
-## IF3: SLAM 6DoF pose
+### IF3: SLAM 6DoF pose
 
 The headset's onboard tracker streams one 512-byte record per bulk transfer
 (alt 0, endpoint `0x83`):
@@ -120,7 +221,7 @@ character device **`/dev/psvr2-pose`** (see `kernel/psvr2_uapi.h`). `read()`
 returns whole samples; `poll()` reports `POLLIN` when data is available. The
 latest raw record is also at `…/debugfs/psvr2/raw_slam`.
 
-### Coordinate convention
+#### Coordinate convention
 
 Position and orientation are reported in the device's **native wire order**.
 Monado remaps them as follows (apply in userspace if you want that convention):
@@ -137,7 +238,7 @@ Monado remaps them as follows (apply in userspace if you want that convention):
 
 `unknown1` is normally `3`; other values may indicate a non-tracking record.
 
-## IF6: cameras
+### IF6: cameras
 
 Bulk IN endpoint `0x87`, alt 0. The headset delivers **one frame per bulk
 transfer**; the transfer length identifies the camera mode, which is selected
@@ -156,10 +257,10 @@ Mode 1 is exposed as a standard **V4L2 capture device** (`/dev/videoN`,
 `V4L2_PIX_FMT_GREY`, 1280x640). Streaming on switches the headset into mode 1;
 streaming off switches the cameras back off (mode 0). Other modes (interleaved
 fisheye/controller-tracking views, BC4-compressed `0x10`, etc.) are documented
-in Monado's `psvr2_protocol.h` (see [references.md](references.md)) and remain
+in Monado's `psvr2_protocol.h` (see [development.md part D](development.md#part-d-acknowledgments-and-provenance)) and remain
 future work.
 
-## IF5: eye / gaze tracking
+### IF5: eye / gaze tracking
 
 Bulk IN endpoint `0x85`, alt 0. The stream is **keepalive-gated**: the host
 must send control report `0x0c` subcmd `0x01` to enable it, and re-send it about

@@ -93,13 +93,13 @@ public:
 
 	const SenseHidInfo &Info() const { return info_; }
 
-	// LED sync (docs/sony-re/ledsync.md). Off: the LED block says
+	// LED sync (docs/sony-re/controllers.md part C). Off: the LED block says
 	// "LED ALL OFF" as before. On: every input report feeds libpad's
 	// host<->controller clock fit and every output report carries the
 	// LED-sync record, which the optical tracker drives with commands.
 	static void SetLedSync( bool on ) { led_sync_enabled_ = on; }
 	static bool LedSyncEnabled() { return led_sync_enabled_; }
-	// One tracker -> libpad command (ledsync.md 2.1).
+	// One tracker -> libpad command (docs/sony-re/controllers.md §C.2.1).
 	void LedSyncCommand( const uint8_t *cmd, uint8_t len );
 	// LED test only: phase LED ALL ON with base time = the controller time
 	// of the headset clock at the first call (the anchor) + offset_us.

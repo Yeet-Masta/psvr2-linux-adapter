@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Sense controller DriverPose_t, see docs/sony-re/steamvr.md
+ * Sense controller DriverPose_t, see docs/sony-re/steamvr-and-display.md part A
  * ("Controller pose").
  */
 #include <math.h>

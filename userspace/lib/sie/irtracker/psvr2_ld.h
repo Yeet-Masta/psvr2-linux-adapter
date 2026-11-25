@@ -2,7 +2,7 @@
 /*
  * PSVR2 headset LED-detection ("LD", USB EP 0x89) blob records.
  *
- * Written from the behavioural spec in docs/sony-driver-re.md and checked
+ * Written from the behavioural spec in docs/sony-re/overview.md part B and checked
  * bit-for-bit against the reference driver by scripts/sony-re/difftest.
  */
 #ifndef PSVR2_SIE_LD_H

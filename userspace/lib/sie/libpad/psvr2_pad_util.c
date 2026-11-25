@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Device-id predicates, report CRC, small helpers (docs/sony-re/libpad.md). */
+/* Device-id predicates, report CRC, small helpers (docs/sony-re/controllers.md part A). */
 #include <string.h>
 #include "psvr2_libpad.h"
 

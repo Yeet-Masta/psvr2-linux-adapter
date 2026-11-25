@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Gyro still detection, IMU conversion and orientation (docs/sony-re/libpad.md, "Motion"). */
+/* Gyro still detection, IMU conversion and orientation (docs/sony-re/controllers.md part A, "Motion"). */
 #include <math.h>
 #include <string.h>
 #include "psvr2_libpad.h"

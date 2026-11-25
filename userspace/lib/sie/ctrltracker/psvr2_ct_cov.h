@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Controller tracker: packed 15x15 symmetric covariance helpers and the
- * lever-arm pose transfer. See docs/sony-re/ctrltracker.md ("Packed
+ * lever-arm pose transfer. See docs/sony-re/controller-tracking.md part H ("Packed
  * covariance"). Build with -ffp-contract=off.
  */
 #ifndef PSVR2_SIE_CT_COV_H

@@ -33,7 +33,7 @@ uint32_t Rd32( const uint8_t *p )
 	return v;
 }
 
-// Set 0x09 blocks (ledsync.md §2.6): Normal and Many Blob.
+// Set 0x09 blocks (docs/sony-re/controllers.md §C.2.6): Normal and Many Blob.
 void Block09( int mode, uint8_t b[24] )
 {
 	static const uint8_t normal[24] = { 0xfe, 0, 0, 0, 0xfe, 0, 0, 0, 0x78, 0x30, 0x40, 0x20,
@@ -47,7 +47,7 @@ void Block09( int mode, uint8_t b[24] )
 	}
 }
 
-// libpad calls this for the PRESCAN base time (ledsync.md §5.4), once per
+// libpad calls this for the PRESCAN base time (docs/sony-re/controllers.md §C.5.4), once per
 // PRESCAN command and per 1 s re-sync. Sony returns the frame time as is.
 // On hardware (2026-11-18) our headset -> host -> controller mapping put the
 // window about 2 ms early: in a 47 s trace the LEDs were lit only at
@@ -236,7 +236,7 @@ void OpticalTracker::LogCameraCalibration()
 			for ( int j = 0; j < PSVR2_CAM_RAW && o < int( sizeof( line ) ) - 24; j++ )
 				o += snprintf( line + o, sizeof( line ) - o, " %.9g", k.raw[j] );
 			DriverLog( "psvr2: optical:  cam %u raw%s", k.id, line );
-			// RESEARCH.md §11 #1: expect s1..s4 ~ 0, small tilt, width >= 508.
+			// docs/sony-re/overview.md §A.11 #1: expect s1..s4 ~ 0, small tilt, width >= 508.
 			struct psvr2_cam_model m;
 			if ( psvr2_cam_model_from_calib( &cal, c, &m ) == 0 )
 				DriverLog( "psvr2: optical:  cam %u model fx %.2f fy %.2f cx %.2f cy %.2f (508 px); "
@@ -314,7 +314,7 @@ void OpticalTracker::Run()
 	}
 }
 
-// ---- LD packet (ledsync.md §2.8, sony-driver-re.md "LD packet layout") ----
+// ---- LD packet (docs/sony-re/controllers.md §C.2.8, docs/sony-re/overview.md part B "LD packet layout") ----
 
 bool OpticalTracker::ParseHeader( const psvr2_ld_packet &pkt, Header &h ) const
 {
@@ -358,7 +358,7 @@ void OpticalTracker::UpdateFrameTime( const psvr2_ld_packet &pkt, const Header &
 	frame_us_ = t;
 }
 
-// ledsync.md §4.3. Extreme-Env modes need tracker settings Sony never sets
+// docs/sony-re/controllers.md §C.4.3. Extreme-Env modes need tracker settings Sony never sets
 // by default, so only Normal <-> Many Blob is implemented.
 void OpticalTracker::UpdateBlobMode( const Header &h )
 {
@@ -370,7 +370,7 @@ void OpticalTracker::UpdateBlobMode( const Header &h )
 	if ( blob_mode_ == 1 )
 	{
 		// Sony's Many-Blob exit looks at blob counts only; the camera flags
-		// count there only with Extreme-Env enabled (ledsync.md §4.3).
+		// count there only with Extreme-Env enabled (docs/sony-re/controllers.md §C.4.3).
 		const bool quiet = h.count[0] <= 49 && h.count[1] <= 49;
 		quiet_frames_ = quiet ? quiet_frames_ + 1 : 0;
 		if ( quiet_frames_ < 480 )
@@ -445,7 +445,7 @@ void OpticalTracker::DecodeBlobs( const psvr2_ld_packet &pkt, const Header &h )
 		for ( uint32_t i = 0; i < h.count[c]; i++ )
 			psvr2_ld_decode_blob( rec + i * PSVR2_LD_BLOB_SIZE, extended, &blobs_[c], &blob_count_[c], nullptr );
 	}
-	// Pattern length of the controller now syncing (RESEARCH.md §7.8).
+	// Pattern length of the controller now syncing (docs/sony-re/overview.md §A.7.8).
 	int period = 0;
 	for ( const auto &s : syncers_ )
 		if ( s->Current() == LedSyncer::kBroad )
@@ -467,7 +467,7 @@ void OpticalTracker::DecodeBlobs( const psvr2_ld_packet &pkt, const Header &h )
 // Once a second per camera: frames with blobs, the largest count, the
 // centroid extents (they show the pixel scale: 0..508 or the sensor size),
 // the largest bounding box, and the last frame's first blobs. Used for the
-// camera-index and pixel-scale checks in docs/HW-TESTS.md.
+// camera-index and pixel-scale checks in docs/development.md part B.
 void OpticalTracker::LogBlobs( const Header &h )
 {
 	for ( int c = 0; c < PSVR2_LD_CAMERAS; c++ )
@@ -516,7 +516,7 @@ void OpticalTracker::LogBlobs( const Header &h )
 
 // ---- LED sync ----------------------------------------------------------
 
-// The first connected controller fixes the preset (RESEARCH.md §7.5). Sony
+// The first connected controller fixes the preset (docs/sony-re/overview.md §A.7.5). Sony
 // reads it from libpad's controller state; its HID origin is still open, so
 // libpad's sync mode stands in for it (same timing values). In this Sony
 // build every path ends in sync mode 2, so the preset is 2 in practice.
@@ -605,7 +605,7 @@ void OpticalTracker::TraceInputs( const bool synced[2] )
 	std::fputc( '\n', trace_ );
 }
 
-// Sony's LED-sync input (FUN_1801999f0, RESEARCH.md §7.14), from this
+// Sony's LED-sync input (FUN_1801999f0, docs/sony-re/overview.md §A.7.14), from this
 // frame's pose association. One sync LED (Sony's default count). The LED
 // is kept while it was seen less than 1 s ago, else the most face-on LED
 // with a matched blob is chosen (view angle / 2 in (0, 45]). Per camera:
@@ -677,7 +677,7 @@ LedObservation OpticalTracker::Observe( int hand, int phase_owner )
 	// its pose explains its LEDs, so the blink finder (shared, and reset
 	// when the other hand starts BROAD) is not needed. Without this, the
 	// other hand's BROAD/BG made it look unseen and dropped it to PRESCAN
-	// after 15 s. Sony uses its pose association here (RESEARCH.md §7.8).
+	// after 15 s. Sony uses its pose association here (docs/sony-re/overview.md §A.7.8).
 	const uint64_t fix = pose_ ? pose_->LastFixUs( hand ) : 0;
 	const bool pose_seen = syncers_[hand]->Current() == LedSyncer::kStable && fix &&
 	                       frame_us_ >= fix && frame_us_ - fix < kSec;
@@ -691,7 +691,7 @@ LedObservation OpticalTracker::Observe( int hand, int phase_owner )
 	// Without a pose, the sync LED is the blob that blinks (BlinkFinder, our
 	// own method).
 	// Dark frames report a small weight with count 1, so the history stays
-	// valid and the frame reads as dark (RESEARCH.md §7.8).
+	// valid and the frame reads as dark (docs/sony-re/overview.md §A.7.8).
 	bool any = false;
 	for ( int c = 0; c < kLedCameras; c++ )
 	{
@@ -715,7 +715,7 @@ LedObservation OpticalTracker::Observe( int hand, int phase_owner )
 void OpticalTracker::RunSyncers( uint64_t now_us )
 {
 	// See-through camera view: LEDs off for both, restart when it ends
-	// (ledsync.md §3.2). Polled once a second like Sony's Get 0x97.
+	// (docs/sony-re/controllers.md §C.3.2). Polled once a second like Sony's Get 0x97.
 	if ( now_us - see_through_at_us_ > kSec )
 	{
 		see_through_at_us_ = now_us;

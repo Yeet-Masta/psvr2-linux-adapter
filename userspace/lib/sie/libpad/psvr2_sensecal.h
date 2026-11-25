@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Sense controller IMU calibration (HID feature report 0x05, two parts).
- * Written from docs/sony-driver-re.md; checked bit-for-bit by
+ * Written from docs/sony-re/overview.md part B; checked bit-for-bit by
  * scripts/sony-re/difftest.
  */
 #ifndef PSVR2_SIE_SENSECAL_H

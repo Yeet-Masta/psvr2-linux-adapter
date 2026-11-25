@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* DualSense / DS4 output report fields (docs/sony-re/libpad.md,
+/* DualSense / DS4 output report fields (docs/sony-re/controllers.md part A,
  * "DualSense and DS4 output state"). */
 #include <string.h>
 #include "psvr2_libpad.h"

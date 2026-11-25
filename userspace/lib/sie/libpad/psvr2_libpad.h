@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Sense / DualSense / DS4 controller library: behaviour reimplemented from
- * docs/sony-re/libpad.md and checked against Sony's driver by
+ * docs/sony-re/controllers.md part A and checked against Sony's driver by
  * scripts/sony-re/difftest/t_libpad_*.c.
  *
  * State records keep the byte layout given in the doc so the tests can

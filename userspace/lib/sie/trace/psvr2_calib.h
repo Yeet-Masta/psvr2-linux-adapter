@@ -2,7 +2,7 @@
 /*
  * Headset calibration blob ("SIE" header, cameras + IMUs) to the driver's
  * calibration struct, behaviour-identical to Sony 0x180161b70 (build
- * 1741940190). Spec: docs/sony-re/trace.md section 12.
+ * 1741940190). Spec: docs/sony-re/vrtrace.md section 12.
  */
 #ifndef PSVR2_CALIB_H
 #define PSVR2_CALIB_H

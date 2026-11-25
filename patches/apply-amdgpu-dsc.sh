@@ -7,7 +7,7 @@
 # Usage:  ./apply-amdgpu-dsc.sh /path/to/linux
 #
 # This patches drivers/gpu/drm/amd/display/dc/link/link_detection.c; you then
-# need to rebuild amdgpu (or the kernel) and reboot/reload. See docs/display.md.
+# need to rebuild amdgpu (or the kernel) and reboot/reload. See docs/getting-started.md part B.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,4 +32,4 @@ else
 	patch -p1 < "${PATCH}"
 fi
 
-echo ">> Applied. Now rebuild amdgpu / the kernel and reboot. See docs/display.md."
+echo ">> Applied. Now rebuild amdgpu / the kernel and reboot. See docs/getting-started.md part B."

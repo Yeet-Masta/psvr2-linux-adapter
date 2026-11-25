@@ -1,7 +1,7 @@
-# Topic: tracking (`docs/sony-re/tracking.md`) — priority 5
+# Topic: tracking (`controller-tracking.md` part A) — priority 5
 
-Read `common.md` first. Earlier notes: `docs/sony-re/ctrltracker.md`,
-`ctrlboot.md`, `irtracker.md`. This is userspace work. Describe the
+Read `common.md` first. Earlier notes: `controller-tracking.md` part H,
+`controller-tracking.md` part D, `headset.md` part B. This is userspace work. Describe the
 algorithms at the level needed to build an equivalent open one; do not
 document every helper.
 

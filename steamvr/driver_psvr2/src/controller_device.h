@@ -5,7 +5,7 @@
 // from the controller over hidraw (sense_hid.h). Orientation is 3DoF from the
 // controller IMU. Position comes from an arm model anchored to the headset:
 // tracking the controller LEDs with the headset cameras (6DoF) is not
-// implemented yet (docs/roadmap.md).
+// implemented yet (docs/development.md part C).
 #pragma once
 
 #include <atomic>
@@ -59,7 +59,7 @@ public:
 	bool ImuOrientation( vr::HmdQuaternion_t &q, double &yaw );
 	// An optical fix for the LED frame at host time frame_us: the IMU's
 	// position (m) and orientation in the world. Returns false when the
-	// innovation gate rejects it (docs/sony-re/opticalpose.md §4.1).
+	// innovation gate rejects it (docs/sony-re/controller-tracking.md §C.4.1).
 	// head_rel: the IMU position in the head frame (m); cam_dist: distance
 	// from the camera rig (m). Both select the filter's measurement noise.
 	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu,

@@ -428,7 +428,7 @@ static const struct attribute_group *psvr2_groups[] = {
 
 /*
  * Headset init, as Sony's driver does it when IF7 connects
- * (docs/sony-re/headset.md section 3.2). It runs from a work item one second
+ * (docs/sony-re/headset.md §A.3.2). It runs from a work item one second
  * after the bind so probe does not block:
  * Sony uses subcmd 1 for every report here.
  *   Get 0x81 firmware info (once more a second later if the board stage is
@@ -498,7 +498,7 @@ static void psvr2_init_work(struct work_struct *work)
 /*
  * Set 0x1f, 256 bytes, sent by Sony's driver each time the SLAM interface
  * (IF3) connects, before poses are read. Values are the raw constants from
- * Sony's driver (docs/sony-re/headset.md section 2.6); float32 fields are
+ * Sony's driver (docs/sony-re/headset.md §A.2.6); float32 fields are
  * kept as IEEE-754 bit patterns because the kernel does not use the FPU.
  * Their meaning is not known; the radians and metre-sized values suggest
  * SLAM thresholds.
@@ -671,7 +671,7 @@ static void psvr2_disconnect(struct usb_interface *intf)
 /*
  * System resume. Sony's driver sends nothing on suspend and, after resume,
  * Set 0x05 subcmd 2 (headset restart; its default "sleep action" 2,
- * docs/sony-re/headset.md section 3.6). This driver has no suspend
+ * docs/sony-re/headset.md §A.3.6). This driver has no suspend
  * callbacks, so usbcore rebinds it across a system sleep; the notifier only
  * adds Sony's restart once the system is back.
  */

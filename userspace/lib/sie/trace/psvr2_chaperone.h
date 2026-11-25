@@ -2,7 +2,7 @@
 /*
  * VrTracker2 universe / chaperone helpers (Sony VA 0x18011e190-0x18011f420,
  * plus the quaternion-to-matrix helper 0x180121360 they call), behaviour-
- * identical to build 1741940190. Spec: docs/sony-re/trace.md section 10.
+ * identical to build 1741940190. Spec: docs/sony-re/vrtrace.md section 10.
  * Build with -ffp-contract=off.
  *
  * Conventions here differ from psvr2_math.h (they follow the VrTracker2

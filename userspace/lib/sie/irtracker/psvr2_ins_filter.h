@@ -4,7 +4,7 @@
  *
  * The reference driver keeps these objects as structs of pointers to their
  * state; the layouts below match it so the differential tests can share one
- * object between both implementations. Behaviour: docs/sony-re/irtracker.md.
+ * object between both implementations. Behaviour: docs/sony-re/headset.md part B.
  */
 #ifndef PSVR2_SIE_INS_FILTER_H
 #define PSVR2_SIE_INS_FILTER_H

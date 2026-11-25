@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Sense controller pose from headset LED blobs. Behaviour from
- * docs/RESEARCH.md §9; the numerics (numeric Jacobian, Nielsen damping
+ * docs/sony-re/overview.md §A.9; the numerics (numeric Jacobian, Nielsen damping
  * start, ray solve) are our own choices and are marked as such.
  */
 #include <float.h>
@@ -214,7 +214,7 @@ int psvr2_led_project(const struct psvr2_rig_camera *cam,
 	return a < model->cone_deg ? 0 : -1;
 }
 
-/* ---- association and matching (RESEARCH.md §9.3 steps 2-3) --------------- */
+/* ---- association and matching (docs/sony-re/overview.md §A.9.3 steps 2-3) --------------- */
 
 struct vis {
 	int n;
@@ -361,7 +361,7 @@ static int match(const struct vis *v, const struct psvr2_blob_list *b, double ga
 	return n;
 }
 
-/* ---- Sony's gated match (FUN_1800df5b0, notdone.md §2.11) ---------------- */
+/* ---- Sony's gated match (FUN_1800df5b0, docs/sony-re/controller-tracking.md §B.2.11) ---------------- */
 
 /* Squared distance from q to the nearest blob other than `self`, or s2
  * when none is closer than s2 (FUN_1800f1ce0). */
@@ -589,7 +589,7 @@ static int match_sony(const struct vis *v, const struct psvr2_blob_list *b, doub
 	return n;
 }
 
-/* ---- refine: weighted LM with Huber IRLS (RESEARCH.md §9.3 step 7) -------- */
+/* ---- refine: weighted LM with Huber IRLS (docs/sony-re/overview.md §A.9.3 step 7) -------- */
 
 struct problem {
 	const struct psvr2_rig_camera *cams;
@@ -1507,7 +1507,7 @@ void psvr2_led_track_mem_boot(struct psvr2_track_mem *mem, const struct psvr2_ri
 	set_prev(mem, res, PSVR2_LED_MAX);
 }
 
-/* ---- orientation-prior boot (RESEARCH.md §9.3 step 6) -------------------- */
+/* ---- orientation-prior boot (docs/sony-re/overview.md §A.9.3 step 6) -------------------- */
 
 /* Pixel -> unit ray in the rig frame (inverse projection by Gauss-Newton
  * on the forward model; our choice, Sony's inverse was not found). */
@@ -1651,7 +1651,7 @@ int psvr2_led_boot_oriented(const struct psvr2_solver_cfg *cfg,
 	if (res->matched >= cfg->min_inliers_boot)
 		return 0;
 	/*
-	 * Sony's rule below MININLIERSFORBOOT (RESEARCH.md §9.3): keep the pose
+	 * Sony's rule below MININLIERSFORBOOT (docs/sony-re/overview.md §A.9.3): keep the pose
 	 * only when it stays within 15 deg of the IMU prior (30 deg closer
 	 * than 150 mm) and is nearer than 500 mm. The gravity-only variant
 	 * needs measured gravity, which this entry point does not take.

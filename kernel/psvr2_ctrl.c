@@ -3,7 +3,7 @@
  * PSVR2 Linux driver — control character device and headset housekeeping.
  *
  * Sony's driver runs these from its status (IF7) reader loop; the reference
- * is docs/sony-re/headset.md sections 3.3, 4.1 and 5.1:
+ * is docs/sony-re/headset.md part A sections 3.3, 4.1 and 5.1:
  *
  *   - Get 0xde clock sync every 500 ms, fitted into a device-us to
  *     CLOCK_MONOTONIC map that the SLAM, IMU and LED paths use.
@@ -326,7 +326,7 @@ static void psvr2_tick_work(struct work_struct *work)
 
 /* ----------------------------------------------------------- char device */
 
-/* Reports Sony's driver sends (docs/sony-re/headset.md section 2.3). */
+/* Reports Sony's driver sends (docs/sony-re/headset.md §A.2.3). */
 static bool psvr2_ctrl_allowed(bool get, u16 id)
 {
 	static const u8 sets[] = { 0x05, 0x08, 0x09, 0x0a, 0x0b, 0x12, 0x14,

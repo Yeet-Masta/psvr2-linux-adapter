@@ -3,7 +3,7 @@
 
 The three 1024-entry radial lens tables (red, green, blue) at
 0x180261180/0x180262180/0x180263180 are measured lens data used by
-ComputeDistortion and the hidden-area mesh (docs/sony-re/display.md 5.2,
+ComputeDistortion and the hidden-area mesh (docs/sony-re/steamvr-and-display.md §B.5.2,
 5.3). Only the raw float values are copied, as IEEE-754 bit patterns.
 
   extract_lens_lut.py <driver_playstation_vr2_orig.dll> <out.h>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Refresh-rate / EDID-type choice at init, see docs/sony-re/steamvr.md
+ * Refresh-rate / EDID-type choice at init, see docs/sony-re/steamvr-and-display.md part A
  * ("Refresh rate and EDID type").
  */
 #include <math.h>

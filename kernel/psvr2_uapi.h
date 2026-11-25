@@ -41,7 +41,7 @@ struct psvr2_pose_sample {
 	__le32	position[3];	/* float32 LE bit patterns */
 	__le32	orientation[4];	/* float32 LE bit patterns, [0] = w */
 	/*
-	 * Tracker state from the same record (docs/sony-re/tracking.md 2.1).
+	 * Tracker state from the same record (docs/sony-re/controller-tracking.md §A.2.1).
 	 * Vectors are float32 bit patterns in the position's raw frame.
 	 */
 	__u8	state;		/* +0x0c: 3 = SLAM tracking */
@@ -110,7 +110,7 @@ struct psvr2_gaze_sample {
  * psvr2_packet_hdr followed by `length` payload bytes. The buffer must hold
  * the whole packet, else read() fails with EMSGSIZE and the packet stays
  * queued. The payload is the headset's wire format unchanged; see
- * docs/sony-re/ledsync.md and docs/sony-re/room.md.
+ * docs/sony-re/controllers.md part C and docs/sony-re/room.md part A.
  */
 struct psvr2_packet_hdr {
 	__u64	timestamp_ns;	/* host CLOCK_MONOTONIC receive time */

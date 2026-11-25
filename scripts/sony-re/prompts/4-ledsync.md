@@ -1,8 +1,8 @@
-# Topic: LED sync and camera (`docs/sony-re/ledsync.md`) — priority 4
+# Topic: LED sync and camera (`controllers.md` part C) — priority 4
 
 Read `common.md` first. The wire format is already in
-`docs/sony-driver-re.md` ("LED sync", "LED detection"). Earlier notes:
-`docs/sony-re/irtracker.md`.
+`overview.md` part B ("LED sync", "LED detection"). Earlier notes:
+`headset.md` part B.
 
 Scope: how the headset cameras and controller LEDs are kept in step. That
 covers the LedSyncer state machine (`0x180190000+`; `FUN_180194af0`,

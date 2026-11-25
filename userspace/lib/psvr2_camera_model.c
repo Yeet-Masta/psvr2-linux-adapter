@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Tracking-camera calibration blob ("SIE", VD types 10/11) and the camera
- * projection model. Layout: docs/sony-driver-re.md, "Camera calibration
+ * projection model. Layout: docs/sony-re/overview.md part B, "Camera calibration
  * blob"; record offsets checked against FUN_180161b70. Model and mapping:
- * docs/RESEARCH.md §8 (FUN_180182e80, FUN_180045420, FUN_180045650).
+ * docs/sony-re/overview.md §A.8 (FUN_180182e80, FUN_180045420, FUN_180045650).
  */
 #include <math.h>
 #include <string.h>

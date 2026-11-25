@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Headset INS: Sony's host-side pose path (docs/sony-re/tracking.md §3.1,
+ * Headset INS: Sony's host-side pose path (docs/sony-re/controller-tracking.md §A.3.1,
  * §5.1, §5.2). The headset sends its on-device SLAM pose (EP 0x83) at a
  * low rate; this keeps two strapdown filters over the 2 kHz IMU, a "VIO"
  * filter reset to every valid SLAM sample and re-integrated up to the

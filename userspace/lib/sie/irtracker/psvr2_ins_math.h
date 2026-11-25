@@ -2,7 +2,7 @@
 /*
  * Small vector / quaternion / matrix helpers used by the headset INS.
  *
- * Written from docs/sony-re/irtracker.md (behaviour only) and checked
+ * Written from docs/sony-re/headset.md part B (behaviour only) and checked
  * against the reference driver by scripts/sony-re/difftest. Quaternions are
  * stored w first: q[0] = w, q[1..3] = x, y, z. Matrices are 4x4 floats,
  * column-major (element (r,c) at m[c*4 + r]). Build with -ffp-contract=off.

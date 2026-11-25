@@ -3,7 +3,7 @@
  * SteamVR-facing behaviour of the PS VR2 headset driver: lens geometry,
  * hidden-area mesh, display timing, HMD properties.
  *
- * Written from the behavioural spec in docs/sony-re/steamvr.md and checked
+ * Written from the behavioural spec in docs/sony-re/steamvr-and-display.md part A and checked
  * against the reference driver by scripts/sony-re/difftest/t_steamvr_*.c.
  */
 #ifndef PSVR2_SIE_STEAMVR_H
@@ -33,7 +33,7 @@ int psvr2_steamvr_lens_update(psvr2_lens_state *st, const uint8_t calib[256]);
 #define PSVR2_HIDDEN_AREA_MAX 108  /* vertices: 32 segments + 4 corner fills, 3 each */
 
 /* lut: radial distortion scale indexed by r^2 * 1023 (Sony ships it in the
- * driver; this project does not carry it, see docs/sony-re/steamvr.md).
+ * driver; this project does not carry it, see docs/sony-re/steamvr-and-display.md part A).
  * Builds the left-eye mesh in v (pairs x, y in 0..1 texture space); returns the
  * vertex count. The right-eye mesh is the left one with x mirrored (1 - x).
  * v must persist between calls: a ray that leaves the lens on its first step

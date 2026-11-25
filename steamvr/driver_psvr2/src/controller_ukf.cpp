@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Controller pose filter; see controller_ukf.h and docs/sony-re/ukf.md.
+// Controller pose filter; see controller_ukf.h and docs/sony-re/controller-tracking.md part G.
 #include "controller_ukf.h"
 
 #include <algorithm>
@@ -18,7 +18,7 @@ constexpr int kMaxM = 12;
 constexpr double kGravity = 9.80665;
 constexpr double kDeg = 3.14159265358979323846 / 180.0;
 
-// Sony's values (docs/sony-re/ukf.md, tracking.md 5.5, opticalpose.md 4).
+// Sony's values (docs/sony-re/controller-tracking.md part G, docs/sony-re/controller-tracking.md §A.5.5, docs/sony-re/controller-tracking.md §C.4).
 constexpr double kP0Pos = 0.0025, kP0Vel = 0.04;
 constexpr double kP0Att[3] = { 1.0 * kDeg * 1.0 * kDeg, 5.0 * kDeg * 5.0 * kDeg, 1.0 * kDeg * 1.0 * kDeg };
 constexpr double kGyroBase = 3.0e-4, kGyroOwn = 2.5e-5, kGyroCross = 6.25e-6, kGyroFixed = 3.04617;
@@ -26,7 +26,7 @@ constexpr double kGyroRange = 43.6332;  // rad/s (2500 deg/s)
 constexpr double kAccBase = 8.0e-6, kAccExtra = 1.0e-4, kAccOwn = 2.5e-5, kAccCross = 6.25e-6, kAccFixed = 6.25;
 constexpr double kGateNear = 0.05, kGateFar = 0.20, kGateSpeed = 1.0;
 constexpr double kStillAccel = 1.96, kStillDamp = 0.99;
-constexpr uint64_t kStaleUs = 300000;  // optical considered stale (opticalpose.md 5)
+constexpr uint64_t kStaleUs = 300000;  // optical considered stale (docs/sony-re/controller-tracking.md §C.5)
 constexpr double kVelLimit = 32.0, kGyroBiasLimit = 0.34907, kAccBiasLimit = 2.0;  // [likely] limits
 constexpr double kZone[3] = { 0.30, 0.20, 0.25 };  // head ellipsoid semi-axes, m
 constexpr double kZoneBand = 0.04;
@@ -124,7 +124,7 @@ void CholSolve( const double *L, int n, int ld, double *b )
 	}
 }
 
-// Sony's rate-dependent per-axis variance (ctrltracker.md "Process noise").
+// Sony's rate-dependent per-axis variance (docs/sony-re/controller-tracking.md part H "Process noise").
 void RateNoise( const Vec3 &v, double own, double cross, double base, double fixed, double range, double out[3] )
 {
 	for ( int i = 0; i < 3; i++ )
@@ -344,7 +344,7 @@ bool ControllerUkf::Update( State &s, const Fix &f )
 {
 	const int m = f.has_rot ? 12 : 3;
 
-	// Measurement noise (ukf.md 4).
+	// Measurement noise (docs/sony-re/controller-tracking.md §G.4).
 	double sp, sr = 0.0;
 	if ( !f.has_rot )
 		sp = kSigmaPosOnly;

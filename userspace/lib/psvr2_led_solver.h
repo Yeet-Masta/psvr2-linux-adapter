@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Sense controller pose from headset LED blobs (docs/RESEARCH.md §9).
+ * Sense controller pose from headset LED blobs (docs/sony-re/overview.md §A.9).
  *
  * Written from the behavioural description, not from Sony's code:
  * projection-driven association (view-angle cone, self-occlusion cull,
@@ -36,7 +36,7 @@ struct psvr2_led_model {
 	double	nrm[PSVR2_LED_MAX][3];	/* unit */
 	/* LED rings for the RANSAC boot's first sampler stage: LED index
 	 * sequences, consecutive LEDs neighbours on the controller (model
-	 * block words 198.., docs/sony-re/notdone.md 2.19). */
+	 * block words 198.., docs/sony-re/controller-tracking.md §B.2.19). */
 	int	rings;
 	int	ring_len[PSVR2_RING_MAX];
 	int	ring[PSVR2_RING_MAX][PSVR2_RING_LEN];
@@ -76,7 +76,7 @@ struct psvr2_solve_result {
 	int	led_blob[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX];	/* -1 = none */
 };
 
-/* Boot config values (RESEARCH.md §9.2), as Sony ships them. */
+/* Boot config values (docs/sony-re/overview.md §A.9.2), as Sony ships them. */
 struct psvr2_solver_cfg {
 	double	search_radius_px;	/* SEARCHRADIUS 3, scaled by 1/distance(m) */
 	double	pothole;		/* POTHOLETHRESHOLD 1 (px^2), scaled */
@@ -246,7 +246,7 @@ int psvr2_led_track_ex(const struct psvr2_solver_cfg *cfg,
  * mode 6; NULL = no IMU. in_track: booting while tracking (50 samples,
  * else 200). Below MININLIERSFORBOOT the pose needs gravity within 3 deg
  * (>= 5 inliers) or the orientation within 15 deg (>= 4), section 2.9 of
- * docs/sony-re/notdone.md. 0 = pose found.
+ * docs/sony-re/controller-tracking.md part B. 0 = pose found.
  */
 int psvr2_led_boot_ransac(const struct psvr2_solver_cfg *cfg,
 			  const struct psvr2_rig_camera cams[PSVR2_SOLVER_CAMS],
@@ -265,7 +265,7 @@ int psvr2_led_boot_oriented(const struct psvr2_solver_cfg *cfg,
 /*
  * Fill `model` with Sony's LED model for Sense hardware rev `rev` (feature
  * 0x20 +0x18; 1..6, anything else = the "other" model), as stored (right
- * hand). Sony mirrors it in x for the left hand (docs/sony-re/opticalpose.md
+ * hand). Sony mirrors it in x for the left hand (docs/sony-re/controller-tracking.md part C
  * §2b.2); the caller does that (steamvr optical_pose.cpp), not this loader.
  */
 void psvr2_led_model_load(int rev, struct psvr2_led_model *model);

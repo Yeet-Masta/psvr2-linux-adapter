@@ -41,7 +41,7 @@ enum psvr2_report_id {
 /*
  * Get 0x81: firmware info, 0x54 bytes. +0x00 is the headset software version,
  * +0x34 the board stage (2 EVA2 ... 9 PVT, 10 MP); 0 means the info is not
- * valid yet. Layout from docs/sony-re/headset.md section 2.4.
+ * valid yet. Layout from docs/sony-re/headset.md part A section 2.4.
  */
 #define PSVR2_FW_INFO_LEN		0x54
 #define PSVR2_FW_INFO_VERSION		0x00
@@ -92,7 +92,7 @@ enum psvr2_camera_mode {
 	 * the SLAM mode" note was a hex/decimal misread.) Frames pack three views
 	 * — one L8 254x508 + two R8G8B8, 8-byte interleaved, 256-byte header,
 	 * 16-byte line tail; see the reference driver's img_xfer_cb. Decoding
-	 * these into V4L2 is future work (docs/roadmap.md "Camera modes > 1").
+	 * these into V4L2 is future work (docs/development.md part C "Camera modes > 1").
 	 */
 	PSVR2_CAMERA_MODE_TRACKING		= 0x10,
 };
@@ -144,7 +144,7 @@ struct psvr2_imu_record {
  * 512-byte record per transfer, prefixed with ASCII "SLA". Position and
  * orientation are IEEE-754 little-endian floats; we carry them as raw __le32
  * so the kernel never touches the FPU. Field order is the wire order — the
- * consumer applies any axis/quaternion convention (see docs/protocol.md).
+ * consumer applies any axis/quaternion convention (see docs/hardware-protocol.md part B).
  */
 struct psvr2_slam_record {
 	char	slp_hdr[3];	/* "SLP" on hardware (not "SLA"); parser doesn't gate on it */

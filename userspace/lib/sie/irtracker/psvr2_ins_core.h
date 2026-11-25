@@ -3,7 +3,7 @@
  * Headset INS core kernels: strapdown propagation, rotation increment,
  * output prediction, mode-1 blend, sanity check, IMU calibration.
  *
- * Written from docs/sony-re/tracking.md §2.2, §5.1, §5.2 (behaviour only)
+ * Written from docs/sony-re/controller-tracking.md §A.2.2, §A.5.1, §A.5.2 (behaviour only)
  * and checked against the reference driver by
  * scripts/sony-re/difftest/t_irtracker_inscore.c. Unlike psvr2_ins_math.h,
  * quaternions here are stored the way the INS stores them: x, y, z, w

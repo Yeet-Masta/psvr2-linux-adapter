@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Write userspace/lib/psvr2_led_models.h from Sony's PSVR2 driver DLL.
 
-The seven Sense LED models (docs/RESEARCH.md 9.1): per hardware rev, the LED
+The seven Sense LED models (docs/sony-re/overview.md §A.9.1): per hardware rev, the LED
 count, the view-angle cone, per-LED position (mm, controller frame) and
 unit normal, and the LED rings the RANSAC boot samples from (block words
 198 = count, 199 + k = length of ring k, 231 + 32 k = its LED indices;
-docs/sony-re/notdone.md 2.19). Only the raw values are copied, floats as IEEE-754 bit patterns.
+docs/sony-re/controller-tracking.md §B.2.19). Only the raw values are copied, floats as IEEE-754 bit patterns.
 
   extract_led_header.py <driver_playstation_vr2_orig.dll> <out.h>
 """

@@ -7,7 +7,7 @@
  * Device facts (USB 054c:0cde, official Sony PSVR2 PC adapter) are derived from:
  *   - Sony SIE GPL OSS release (psvr2-sie-kernel-modules), device-side source
  *   - The Monado host-side PSVR2 driver (BSL-1.0), reverse-engineered protocol
- * See docs/references.md for full provenance.
+ * See docs/development.md part D for full provenance.
  */
 #ifndef _PSVR2_H_
 #define _PSVR2_H_
@@ -115,7 +115,7 @@ struct psvr2_ctrl;
 
 /*
  * Headset clock map (psvr2_ctrl.c), fitted from Get 0xde every 500 ms as
- * Sony's driver does (docs/sony-re/headset.md section 5.1). Samples are
+ * Sony's driver does (docs/sony-re/headset.md §A.5.1). Samples are
  * offsets host_ns - device_us * 1000 taken at the round-trip midpoint; the
  * map is their mean plus a least-squares drift over the last
  * PSVR2_CLOCK_RING samples.
@@ -138,7 +138,7 @@ struct psvr2_clock {
 
 /*
  * Factory calibration blobs from the IF10 "VD" stream (types 10..13), as
- * Sony's GenData thread collects them (docs/sony-driver-re.md, calibration
+ * Sony's GenData thread collects them (docs/sony-re/overview.md part B, calibration
  * stream). Exposed read-only in sysfs.
  */
 enum psvr2_calib_slot {

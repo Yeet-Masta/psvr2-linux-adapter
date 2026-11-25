@@ -83,7 +83,7 @@ uint64_t SteadyMicros()
 SenseHid::SenseHid( const SenseHidInfo &info ) : info_( info )
 {
 	psvr2_sync_init( &sync_, info_.bluetooth ? 1 : 0, info_.left ? 1 : 0 );
-	// libpad's reset values (ledsync.md 2.2): LED ALL OFF, preset-1 timing.
+	// libpad's reset values (docs/sony-re/controllers.md §C.2.2): LED ALL OFF, preset-1 timing.
 	led_.phase = sense::kLedPhaseAllOff;
 	led_.cycle_ns = 16683350;
 	std::memset( led_.led, 0xff, sizeof( led_.led ) );
@@ -108,7 +108,7 @@ bool SenseHid::Open()
 		static std::set<std::string> logged;
 		std::lock_guard<std::mutex> lock( logged_mutex );
 		if ( logged.insert( info_.path ).second )
-			DriverLog( "psvr2: cannot open %s: %s (udev rule installed? see docs/install.md)", info_.path.c_str(),
+			DriverLog( "psvr2: cannot open %s: %s (udev rule installed? see docs/getting-started.md part A)", info_.path.c_str(),
 			           strerror( errno ) );
 		return false;
 	}
@@ -180,7 +180,7 @@ bool SenseHid::ReadCalibration()
 
 	// Reading the report is also what switches the controller to full mode.
 	// Use the factory calibration the way Sony's libpad does (the DualSense
-	// formula; docs/sony-driver-re.md "IMU calibration"). If it is degenerate,
+	// formula; docs/sony-re/overview.md part B "IMU calibration"). If it is degenerate,
 	// fall back to Monado's fixed scales and let ImuFusion learn gyro bias.
 	if ( !ApplyCalibration( cal ) )
 	{
@@ -321,7 +321,7 @@ void SenseHid::Parse( const sense::InputCommon &in, SenseState &s )
 	s.accel = { ( in.accel[0] - accel_bias_.x ) * accel_scale_.x, ( in.accel[1] - accel_bias_.y ) * accel_scale_.y,
 	            ( in.accel[2] - accel_bias_.z ) * accel_scale_.z };
 
-	// Sony's mapping (docs/sony-re/sense.md 2.4): level 0..9 = 10n+5 %,
+	// Sony's mapping (docs/sony-re/controllers.md §B.2.4): level 0..9 = 10n+5 %,
 	// 10 = 100 %, 11..15 = 0 %; charge state 0..2, anything else an error.
 	const uint8_t charge = in.battery_state >> 4, level = in.battery_state & 0xf;
 	s.battery_valid = charge <= sense::kFull;
@@ -355,7 +355,7 @@ bool SenseHid::Write( const SenseOutput &out )
 		FillLedSync( st, SteadyMicros() );
 		// Sony's driver turns on libpad's first output switch once at
 		// start and never off, so for firmware revisions above 0x253 every
-		// report carries flag2 bit 1 (libpad.md "Sense output report",
+		// report carries flag2 bit 1 (docs/sony-re/controllers.md part A "Sense output report",
 		// step 8). Reports without it got no visible LED response
 		// (hardware test, 2026-11-18).
 		if ( fw_revision_ > 0x253 )
@@ -440,7 +440,7 @@ void SenseHid::FeedSyncFit( const sense::InputCommon &in )
 		return;
 	// The controller echoes the host_timestamp_us of the last output report
 	// and adds its own clock; libpad turns pairs of these into the
-	// host <-> controller time map (libpad.md, "Clock fit").
+	// host <-> controller time map (docs/sony-re/controllers.md part A, "Clock fit").
 	std::lock_guard<std::mutex> lock( led_mutex_ );
 	last_rx_us_ = SteadyMicros();
 	const uint32_t ticks = in.device_timestamp_ticks ? in.device_timestamp_ticks : in.imu_ticks;
@@ -493,7 +493,7 @@ SenseHid::LedSyncStatus SenseHid::LedSync()
 	return s;
 }
 
-// Capability probe (ledsync.md 2.2): Set 0x80 "80 13 22 00", then Get 0x81.
+// Capability probe (docs/sony-re/controllers.md §C.2.2): Set 0x80 "80 13 22 00", then Get 0x81.
 // A reply whose first byte is 0x81 means the controller supports the
 // tighter sync window (mode 2).
 uint8_t SenseHid::ProbeSyncMode()

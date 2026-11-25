@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Controller tracker: UKF process-noise helpers. See
- * docs/sony-re/ctrltracker.md ("Process noise"). Build with -ffp-contract=off.
+ * docs/sony-re/controller-tracking.md part H ("Process noise"). Build with -ffp-contract=off.
  */
 #ifndef PSVR2_SIE_CT_NOISE_H
 #define PSVR2_SIE_CT_NOISE_H

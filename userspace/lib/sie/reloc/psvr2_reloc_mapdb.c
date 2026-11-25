@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* See psvr2_reloc_mapdb.h and docs/sony-re/reloc.md ("Room map file"). */
+/* See psvr2_reloc_mapdb.h and docs/sony-re/room.md part B ("Room map file"). */
 #include "psvr2_reloc_mapdb.h"
 #include "psvr2_reloc_sha256.h"
 

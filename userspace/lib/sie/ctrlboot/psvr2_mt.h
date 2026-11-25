@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * MT19937 random generator with the reference driver's output schedule
- * (see docs/sony-re/ctrlboot.md, "Random generator"). Checked by
+ * (see docs/sony-re/controller-tracking.md part D, "Random generator"). Checked by
  * scripts/sony-re/difftest/t_ctrlboot_mt.c.
  */
 #ifndef PSVR2_CTRLBOOT_MT_H

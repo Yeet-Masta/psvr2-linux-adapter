@@ -25,7 +25,7 @@ uint64_t NowMicros()
 	                     .count() );
 }
 
-// Sony's built-in rig, variant 2 (opticalpose.md §2.1): rig <- camera,
+// Sony's built-in rig, variant 2 (docs/sony-re/controller-tracking.md §C.2.1): rig <- camera,
 // rotation given by columns, translation in mm.
 struct RigEntry
 {
@@ -38,7 +38,7 @@ const RigEntry kRigVariant2[4] = {
 	{ { 0.70941, -0.49374, 0.50295 }, { 0.49673, 0.85651, 0.14019 }, { -0.5, 0.15038, 0.85287 }, { -67.5, 32.1406, 80.106 } },
 };
 
-// IMU position in the LED-model frame, mm (pad +0x48, opticalpose.md §2b.1).
+// IMU position in the LED-model frame, mm (pad +0x48, docs/sony-re/controller-tracking.md §C.2b.1).
 const double kImuInModel[2][3] = {
 	{ 9.3727, -12.2481, -6.0039 },   // left
 	{ -20.0727, -12.2481, -6.0039 }, // right
@@ -263,7 +263,7 @@ void OpticalPose::LoadHand( int hand )
 		h.remap = -1;
 	// Sony always mirrors the left model in x: no model sets its own mirror
 	// byte (+0x31e is 0 in all seven), so the descriptor's 'X' applies
-	// (opticalpose.md §2b.2). Unmirrored, the left hand booted onto the
+	// (docs/sony-re/controller-tracking.md §C.2b.2). Unmirrored, the left hand booted onto the
 	// right controller on hardware.
 	h.mirror = hand == 0 ? 1 : 0;
 }
@@ -781,7 +781,7 @@ void OpticalPose::Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Po
 	const double *v = kImuInModel[hand];
 	const vrmath::Vec3 imu_pos = vrmath::Add(
 		world_model.pos, vrmath::Rotate( world_model.rot, { v[0] * 1e-3, v[1] * 1e-3, v[2] * 1e-3 } ) );
-	// Noise-zone inputs for the controller filter (docs/sony-re/ukf.md 4):
+	// Noise-zone inputs for the controller filter (docs/sony-re/controller-tracking.md §G.4):
 	// the IMU in the head frame, and the distance from the camera rig.
 	vrmath::Vec3 head_rel{ 0.0, -0.3, -0.4 };
 	vr::DriverPose_t head_at;

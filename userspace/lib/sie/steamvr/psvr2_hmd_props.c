@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * HMD properties written on Activate, see docs/sony-re/steamvr.md
+ * HMD properties written on Activate, see docs/sony-re/steamvr-and-display.md part A
  * ("HMD properties").
  */
 #include <math.h>

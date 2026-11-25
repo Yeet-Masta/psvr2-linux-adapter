@@ -2,7 +2,7 @@
 """Print the Sense controller LED models from the user's own copy of Sony's
 PSVR2 SteamVR driver, as JSON (millimetres, controller frame).
 
-Offsets are for the build documented in docs/sony-driver-re.md (PE timestamp
+Offsets are for the build documented in docs/sony-re/overview.md part B (PE timestamp
 1741940190). The script checks every header, so a different build fails
 loudly instead of printing garbage.
 

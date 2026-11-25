@@ -1,10 +1,10 @@
-# Topic: open gaps in the dev driver (`docs/sony-re/notdone.md`) — priority 7
+# Topic: open gaps in the dev driver (`controller-tracking.md` part B) — priority 7
 
 Read `common.md` first, with one change: the repo is
 `/home/yeetmasta/Claude/psvr2/src-dev`, so run `scripts/sony-re/trace.py`
-from there. Also read `docs/DEV-NOTES.md` ("Not done, and why"),
-`docs/sony-re/ledsync.md`, `docs/sony-re/tracking.md` and the
-camera-calibration section of `docs/sony-driver-re.md`.
+from there. Also read `development.md` part A ("Not done, and why"),
+`controllers.md` part C, `controller-tracking.md` part A and the
+camera-calibration section of `overview.md` part B.
 
 The dev driver implements everything except the items below. Each item is
 blocked by a specific unknown. Find exactly that unknown: offsets, formulas,
@@ -63,7 +63,7 @@ Find:
 
 ## 2. Controller pose solve, the minimum needed to build one
 
-From tracking.md §5.3–5.6, ctrlboot.md, ctrltracker.md, irtracker.md, fill
+From controller-tracking.md §A.5.3–5.6, controller-tracking.md part D, controller-tracking.md part H, headset.md part B, fill
 only these gaps:
 - **Blob ↔ LED association.** Gating radius and metric, use of the ellipse
   axes and angle, uniqueness rules, how the blob `id` and `link` fields are
@@ -104,7 +104,7 @@ only these gaps:
 - Check the BROAD accept rule: are the "3 consecutive" decodes counted per
   frame or per successful decode? The 11-frame window lines up with the
   code only once per cycle.
-- Correct `ledsync.md` §2.2: `FUN_1801cbeb0` calls the mode setter with
+- Correct `controllers.md` §C.2.2: `FUN_1801cbeb0` calls the mode setter with
   **2** when firmware < 0x1006d or the probe has failed 4 times. Confirm
   this, and say which firmware field `local_b4` is (the controller's
   feature 0x20 version or something else).
@@ -135,7 +135,7 @@ so in one line.
 
 ## Deliver
 
-Write `docs/sony-re/notdone.md` with one section per item above. For each
+Write `controller-tracking.md` part B with one section per item above. For each
 item give:
 - the answer, as tables of offsets and values, with formulas in pseudo-C;
 - confidence tags and function addresses;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* See psvr2_reloc_rp.h and docs/sony-re/reloc.md ("RP frame"). */
+/* See psvr2_reloc_rp.h and docs/sony-re/room.md part B ("RP frame"). */
 #include "psvr2_reloc_rp.h"
 
 #include <string.h>

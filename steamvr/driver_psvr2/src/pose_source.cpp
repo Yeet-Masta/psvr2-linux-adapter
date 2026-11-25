@@ -19,7 +19,7 @@
 //
 // OpenVR is right-handed: +x right, +y up, -z forward, metres. OpenXR uses the
 // same convention, so we mirror the Monado PSVR2 driver's process_slam_record
-// remap verbatim (see docs/references.md) — adopted as the reference after the
+// remap verbatim (see docs/development.md part D) — adopted as the reference after the
 // in-headset pose-guide superseded the earlier hand-timed capture.
 //
 // The tracker's native upright is additionally rolled 90deg from OpenVR's, so
@@ -167,7 +167,7 @@ bool PoseSource::ReadSlam( vr::DriverPose_t &out )
 	// The SLAM pose is the IMU rig. RemapPose already folds Sony's
 	// driver-from-head rotation into qRotation, so only Sony's lever arm is
 	// left: in head axes the head origin sits 2.08 cm above and 9.255 cm
-	// behind the IMU (docs/RESEARCH.md §5.2).
+	// behind the IMU (docs/sony-re/overview.md §A.5.2).
 	out.qWorldFromDriverRotation.w = 1.0;
 	out.qDriverFromHeadRotation.w = 1.0;
 	out.vecDriverFromHeadTranslation[1] = 0.02080;

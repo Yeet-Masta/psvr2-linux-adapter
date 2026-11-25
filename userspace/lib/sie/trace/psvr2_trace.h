@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * VrTrace capture files: readers/writers for every stream file Sony's
- * VrTrace writes (docs/sony-re/trace.md section 4), the headset image
+ * VrTrace writes (docs/sony-re/vrtrace.md §4), the headset image
  * header check, the 'ST' SLAM-trace frame table of contents, and our own
  * "P2TR" container for USB-level captures used by replay tests (section 7).
  *

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Entry point dlopen'd by SteamVR's vrserver. Mirrors the OpenVR SDK's
-// `simplehmd` sample driver — see docs/steamvr.md and docs/references.md.
+// `simplehmd` sample driver — see docs/getting-started.md part C and docs/development.md part D.
 #include <cstring>
 
 #include "device_provider.h"

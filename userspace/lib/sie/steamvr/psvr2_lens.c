@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Lens geometry and hidden-area mesh, see docs/sony-re/steamvr.md
+ * Lens geometry and hidden-area mesh, see docs/sony-re/steamvr-and-display.md part A
  * ("Lens geometry", "Hidden-area mesh").
  */
 #include <math.h>

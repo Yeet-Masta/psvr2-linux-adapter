@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Hand skeleton bind pose, see docs/sony-re/steamvr.md ("Hand skeleton").
+ * Hand skeleton bind pose, see docs/sony-re/steamvr-and-display.md part A ("Hand skeleton").
  */
 #include <math.h>
 #include <string.h>

@@ -152,7 +152,7 @@ int psvr2_set_rumble(psvr2_t *p, int hz);
 int psvr2_get_lens_distortion(psvr2_t *p, float out[8]);
 
 /*
- * Sony's lens model (docs/sony-re/display.md 5.2): maps the output-panel
+ * Sony's lens model (docs/sony-re/steamvr-and-display.md §B.5.2): maps the output-panel
  * coordinate (u, v) in [0, 1] of eye 0 (left) or 1 (right) to the render
  * coordinate to sample, per colour channel: out[0..1] red, [2..3] green,
  * [4..5] blue.
@@ -253,7 +253,7 @@ int psvr2_cam_calib_parse(const void *blob, unsigned int len,
 			  struct psvr2_cam_calib *out);
 
 /*
- * Tracking-camera model (docs/RESEARCH.md §8). OpenCV's rational model with
+ * Tracking-camera model (docs/sony-re/overview.md §A.8). OpenCV's rational model with
  * two more orders in numerator and denominator, tangential p1/p2 and tilt
  * tau_x/tau_y; thin-prism s1..s4 exist in the calibration but Sony ignores
  * them. Intrinsics are rescaled to a 508 x 508 model image, as Sony does.

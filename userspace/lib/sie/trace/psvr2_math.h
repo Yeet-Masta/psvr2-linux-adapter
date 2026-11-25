@@ -2,7 +2,7 @@
 /*
  * Shared geometry helpers, behaviour-identical to the PSVR2 SteamVR
  * driver's math module (Sony VA 0x180160000-0x18016ffff, build 1741940190).
- * Spec: docs/sony-re/trace.md section 8. Every function is a plain C11
+ * Spec: docs/sony-re/vrtrace.md section 8. Every function is a plain C11
  * leaf: copy this header and psvr2_math.c into another subsystem freely.
  * Build with -ffp-contract=off (no FMA); the results are then bit-exact
  * with Sony's (see scripts/sony-re/status/trace.tsv for each function).
@@ -113,7 +113,7 @@ void psvr2_math_mat4_translation(float m[16], float x, float y, float z);
  * In-place 4x4 inverse by adjugate / determinant, no singularity check
  * (det 0 gives inf/NaN). Each cofactor is three positive and three
  * negative triple products in a fixed grouping; the determinant is 12
- * positive then 12 negative quadruple products (docs/sony-re/trace.md
+ * positive then 12 negative quadruple products (docs/sony-re/vrtrace.md
  * section 8). Sony 0x18016f590.
  */
 void psvr2_math_mat4_invert(float m[16]);

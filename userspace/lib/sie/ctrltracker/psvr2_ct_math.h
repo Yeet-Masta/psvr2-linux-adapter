@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Controller tracker: small vector, quaternion and matrix kernels.
- * Written from docs/sony-re/ctrltracker.md; checked bit-for-bit by
+ * Written from docs/sony-re/controller-tracking.md part H; checked bit-for-bit by
  * scripts/sony-re/difftest/t_ctrltracker_math.c. Build with -ffp-contract=off.
  *
  * Quaternions are x, y, z, w. Matrices are column-major with 4-float

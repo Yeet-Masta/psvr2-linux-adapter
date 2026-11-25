@@ -2,7 +2,7 @@
 /*
  * PSVR2 relocaliser input ("RP" record, USB EP 0x8a).
  *
- * Written from the behavioural spec in docs/sony-re/reloc.md and checked
+ * Written from the behavioural spec in docs/sony-re/room.md part B and checked
  * bit-for-bit against the reference driver by scripts/sony-re/difftest.
  */
 #ifndef PSVR2_SIE_RELOC_RP_H
@@ -13,7 +13,7 @@
 /* Bytes of the unpacked relocaliser frame. */
 #define PSVR2_RP_FRAME_SIZE 0x9b040
 
-/* Byte offsets inside the unpacked frame (see reloc.md, "RP frame"). */
+/* Byte offsets inside the unpacked frame (see docs/sony-re/room.md part B, "RP frame"). */
 #define PSVR2_RP_F_HEADER      0x00000 /* u32 timestamp-ish, u32 */
 #define PSVR2_RP_F_KP_UV       0x00008 /* 324 x { u16 u, u16 v } */
 #define PSVR2_RP_F_KP_DESC     0x00518 /* 162 x 128 bytes */

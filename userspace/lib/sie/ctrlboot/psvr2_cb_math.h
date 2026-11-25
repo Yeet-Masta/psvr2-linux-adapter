@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Small vector / statistics helpers of the controller boot stage.
- * Spec: docs/sony-re/ctrlboot.md ("Math helpers"). Matrices are 4 columns
+ * Spec: docs/sony-re/controller-tracking.md part D ("Math helpers"). Matrices are 4 columns
  * of 4 floats (column-major, translation in column 3). Several helpers use
  * fused multiply-add exactly where the reference does.
  */

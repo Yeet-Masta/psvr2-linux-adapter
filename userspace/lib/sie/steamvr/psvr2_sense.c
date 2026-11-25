@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Sense controller properties and input components, see
- * docs/sony-re/steamvr.md ("Sense controller").
+ * docs/sony-re/steamvr-and-display.md part A ("Sense controller").
  */
 #include <stdio.h>
 #include <string.h>

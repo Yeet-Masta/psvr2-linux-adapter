@@ -2,7 +2,7 @@
 // Finds the blinking sync LED among a camera's blobs (our own method).
 //
 // Sony feeds LED sync the weight of the blob its pose-driven association
-// assigned to the sync LED (docs/RESEARCH.md §7.8). Before a controller has
+// assigned to the sync LED (docs/sony-re/overview.md §A.7.8). Before a controller has
 // a pose there is nothing to associate, and a lit room gives 50-80 steady
 // blobs per camera (hardware test, 2026-11-18). This class tracks blob
 // positions over the last kFrames frames and picks the one whose on/off

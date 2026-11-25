@@ -281,7 +281,7 @@ void Psvr2ControllerDriver::Disconnected()
 
 void Psvr2ControllerDriver::OnHaptic( const vr::VREvent_HapticVibration_t &h )
 {
-	// Thresholds as Sony's driver applies them (docs/sony-re/sense.md 5.1):
+	// Thresholds as Sony's driver applies them (docs/sony-re/controllers.md §B.5.1):
 	// a zero amplitude or frequency stops the pulse, but no earlier than
 	// 80 ms after it started; events weaker than 0.049 are ignored; every
 	// pulse lasts at least 80 ms.
@@ -790,7 +790,7 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	double time_offset = -prediction_s_;
 	if ( ukf_active )
 	{
-		// Sony (opticalpose.md 5): the filter while fixes are fresh, then the
+		// Sony (docs/sony-re/controller-tracking.md §C.5): the filter while fixes are fresh, then the
 		// last fix position held; the rotation stays filter-driven.
 		if ( now_us < ukf_.LastFixUs() + ukf_hold_us_ )
 		{
@@ -806,7 +806,7 @@ vr::DriverPose_t Psvr2ControllerDriver::BuildPose()
 	}
 	else if ( o.have )
 	{
-		// Sony (opticalpose.md §5): extrapolate the newest optical position
+		// Sony (docs/sony-re/controller-tracking.md §C.5): extrapolate the newest optical position
 		// for up to 0.3 s, then hold it; the rotation stays IMU-driven.
 		const double age = double( int64_t( now_us - o.us ) ) * 1e-6;
 		if ( age < 0.3 )

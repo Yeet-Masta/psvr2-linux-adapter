@@ -232,7 +232,7 @@ static int run_model(int rev)
 	int track_ok = 0, track_wrong = 0, boot_ok = 0, boot_wrong = 0;
 	int rp_ok = 0, rp_wrong = 0, rn_ok = 0, rn_wrong = 0, rp_gross = 0, rn_gross = 0;
 	/* Blobs for LEDs < 100 deg off-axis: that gives 28 matches per pose,
-	 * as on a recorded hardware frame (28-30, DEV-NOTES.md). LED_VA sets it. */
+	 * as on a recorded hardware frame (28-30, docs/development.md part A). LED_VA sets it. */
 	const double max_va = getenv("LED_VA") ? atof(getenv("LED_VA")) : 100;
 	double matched_sum = 0, support_sum = 0, ransac_s = 0;
 	int support_low = 0, few_n = 0, few_ok = 0, few_wrong = 0, sticky_n = 0, sticky_ok = 0;

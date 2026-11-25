@@ -22,7 +22,7 @@ const char *LedSyncer::Name( Phase p )
 	return p <= kAllOff ? names[p] : "?";
 }
 
-// ledsync.md §2.4: step and per-phase search windows (µs), preset 1 / 2.
+// docs/sony-re/controllers.md §C.2.4: step and per-phase search windows (µs), preset 1 / 2.
 LedSyncer::Preset LedSyncer::Timing( int preset )
 {
 	if ( preset == 2 )
@@ -30,7 +30,7 @@ LedSyncer::Preset LedSyncer::Timing( int preset )
 	return { 105, 4200, 5250, 3150, 1260 };
 }
 
-// ---- commands (ledsync.md §2.1) -------------------------------------------
+// ---- commands (docs/sony-re/controllers.md §C.2.1) -------------------------------------------
 
 void LedSyncer::SendPhase( uint8_t phase, uint8_t period, const uint8_t *leds, bool with_value, int32_t value )
 {
@@ -65,7 +65,7 @@ void LedSyncer::SendDrift( double rate, bool with_offset, int32_t offset_us )
 	retries_ = 0;  // a successful correction resets the retry counter (§4.2)
 }
 
-// ---- drift fit (ledsync.md §5.5) ------------------------------------------
+// ---- drift fit (docs/sony-re/controllers.md §C.5.5) ------------------------------------------
 
 void LedSyncer::DriftFit::Push( uint64_t now_us, double value )
 {
@@ -250,7 +250,7 @@ void LedSyncer::Frame( uint64_t now_us, int preset, const LedObservation &obs )
 	}
 }
 
-// ---- per-camera history (RESEARCH.md §7.8) ---------------------------------
+// ---- per-camera history (docs/sony-re/overview.md §A.7.8) ---------------------------------
 
 void LedSyncer::Push( const LedObservation &obs )
 {
@@ -452,7 +452,7 @@ void LedSyncer::Broad( uint64_t now_us, const Preset &ps, const LedObservation &
 		Enter( kPrescan, now_us );
 }
 
-// ---- BG (RESEARCH.md §7.10) ----------------------------------------------
+// ---- BG (docs/sony-re/overview.md §A.7.10) ----------------------------------------------
 
 // The 20-frame window must carry the framing marker (frames 0-3 lit, dark,
 // dark, lit; frames 17-19 lit, dark, lit). Frames 4..16 hold the sweep; x

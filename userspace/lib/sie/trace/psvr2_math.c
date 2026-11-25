@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Shared geometry helpers; see psvr2_math.h and docs/sony-re/trace.md.
+ * Shared geometry helpers; see psvr2_math.h and docs/sony-re/vrtrace.md.
  * Sums are evaluated in index order (k = 0, 1, 2, ...), which is what makes
  * the results bit-identical; keep that order when editing.
  */

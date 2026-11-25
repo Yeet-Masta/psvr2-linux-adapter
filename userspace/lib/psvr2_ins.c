@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Headset INS orchestration (see psvr2_ins.h). Sony's sequence is
- * FUN_18017cdb0 (tracking.md §3.1); the numeric kernels are the bit-exact
+ * FUN_18017cdb0 (docs/sony-re/controller-tracking.md §A.3.1); the numeric kernels are the bit-exact
  * ports in sie/irtracker/psvr2_ins_core.c.
  */
 #include "psvr2_ins.h"

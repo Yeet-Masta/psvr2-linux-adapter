@@ -38,7 +38,7 @@ entry points below, and write down what it does and why.
 
 ## Read first
 
-1. `docs/sony-driver-re.md`: the protocol already decoded (USB transport,
+1. `overview.md` part B: the protocol already decoded (USB transport,
    reports, endpoints, LED sync, calibration). Do not redo it. Extend it and
    correct it.
 2. The earlier per-subsystem notes in `docs/sony-re/*.md` that your topic
@@ -88,10 +88,12 @@ find the few decisions it makes and describe those.
   can be checked. Cite addresses only; never quote Sony's code.
 - Never commit anything, and never switch branch. Never send Sony code or
   data off this machine. Bundles stay in `/home/yeetmasta/psvr2-re-work/`.
-- Write only your own topic file `docs/sony-re/<topic>.md`. Other sessions
-  edit other files in this folder at the same time. Put corrections to
-  `docs/sony-driver-re.md` in a section "Corrections to the main doc" in
-  your file; do not edit the main doc.
+- Write only the topic file you were given (one of the category files in
+  `docs/sony-re/`). Other sessions edit other files at the same time. When
+  you find a statement elsewhere is wrong, list it (where, old, correct) at
+  the end of your report; the merging session fixes it in place and adds a
+  row to the errata table, `overview.md` §A.12. Never add a separate
+  "Corrections" section.
 - Save often. Write each finding into the doc as soon as you confirm it, so
   the work survives if you stop.
 

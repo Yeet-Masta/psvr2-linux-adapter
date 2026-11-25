@@ -1,7 +1,7 @@
 #!/bin/sh
 # Decompile Sony's PSVR2 SteamVR driver with Ghidra (headless) for
 # interoperability research. Output stays local: it is Sony's code and must
-# not be committed. Findings go to docs/sony-driver-re.md in our own words.
+# not be committed. Findings go to docs/sony-re/overview.md part B in our own words.
 #
 # usage: decompile.sh <ghidra_install_dir> <driver_playstation_vr2(_orig).dll> <out_dir>
 # Produces <out_dir>/decomp.c (every function) and strings_xref.tsv

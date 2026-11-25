@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Controller pose from the headset's LED blobs (docs/sony-re/opticalpose.md).
+// Controller pose from the headset's LED blobs (docs/sony-re/controller-tracking.md part C).
 //
 // Per LD frame, for every controller whose LEDs are synced (STABLE):
 //   1. place the camera rig in the world: head pose at the frame time,

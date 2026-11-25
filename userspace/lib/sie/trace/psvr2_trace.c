@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* VrTrace file formats; see psvr2_trace.h and docs/sony-re/trace.md. */
+/* VrTrace file formats; see psvr2_trace.h and docs/sony-re/vrtrace.md. */
 #include <string.h>
 #include "psvr2_trace.h"
 

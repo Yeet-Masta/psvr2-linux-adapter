@@ -1,11 +1,197 @@
-# SteamVR / OpenVR driver (`driver_psvr2`)
+# Getting started
+
+Building, installing and running the PS VR2 Linux driver.
+
+Parts:
+
+- [Part A: Install](#part-a-install)
+- [Part B: Display bring-up](#part-b-display-bring-up)
+- [Part C: SteamVR driver](#part-c-steamvr-driver)
+
+---
+
+## Part A: Install
+
+Three ways to install, from quickest-to-try to most integrated. All need your
+distro's **kernel headers** for the running kernel and a toolchain
+(`gcc`/`make`).
+
+### A.1 Build and load manually (no install)
+
+Good for development and a quick try:
+
+```bash
+make -C kernel
+sudo insmod kernel/psvr2.ko
+make -C userspace/tools          # build the smoke-test tools
+```
+
+Unload with `sudo rmmod psvr2`. Device-node permissions (IIO, input,
+`/dev/psvr2-pose`, `/dev/psvr2-gaze`, `/dev/videoN`) need the udev rules from
+the install paths below, or run the tools as root.
+
+### A.2 DKMS install (any distro)
+
+Installs the module so it persists across reboots and rebuilds on kernel
+upgrades, and installs the udev rules:
+
+```bash
+./install.sh             # everything below; asks for sudo where needed
+```
+
+Parts (run one or several by name, e.g. `./install.sh kernel udev`):
+
+| Part | What |
+|------|------|
+| `kernel` | psvr2 module via DKMS (sources only copied to `/usr/src/psvr2-<ver>`), loaded right away |
+| `udev` | `kernel/99-psvr2.rules` to `/etc/udev/rules.d` (device access, IMU buffer for the headset INS, Sense hidraw) |
+| `group` | adds you to `input` (log out and back in once) |
+| `steamvr` | builds `driver_psvr2` and symlinks it into SteamVR's `drivers/` (`steamvr/install-steamvr-driver.sh`) |
+| `settings` | `"displayPortTrainingMode": 1` in `steamvr.vrsettings` ([part C](#part-c-steamvr-driver)); a `.psvr2.bak` copy is kept |
+| `lib` | libpsvr2 to `/usr/local` (not default; the driver links it statically) |
+
+Iterating: `git pull && ./install.sh --update` rebuilds the DKMS module only
+when `kernel/` changed (content hash in `/var/lib/psvr2`) and then reloads it,
+re-installs the udev rules only when they changed, and rebuilds the SteamVR
+driver incrementally (the symlink makes the new build live on the next
+SteamVR start). `--no-reload` keeps the running module. Close SteamVR first:
+it rewrites `steamvr.vrsettings` on exit and holds the module.
+
+Driver settings: `./install.sh --set key=value` writes into the
+`driver_psvr2` section of `steamvr.vrsettings` (defaults in
+`steamvr/driver_psvr2/resources/settings/default.vrsettings`); `--set -key`
+removes an override.
+
+`./uninstall.sh` removes the module, rules, SteamVR registration and the
+settings keys it added (and the `driver_psvr2` overrides); `--all` also libpsvr2
+and the install state. The `input` group membership stays. Requires `dkms`,
+`cmake`, a C/C++ toolchain and `python3` (for the settings edit).
+
+### A.3 Arch package
+
+```bash
+cd packaging
+makepkg -si
+```
+
+This builds `psvr2-dkms`; the `dkms` pacman hooks compile the module on install
+and rebuild it on every kernel upgrade. Udev rules are installed to
+`/usr/lib/udev/rules.d/`.
+
+### Display (separate from the module)
+
+The headset's panel is driven by your GPU's DRM stack, not this module. On AMD
+you likely need the DSC/FEC EDID quirk:
+
+```bash
+patches/apply-amdgpu-dsc.sh /path/to/linux   # then rebuild amdgpu/kernel
+```
+
+Then bring the panel up (X11):
+
+```bash
+userspace/tools/psvr2-display-up.sh
+```
+
+See [part B](#part-b-display-bring-up) for AMD/NVIDIA/Wayland details.
+
+### Verifying
+
+```bash
+dmesg | grep psvr2                   # probe messages per interface
+lsusb -t                             # audio still on snd-usb-audio
+ls /sys/bus/iio/devices/             # iio:deviceN named "psvr2_imu"
+ls /dev/psvr2-* /dev/video*          # pose/gaze char devs + camera node
+```
+
+Then run the tools in `userspace/tools/` (`psvr2-imu-test`, `psvr2-pose-test`,
+`psvr2-gaze-test`) or standard utilities (`evtest`, `v4l2-ctl`, `iio_readdev`).
+
+### libpsvr2 (optional)
+
+A C library wrapping the device nodes for application/runtime use:
+
+```bash
+make -C userspace/lib                 # builds libpsvr2.a/.so + psvr2-monitor
+sudo make -C userspace/lib install    # installs header, libs, and pkg-config
+```
+
+Then build against it with `pkg-config --cflags --libs libpsvr2`. See
+`userspace/lib/psvr2-monitor.c` for a worked example.
+
+---
+
+## Part B: Display bring-up
+
+The PSVR2 panel is a standard DisplayPort 1.4 sink — **not** driven by this
+project's kernel module. It is brought up by the GPU's DRM/KMS driver. The panel
+runs at `4000x2040 @ 119.88 Hz` and requires **DSC** (Display Stream Compression)
+and **FEC**, which some drivers do not enable for this sink without a quirk.
+
+This is a separate track from the USB module: the IMU/buttons module in
+`kernel/` works regardless of whether the display is lit (though see the open
+question about whether the IMU streams before the DP link is up — noted in
+[development.md part C](development.md#part-c-status-and-roadmap)).
+
+### AMD (amdgpu)
+
+`patches/amdgpu-psvr2-dsc-fec.patch` forces DSC 1.1 + FEC capabilities for the
+PSVR2 EDID (manufacturer `0xD94D`, products `0xA205`/`0xC207`, plus the generic
+MTK EDID `0x8B36:0x3612`). Without it, amdgpu may mis-detect the EDID and bring
+the headset up at the wrong resolution.
+
+Apply against a kernel source tree and rebuild amdgpu (or the kernel). The
+helper script applies it (with a dry-run check first) to a git or tarball tree:
+
+```
+patches/apply-amdgpu-dsc.sh /path/to/linux
+# then rebuild amdgpu / the kernel and reboot
+```
+
+### Bringing the panel up (X11)
+
+The headset enumerates as a DRM non-desktop / lease device, so a normal desktop
+won't draw to it. Under X11, promote it to a normal output with the helper
+(it auto-detects the PSVR2 connector by its `4000x2040` mode):
+
+```
+userspace/tools/psvr2-display-up.sh          # enable as a normal display
+userspace/tools/psvr2-display-up.sh --off    # hand it back as a lease output
+```
+
+Equivalent manual steps (replace `DP-N` with whatever connector the headset
+enumerates as — the one advertising the `4000x2040` mode):
+
+```
+xrandr --output DP-N --set non-desktop 0
+xrandr --output DP-N --auto
+```
+
+Under **Wayland** this is compositor-specific (the connector stays a
+non-desktop/lease output for VR runtimes); the helper does not handle it.
+
+### NVIDIA
+
+NVIDIA GPUs are largely untested for this sink. The proprietary driver handles
+DSC internally; `nouveau` DSC support is unverified here. This needs hardware
+testing — tracked in [development.md part C](development.md#part-c-status-and-roadmap).
+
+### Intel (reference)
+
+Community reports indicate Intel Alder Lake iGPUs bring the 4K VR mode up
+automatically over a USB-C→DP path, which has been one of the more reliable
+display paths so far.
+
+---
+
+## Part C: SteamVR driver
 
 A SteamVR driver that makes the PSVR2 appear as a native HMD. SteamVR (`vrserver`)
 is Valve's runtime — this is a driver plugin it loads, not a replacement. The
 driver is pure userspace and consumes the kernel module's device nodes through
 **libpsvr2**; it needs no kernel changes.
 
-## Status
+### Status
 
 - **Display** — direct mode via DRM leasing: the runtime leases the headset's
   display connector and lights the 4000×2040 panel while the desktop keeps
@@ -58,7 +244,7 @@ driver is pure userspace and consumes the kernel module's device nodes through
   estimated, not calibrated, so the 3D view is approximate. Turn it off with
   `passthrough_camera: false`.
 
-## Build & install
+### Build & install
 
 ```sh
 # Builds libpsvr2 + the driver and registers it with SteamVR (via a symlink).
@@ -75,7 +261,7 @@ pick up changes — no reinstall needed.
 The driver is built against the OpenVR SDK's `openvr_driver.h` and links
 `libpsvr2` statically, so the resulting `.so` is self-contained.
 
-## Running on Wayland
+### Running on Wayland
 
 Direct mode works on a Wayland session (validated on KDE Plasma 6 / KWin) — no
 TTY or X11 required — with two settings:
@@ -106,7 +292,7 @@ TTY or X11 required — with two settings:
 With both, the panel lights in direct mode with correct color and 6DoF tracking
 while the desktop keeps running on your other monitors.
 
-## How direct mode works
+### How direct mode works
 
 For a standard DisplayPort-connected HMD, the driver does **not** do the leasing
 or the rendering itself — SteamVR's compositor does. In particular it does **not**
@@ -127,7 +313,7 @@ desktop session keeps running. It is controlled by the `direct_mode` setting
 (default `true`) in `default.vrsettings`; setting it `false` selects an
 extended-desktop fallback instead.
 
-## Components
+### Components
 
 ```
 driver_psvr2/
@@ -165,7 +351,7 @@ thread reads 6DoF samples, remaps them into the OpenVR frame, and submits them v
 `TrackedDevicePoseUpdated()`. The display component reports the panel geometry
 (4000×2040 split into two eyes) and its EDID identity.
 
-## Known limitations
+### Known limitations
 
 - **Multi-GPU systems.** If the headset is wired to a different GPU than the one
   SteamVR renders on, the compositor can fail to acquire the display. Point
@@ -178,7 +364,7 @@ thread reads 6DoF samples, remaps them into the OpenVR frame, and submits them v
 - **Controller position (6DoF).** Sony's PC driver finds the controllers by
   their LED constellation in the headset cameras; that camera mode, the LED
   sync handshake and the tracker are not implemented here yet (see
-  [roadmap.md](roadmap.md)). Until then the controllers rotate correctly and
+  [development.md part C](development.md#part-c-status-and-roadmap)). Until then the controllers rotate correctly and
   sit at an arm-model position relative to your head; yaw can drift slowly,
   which the Create/Options hold corrects.
 - **Ignition / PSVR2 Toolkit.** They run Sony's Windows driver, which drives the

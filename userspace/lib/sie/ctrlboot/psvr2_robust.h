@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Robust loss functions (IRLS weights) used by the controller pose solver.
- * Written from docs/sony-re/ctrlboot.md; checked against the reference
+ * Written from docs/sony-re/controller-tracking.md part D; checked against the reference
  * driver by scripts/sony-re/difftest/t_ctrlboot_robust.c.
  */
 #ifndef PSVR2_CTRLBOOT_ROBUST_H

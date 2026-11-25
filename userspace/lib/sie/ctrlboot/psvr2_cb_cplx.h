@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Complex-number, 2x2 and small block helpers of the controller boot stage.
- * Spec: docs/sony-re/ctrlboot.md ("Complex and 2x2 helpers"). The 2x2
+ * Spec: docs/sony-re/controller-tracking.md part D ("Complex and 2x2 helpers"). The 2x2
  * inverse and 2-D normalise use the SSE reciprocal estimates like the
  * reference, so they match it only on the same CPU.
  */

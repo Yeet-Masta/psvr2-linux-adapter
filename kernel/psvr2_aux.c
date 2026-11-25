@@ -4,7 +4,7 @@
  *
  * The headset's tracking pipeline needs these bulk IN endpoints read all the
  * time, as Sony's driver does with one reader thread per interface
- * (docs/sony-re/headset.md section 2.1):
+ * (docs/sony-re/headset.md §A.2.1):
  *
  *   IF8  EP 0x89  "LD" LED-detector blobs     -> /dev/psvr2-ld
  *   IF9  EP 0x8a  "RP" relocaliser keyframes  -> /dev/psvr2-rp
@@ -297,7 +297,7 @@ static void psvr2_aux_log(struct psvr2_aux *aux, const u8 *p, unsigned int len)
 }
 
 /*
- * IF10 "VD" records (docs/sony-driver-re.md, calibration stream): "VD", u16
+ * IF10 "VD" records (docs/sony-re/overview.md part B, calibration stream): "VD", u16
  * version 0x0200, u32 record size, u16 entry count at +8, then from +0x20
  * entries of {u32 type, u32 size, u32 offset from record start}. Types
  * 10..13 are kept for userspace.
@@ -419,7 +419,7 @@ static void psvr2_aux_complete(struct urb *urb)
 			aux->ifnum, ret);
 }
 
-/* Sony's per-interface connect hooks (docs/sony-re/headset.md 2.1, 3.2). */
+/* Sony's per-interface connect hooks (docs/sony-re/headset.md §A.2.1, 3.2). */
 static void psvr2_aux_connect(struct psvr2_aux *aux, struct usb_interface *intf)
 {
 	struct psvr2_device *psvr2 = aux->psvr2;

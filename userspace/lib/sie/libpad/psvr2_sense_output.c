@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Sense controller output-report fields (docs/sony-re/libpad.md, "Sense output report"). */
+/* Sense controller output-report fields (docs/sony-re/controllers.md part A, "Sense output report"). */
 #include <string.h>
 #include "psvr2_libpad.h"
 

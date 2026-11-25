@@ -1,6 +1,6 @@
-# Topic: display and SteamVR device (`docs/sony-re/display.md`) — priority 2
+# Topic: display and SteamVR device (`steamvr-and-display.md` part B) — priority 2
 
-Read `common.md` first. Earlier notes: `docs/sony-re/steamvr.md`.
+Read `common.md` first. Earlier notes: `steamvr-and-display.md` part A.
 
 Scope: what Sony reports to SteamVR and how it drives the display. That
 covers EDID detection and 90/120 Hz selection (report `0x29`/`0xa9`,

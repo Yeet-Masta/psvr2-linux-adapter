@@ -2,7 +2,7 @@
 /*
  * PSVR2 relocaliser room-map database ("MD" image, sceMapDb.bin).
  *
- * The map is one flat fixed-size image (layout in docs/sony-re/reloc.md,
+ * The map is one flat fixed-size image (layout in docs/sony-re/room.md part B,
  * "Room map file"). These helpers operate on such an image; results and
  * every byte they write match the reference driver (checked by
  * scripts/sony-re/difftest/t_reloc_mapdb.c).
@@ -134,6 +134,6 @@ void psvr2_mapdb_edge_find(const psvr2_mapdb *db, int32_t a, int32_t b, int32_t 
 int psvr2_mapdb_summary(const psvr2_mapdb *db, uint8_t *out);
 void psvr2_mapdb_edge_copy(uint8_t *dst, const uint8_t *src);
 
-/* Text obfuscation used by the logs (see reloc.md). */
+/* Text obfuscation used by the logs (see docs/sony-re/room.md part B). */
 const char *psvr2_mapdb_obfuscate(psvr2_mapdb *db, const char *text);
 #endif

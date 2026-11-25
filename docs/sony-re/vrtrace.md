@@ -3,7 +3,7 @@
 Behavioural spec, written from the decompile in our own words. VAs are in
 the documented build (image base `0x180000000`). Status per function is in
 [`scripts/sony-re/status/trace.tsv`](../../scripts/sony-re/status/trace.tsv).
-Confidence tags as in [sony-driver-re.md](../sony-driver-re.md).
+Confidence tags as in [overview.md part B](overview.md#part-b-driver-architecture-and-code-map).
 
 ## 1. What VrTrace does on PC (summary) [sure]
 
@@ -72,7 +72,7 @@ is retried up to 3 times, 100 ms apart, while the core answers
 `FUN_18010e860`, `FUN_18010ec10`) [sure]
 
 Capture type → headset camera mode sent with `FUN_180127ec0` (control
-report `0x0b`, see the main doc), then a 100 ms sleep:
+report `0x0b`, see overview.md part B), then a 100 ms sleep:
 
 | type | 0 | 1 | 2 | 3 | 4 | 1000 | 1001 | 1002 | 1003 | 1004 |
 |------|---|---|---|---|---|------|------|------|------|------|
@@ -108,7 +108,7 @@ subsystems (INS, controller tracker, libpad, relocaliser).
 | `plugin_version.bin` | NUL-free ASCII plugin version string (manager `+0x918`), written once per capture session | `FUN_180114030` |
 | `computer_spec.bin` | Text: `Windows version: %lu.%lu\n` (from `RtlGetVersion`) or `Windows version: Unknown\n`, then `Graphic Board: %s\n` / `Graphic Board: Unknown\n` | `FUN_180112dd0` |
 | `hmd_hw_version.bin`, `hmd_sw_version.bin` | Headset HW / FW version blocks | `FUN_180113040` |
-| `imu_calib.bin` (0x78), `imu_set_calib.bin` (0x34), `vrt_camera_calib_vrtrace0.bin`, `vrt_camera_calib_vrtrace1.bin` | The raw `VD` entries types 12, 13, 10, 11 (main doc, calibration stream) | `FUN_1801132a0` |
+| `imu_calib.bin` (0x78), `imu_set_calib.bin` (0x34), `vrt_camera_calib_vrtrace0.bin`, `vrt_camera_calib_vrtrace1.bin` | The raw `VD` entries types 12, 13, 10, 11 (overview.md part B, calibration stream) | `FUN_1801132a0` |
 
 ### 4.2 Stream files
 

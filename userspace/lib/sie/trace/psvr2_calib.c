@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Calibration blob parser; see psvr2_calib.h and docs/sony-re/trace.md section 12. */
+/* Calibration blob parser; see psvr2_calib.h and docs/sony-re/vrtrace.md section 12. */
 #include <string.h>
 #include "psvr2_calib.h"
 

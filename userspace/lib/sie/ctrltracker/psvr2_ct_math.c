@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* See psvr2_ct_math.h and docs/sony-re/ctrltracker.md. */
+/* See psvr2_ct_math.h and docs/sony-re/controller-tracking.md part H. */
 #include "psvr2_ct_math.h"
 
 #include <math.h>

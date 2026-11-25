@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Per-pad input sample ring (docs/sony-re/libpad.md, "Sample ring"). */
+/* Per-pad input sample ring (docs/sony-re/controllers.md part A, "Sample ring"). */
 #include <string.h>
 #include "psvr2_libpad.h"
 

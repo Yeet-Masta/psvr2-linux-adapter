@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * IVRDisplayComponent behaviour, see docs/sony-re/steamvr.md ("Display").
+ * IVRDisplayComponent behaviour, see docs/sony-re/steamvr-and-display.md part A ("Display").
  */
 #include <math.h>
 #include <string.h>

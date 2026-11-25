@@ -1,6 +1,6 @@
-# Topic: room map and play area (`docs/sony-re/room.md`) — priority 6
+# Topic: room map and play area (`room.md` part A) — priority 6
 
-Read `common.md` first. Earlier notes: `docs/sony-re/reloc.md`. Lowest
+Read `common.md` first. Earlier notes: `room.md` part B. Lowest
 priority: only needed for persistent room setup.
 
 Scope: the "RP" record from EP `0x8a`; the relocaliser

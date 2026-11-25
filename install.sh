@@ -6,7 +6,7 @@
 #   udev     kernel/99-psvr2.rules (device access, IMU buffer, Sense hidraw)
 #   group    add you to the "input" group the rules grant access to
 #   steamvr  build driver_psvr2 and register it with SteamVR (symlink)
-#   settings steamvr.vrsettings: "displayPortTrainingMode": 1 (docs/steamvr.md)
+#   settings steamvr.vrsettings: "displayPortTrainingMode": 1 (docs/getting-started.md part C)
 #   lib      libpsvr2 header/libs/pkg-config in /usr/local (not needed by the driver)
 #
 # Usage:
@@ -298,5 +298,5 @@ say "done"
 if [ "${UPDATE}" -eq 0 ] && want kernel; then
 	note "Later: git pull && ./install.sh --update"
 	note "Logs: SteamVR web console 'driver_psvr2', dmesg | grep psvr2"
-	note "Multi-GPU: launch Steam with VK_DRIVER_FILES=<headset GPU ICD> (docs/steamvr.md)"
+	note "Multi-GPU: launch Steam with VK_DRIVER_FILES=<headset GPU ICD> (docs/getting-started.md part C)"
 fi

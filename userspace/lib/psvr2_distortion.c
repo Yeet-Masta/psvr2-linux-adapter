@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * PSVR2 lens model: distortion and hidden-area mesh, written from the
- * behaviour of Sony's PC driver (docs/sony-re/display.md 5.2 and 5.3,
- * docs/sony-re/steamvr.md "Hidden-area mesh"). The radial tables are Sony's
+ * behaviour of Sony's PC driver (docs/sony-re/steamvr-and-display.md §B.5.2 and 5.3,
+ * docs/sony-re/steamvr-and-display.md part A "Hidden-area mesh"). The radial tables are Sony's
  * measured lens data (psvr2_lens_lut.h, scripts/sony-re/extract_lens_lut.py);
  * the constants are Sony's float values, given as bit patterns.
  *

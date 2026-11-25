@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * VrTracker2 universe / chaperone helpers. See psvr2_chaperone.h and
- * docs/sony-re/trace.md section 10. Evaluation order is part of the
+ * docs/sony-re/vrtrace.md section 10. Evaluation order is part of the
  * contract: every sum is written in the order Sony evaluates it.
  */
 #include <math.h>

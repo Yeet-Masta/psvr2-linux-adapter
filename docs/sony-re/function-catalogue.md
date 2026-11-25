@@ -360,6 +360,434 @@ size `0x180351764/68` = 640 × 480.
 | `0x1800b0cc0` | 517 | per-pair consensus estimator (above) [sure] |
 | `0x1800a1000` | 40 | per-pair estimator ctor: 6 history slots, thresholds 10 / 50, min 5 samples, min support 3 [sure] |
 
+### Gap fill 1: math helpers, blob stores, sort helpers (`0x180044520`–`0x1800af510`)
+
+Most rows here have no direct caller in the inventory: they are reached
+through vtables or function-pointer tables, or are out-of-line copies of
+inline operators that the compiler kept. "Vec2" = two floats packed in the
+low half of an SSE register, "Vec4" = four floats, "M34" = 3×4 rigid
+transform (rows R | t), "M44" = 4×4.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180044520` | 13 | Vec2 splat: copy one 8-byte pair into both halves [sure] |
+| `0x180044550` | 14 | Vec2 broadcast lane x to all four lanes [sure] |
+| `0x180044580` | 14 | Vec2 broadcast lane y to all four lanes [sure] |
+| `0x1800445c0` | 19 | Vec4 broadcast lane `i & 3` [sure] |
+| `0x180044600` | 18 | Vec2 add [sure] |
+| `0x180044640` | 17 | Vec2 subtract [sure] |
+| `0x180044680` | 16 | Vec2 times the x lane of a Vec4 [sure] |
+| `0x1800446b0` | 20 | Vec2 times scalar [sure] |
+| `0x1800446e0` | 27 | Vec2 divided by scalar, through `rcp` plus two Newton steps [sure] |
+| `0x180044740` | 20 | scalar times Vec2 (argument order swapped) [sure] |
+| `0x180044770` | 18 | Vec2 component-wise multiply [sure] |
+| `0x1800447b0` | 29 | Vec2 dot product, result in all lanes [sure] |
+| `0x180044800` | 25 | Vec2 squared length [sure] |
+| `0x180044880` | 10 | build Vec4 from a Vec2 and a scalar in z (w = scalar too) [sure] |
+| `0x180044e40` | 54 | 3×3 rotation matrix from a unit quaternion (x, y, z, w) [sure] |
+| `0x180044f10` | 38 | M34 rotate a vector: `R·v` (no translation) [sure] |
+| `0x180045140` | 38 | duplicate of `0x180044f10` (separate COMDAT) [sure] |
+| `0x180045190` | 45 | M34 transform a point: `R·p + t` [sure] |
+| `0x180045330` | 42 | rigid inverse of an M34: `Rᵀ`, `−Rᵀ·t` [sure] |
+| `0x180045ba0` | 21 | Vec2 squared length returned in a register [sure] |
+| `0x180045c40` | 44 | Vec4 normalise (`v / ‖v‖`, scalar `sqrt`) [sure] |
+| `0x180045cb0` | 52 | quaternion normalise, then lane reorder into (x, y, z, w) [sure] |
+| `0x180045f80` | 25 | M34 from a quaternion and a translation (rotation by `0x180045d50`, t copied to row 3) [sure] |
+| `0x180046040` | 58 | rigid inverse of an M34 returned as a 64-byte value (same math as `0x180045330`) [sure] |
+| `0x1800460f0` | 44 | rigid inverse of an M34 written to an out-parameter; used by `0x1800e2a00` [sure] |
+| `0x1800461a0` | 33 | M34 product `a·b` through `0x1800451e0`, returned by value [sure] |
+| `0x1800461d0` | 45 | duplicate of `0x180045190` (`R·p + t`) [sure] |
+| `0x1800464b0` | 414 | resize every array of an 11-array blob store to `n` items (three of 8-byte items, six of 4-byte items, two of 2-byte items), reallocating through each RnD::Vector's allocator; called by `0x18004b0a0`, `0x1800a0480`, `0x1800a09a0`, `0x1800d9800` [sure] |
+| `0x18009dcc0` | 46 | Vec4 lane-wise `sqrt` as `x·rsqrt(x)` with two Newton steps, 0 where x = 0 [sure] |
+| `0x18009df40` | 46 | duplicate of `0x18009dcc0` [sure] |
+| `0x18009e590` | 72 | Vec3 safe normalise: below a tiny squared length it returns a fixed default vector [sure for the form] |
+| `0x18009e660` | 59 | Vec3 normalise with `rsqrt` and two Newton steps [sure] |
+| `0x18009e7c0` | 62 | Vec4 normalise with `rsqrt` and two Newton steps [sure] |
+| `0x18009e840` | 123 | quaternion slerp: flips the sign for a negative dot product, uses `acos`/`sin` (`0x18009e170`, `0x18009e2a0`), and falls back to a linear blend above a dot threshold (5th argument); callers `0x1800b0980`, `0x1800da320` [likely] |
+| `0x18009e9d0` | 21 | scalar-argument wrapper of the slerp `0x18009e840` [sure] |
+| `0x18009ea40` | 66 | M44 from a unit quaternion, translation 0, last row (0, 0, 0, 1) [sure] |
+| `0x18009ed40` | 488 | 8-lane (AVX) body of the camera model map behind `0x18009eb50`: projective 3×3 step with a divide by the third row, then the distortion polynomial, for 8 points at once [likely] |
+| `0x18009f2b0` | 108 | 8-lane polynomial in r² (Horner on coefficients at `+0x20..+0x38` of the model), with an optional second branch selected by the 4th argument; distortion radial term [likely] |
+| `0x18009f3b0` | 10 | `RnD::MersenneTwister` constructor: sets the vtable, then seeds through `0x18009f3e0` [sure] |
+| `0x18009f6a0` | 48 | Mersenne Twister state regeneration (the 624-word twist with `0x9908b0df`); called by the readers `0x18009f530`, `0x1800a7c50` [sure] |
+| `0x18009f850` | 41 | Vec3 normalise with scalar `sqrt` [sure] |
+| `0x18009f940` | 24 | count set bits in a 64-bit mask over the first `n` bits; used by `0x1800e2a00` [sure] |
+| `0x18009f9a0` | 99 | constructor of a per-camera state block: zeroes the counters, index `+0x28` = −1, 24 entries starting at `+0x278` set to (7.78, −1.0, …) defaults; called by `0x18009fd80` [sure for the writes, guess for the role] |
+| `0x1800a2000` | 92 | per-controller reset over `+0x15c40` controllers: clears flag `+0x3358` and sets `+0x35e0` to ≈ 1e5 (`0x47c34ff3`, "no distance yet") in each camera-manager controller block [sure for the writes] |
+| `0x1800a3780` | 31 | clear byte `+0x4bc` of each controller in every camera manager (stride 0x4ce0) [sure] |
+| `0x1800a5600` | 20 | run the boot worker `0x1800a56b0` twice per item for `n` items: job type 1 then job type 2 [sure] |
+| `0x1800a5d60` | 31 | copy each controller's per-camera blob store into the tracker (`0x1800a0bf0`, tracker `+0xa430 + 1520·(4·ctrl + cam)`) [sure] |
+| `0x1800a6610` | 163 | filter a list of 2D points against a centre and radius (squared distance below `r²`), compacting the kept ones; callers `0x1800a4fb0`, `0x1800a8770` [likely] |
+| `0x1800a6820` | 40 | load `./ConfigFile0.trk` into memory (`fopen`, `fseek`/`ftell`, `malloc`) and hand it to the parser `0x1800a6940` [sure] |
+| `0x1800a9db0` | 77 | thread-safe static init of the shared `RnD::DefaultAllocator` (`0x1806167a0`), then build an object that uses it [sure] |
+| `0x1800a9fe0` | 33 | release five RnD::Vectors of an object through their allocators and zero them (destructor body) [sure] |
+| `0x1800aa240` | 12 | obfuscated-string decoder: XOR 32 bytes with a fixed key [sure] |
+| `0x1800aa320` | 12 | same decoder, another string [sure] |
+| `0x1800aa550` | 12 | same decoder [sure] |
+| `0x1800aa5e0` | 12 | same decoder [sure] |
+| `0x1800aa6c0` | 12 | same decoder [sure] |
+| `0x1800aa750` | 12 | same decoder [sure] |
+| `0x1800aa7e0` | 12 | same decoder [sure] |
+| `0x1800aa870` | 12 | same decoder [sure] |
+| `0x1800ab3a0` | 12 | allocate and zero a 0x17004-byte block (tracker work area) [sure] |
+| `0x1800ab590` | 20 | sort an RnD::Vector of 8-byte items with `0x1800ad2b0` [sure] |
+| `0x1800ac630` | 58 | RnD::Vector constructor for `n` 8-byte items from a given allocator [sure] |
+| `0x1800ac7c0` | 14 | sort range `[a, b)` with `0x1800acfb0` [sure] |
+| `0x1800ac810` | 14 | sort range `[a, b)` with `0x1800ad2b0` [sure] |
+| `0x1800adad0` | 51 | find the first (float, float) pair equal to a key in a range (std::find instance) [likely] |
+| `0x1800adb80` | 49 | std::make_heap on 16-byte items keyed by the second float [sure] |
+| `0x1800adc80` | 35 | std::sort_heap on 8-byte items (pop loop through `0x1800ae860`) [sure] |
+| `0x1800ae030` | 51 | duplicate of `0x1800adad0` for another item type [sure] |
+| `0x1800ae100` | 49 | duplicate of `0x1800adb80` [sure] |
+| `0x1800ae1f0` | 35 | std::sort_heap, other comparator (`0x1800aeb30`) [sure] |
+| `0x1800ae930` | 25 | std::pop_heap (`0x1800ae860`) [sure] |
+| `0x1800ae9b0` | 39 | introsort partition step (median-of-three or median-of-nine above 40 items) [sure] |
+| `0x1800aec00` | 25 | std::pop_heap, other comparator (`0x1800aeb30`) [sure] |
+| `0x1800aec70` | 39 | introsort partition step, other comparator [sure] |
+| `0x1800aefb0` | 13 | heap: move the first item to the output and sift down (`0x1800ae860`) [sure] |
+| `0x1800af0e0` | 13 | same, comparator `0x1800aeb30` [sure] |
+| `0x1800af320` | 49 | M34 rotation about x by an angle (sincos `0x18009e2a0`) [sure] |
+| `0x1800af3d0` | 41 | M34 rotation about y by an angle [sure] |
+| `0x1800af470` | 38 | M34 rotation about z by a vector-lane angle [sure] |
+| `0x1800af510` | 44 | M34 rotation about x by a vector-lane angle [sure] |
+
+### Gap fill 2: rig poses, ray helpers, background-model containers (`0x1800b0250`–`0x1800c02d0`)
+
+The background model itself is `controller-tracking.md` part E. The rows
+here are its helpers and the std::vector code generated for its record
+types (landmarks are 320 bytes, view candidates 288 bytes).
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1800b0250` | 18 | fill the 4-camera built-in rig table at `0x1805f32e0` for a variant: `0x1800af650(variant, cam)` per camera [sure] |
+| `0x1800b0c40` | 48 | store a pose (M34) and its quaternion (`0x180044bc0`) side by side in one record; used by `0x1800b0980` [sure] |
+| `0x1800b16d0` | 17 | Vec2 `a −= b` in place [sure] |
+| `0x1800b1710` | 25 | Vec2 "all lanes a < b" mask [sure] |
+| `0x1800b1770` | 25 | Vec2 "all lanes a ≤ b" mask (operands swapped) [sure] |
+| `0x1800b1940` | 13 | Vec4 from two Vec2 halves [sure] |
+| `0x1800b1bd0` | 62 | Vec4 set lane `i & 3` to a scalar (`insertps`); callers `0x1800b24b0`, `0x180103580` [sure] |
+| `0x1800b1d60` | 21 | read lane `j & 3` of row `i` of a matrix and broadcast it [sure] |
+| `0x1800b1ee0` | 28 | 12-float `a −= b` (M34 subtract) [sure] |
+| `0x1800b2000` | 18 | Vec4 lane-wise `acos` wrapper (`0x18009e170`) [sure] |
+| `0x1800b21a0` | 109 | closest points of two rays `p1 + s·d1`, `p2 + t·d2`: fails when the rays are near parallel (det < 1e-6) or either point lies behind its origin (s ≤ 0 or t ≤ 0); returns both points [sure] |
+| `0x1800b2370` | 83 | build a rotation from an axis and an angle: normalise the axis, then half-angle sin/cos; returns false for a zero axis [likely] |
+| `0x1800b3d00` | 46 | landmark prune (background step 5): drop a landmark when either camera's miss count exceeds 300 (hit count ≥ 10) or 40 (otherwise) [sure] |
+| `0x1800b3e00` | 17 | `RnD::Background` constructor: vtable, three views built by `0x1800b6d40` (destructor `0x1800b3f50`), view ids 0/1/2 [sure] |
+| `0x1800b83c0` | 111 | as `0x1800b21a0`, and also returns the two ray parameters s and t [sure] |
+| `0x1800b9ce0` | 88 | prune a list of 288-byte view records (`+0x90`): drop flagged entries whose counter passed the limits at `0x180351778` / `0x18035177a`, shifting the rest down [likely] |
+| `0x1800ba930` | 12 | erase one 320-byte landmark (memmove the tail down) [sure] |
+| `0x1800babd0` | 25 | free the buffer of a vector of 64-byte items (MSVC aligned-delete path); callers `0x1800b3f50`, `0x18023d0a0` [sure] |
+| `0x1800baf90` | 14 | push_back of a 288-byte record (grow through `0x1800bbfe0`, copy `0x1800bc490`) [sure] |
+| `0x1800bafd0` | 14 | same push_back, second instance [sure] |
+| `0x1800bb010` | 10 | push_back without the capacity check (caller checked) [sure] |
+| `0x1800bb040` | 25 | free a vector of 32-byte items; caller `0x1800b6f70` [sure] |
+| `0x1800bb260` | 25 | free a vector of 64-byte items [sure] |
+| `0x1800bb390` | 25 | free a vector of 32-byte items [sure] |
+| `0x1800bb570` | 59 | RnD::Vector constructor for `n` items from a given allocator [sure] |
+| `0x1800bb7f0` | 9 | trivially-copyable move of `[src, end)` to `dst`, returns the new end [sure] |
+| `0x1800bbfe0` | 97 | vector<288-byte record> reallocate-and-insert (growth ×1.5, `length_error` at 0xe38e38e38e38e3 items) [sure] |
+| `0x1800bc700` | 25 | free a vector of 64-byte items (other instance) [sure] |
+| `0x1800bc840` | 32 | allocate `n` 320-byte records (aligned new above 4 KiB) [sure] |
+| `0x1800bc9d0` | 17 | copy a range of 8-byte items [sure] |
+| `0x1800bca60` | 32 | allocate `n` 8-byte items [sure] |
+| `0x1800bcb20` | 25 | free a vector of 32-byte items (other instance) [sure] |
+| `0x1800bcc10` | 21 | copy-construct a range of 288-byte records [sure] |
+| `0x1800bcc60` | 95 | move a range of 288-byte records field by field (used by the grow path `0x1800bbfe0`) [sure] |
+| `0x1800bce20` | 32 | allocate `n` 288-byte records [sure] |
+| `0x1800bcf70` | 15 | copy-construct a range of 288-byte records (second instance) [sure] |
+| `0x1800bd060` | 9 | memmove range helper (duplicate of `0x1800bb7f0`) [sure] |
+| `0x1800bd0f0` | 64 | copy a range of 320-byte landmarks (two 128-byte blocks plus the tail per item); callers `0x1800bb900`, `0x1800bc7f0`, `0x1800bc810`, `0x1800bceb0` [sure] |
+| `0x1800bd1d0` | 12 | byte size of `n` 320-byte items, `bad_array_new_length` on overflow [sure] |
+| `0x1800bd240` | 12 | byte size of `n` 8-byte items, same check [sure] |
+| `0x1800bd430` | 12 | byte size of `n` 288-byte items, same check [sure] |
+| `0x1800bd460` | 15 | uninitialised copy of 288-byte records, returns the new end [sure] |
+| `0x1800bd7c0` | 10 | construct one 288-byte record at the end and advance [sure] |
+| `0x1800bfec0` | 18 | two u32 → two doubles (the `0x4330…` bias trick) [sure] |
+| `0x1800bff60` | 9 | copy one 8-byte value [sure] |
+| `0x1800c0270` | 21 | Vec2 select by a bool: `b ? y : x` [sure] |
+| `0x1800c02d0` | 24 | Vec2 select by a lane mask [sure] |
+
+### Gap fill 3: RANSAC sampler object and boot helpers (`0x1800c0640`–`0x1800cea10`)
+
+The RANSAC object used by the boot (`controller-tracking.md` §B.2.19) keeps
+its Mersenne Twister at `+0x1f8`, the model point list at `+0xd90`
+(16-byte points), the observation list at `+0xda0` (8-byte points), the
+candidate list at `+0xe18` (48-byte entries, index at `+0x20`), a 4-wide
+neighbour table at `+0xee8`, the sampling mode at `+0xf10` and an
+optional filter object at `+0xf08`. Random draws use
+`u32 · 2⁻³² · n`.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1800c0640` | 150 | 8-lane nearest-point search: for each stored 2D point, distance to 8 query points, keep the smallest three distances and their indices per lane (initial value from `0x18031a660`) [likely] |
+| `0x1800c0bf0` | 178 | 8-lane transform of 8 model points by an M34 (7th argument), then projection and comparison with the observations; callers via `0x1800c08a0` [likely] |
+| `0x1800c1b10` | 57 | gather one sample (three model points, three observations by the indices in the sample record) and hand them to the P3P solver `0x1800f43e0` [sure] |
+| `0x1800c1c60` | 177 | start of a RANSAC run: clear the result fields, refresh the point count, recompute the iteration bound (`0x1800c8b50`), then score hypotheses through `0x1800c2080` [likely] |
+| `0x1800c1ff0` | 20 | hypothesis gate: if a filter object is set (`+0xf08`), ask its slot 1 first; on reject write 0 and return false, else score with `0x1800c2080` [sure] |
+| `0x1800c3fe0` | 132 | sample generator by mode (`+0xf10`): mode 1 draws a candidate and two of its neighbours from the table, other modes draw three candidates independently; needs ≥ 3 observations; callers `0x1800c2960`, `0x1800c3f60` [sure] |
+| `0x1800c44a0` | 65 | sample generator: three independent random candidates plus random model points [sure] |
+| `0x1800c46a0` | 85 | deterministic sample from stored counters (`+0xf50` base, step and stride), so the triplets are walked in order instead of drawn [likely] |
+| `0x1800c5030` | 37 | three random integers in the given ranges from one 3-draw block [sure] |
+| `0x1800c50f0` | 58 | six random integers in four given ranges from one 6-draw block [sure] |
+| `0x1800c5620` | 24 | in modes 6 and 7, reset the sample state: eight ints at `+0xf80` to −1 (or 0), counters `+0xf60..+0xf70` and `+0xf6c` [sure] |
+| `0x1800c5690` | 158 | build a three-point sample: copy the three observation records, take the mean of the three model points and rotate it by the matrix at `+0xf20`; caller `0x1800c5ac0` [likely] |
+| `0x1800c82e0` | 18 | release two RnD::Vectors of an object (destructor body); caller `0x18023d180` [sure] |
+| `0x1800c83c0` | 36 | fill a 256-entry u32 table (1 KiB) with a value, memset when 0 [sure] |
+| `0x1800c8550` | 59 | fill an 8-float record with a value (zero when 0); `0x1800c5620` uses it with −1 [sure] |
+| `0x1800c8650` | 33 | take `k` bits at bit offset `o` from a 256-bit mask and spread them to a per-lane mask (bit i → lane i) [sure] |
+| `0x1800c8840` | 70 | build a 48-byte parameter record: 16-byte header copied, then thresholds from the float arguments; uses `0x18009f3e0` to seed [likely] |
+| `0x1800c8c50` | 61 | RnD::Vector constructor holding one 48-byte item copied from the argument [likely] |
+| `0x1800c94e0` | 12 | uniform random int in `[0, n)` from the twister [sure] |
+| `0x1800c9840` | 34 | fill 256 u32 with a value (second instance of `0x1800c83c0`) [sure] |
+| `0x1800c9900` | 19 | `fill_n` of u32 [sure] |
+| `0x1800c99f0` | 19 | `fill_n` of u32 (duplicate) [sure] |
+| `0x1800cb9c0` | 13 | constructor of an array block: 16 entries of 0x70 bytes (`0x1800b0950`) at `+0`, then 0x1f0-byte entries at `+0x700`; callers `0x180051420`, `0x180051430`, `0x1800a1000`, `0x1800b0950` [sure for the layout] |
+| `0x1800cba70` | 53 | reset four rotation slots to identity (from `sin(0)`, `cos(0)`), with zero offsets; caller `0x18009d4d0` [sure] |
+| `0x1800cbcf0` | 42 | compose a rig transform for a camera pair (`0x1800cbd70`) with a pose (`0x1800451e0`) [sure] |
+| `0x1800cbe50` | 30 | for each controller, predict the next-frame pose (`0x1800ceaa0`) into the tracker at `+0x9200` from the ring at `+0x8dc0` [sure] |
+| `0x1800cbf60` | 54 | occupancy grid: write the bits of a rectangle (x0..x1, y0..y1) into rows of 64-bit masks [likely] |
+| `0x1800cc030` | 127 | occupancy grid: does a rectangle overlap any set bit (8-lane test per row) [likely] |
+| `0x1800ce870` | 63 | quaternion product (Hamilton, x y z w lanes) [sure] |
+| `0x1800cea10` | 51 | copy up to `n` newest poses out of a 4-entry ring (64-byte entries, count `+0x100`, head `+0x104`) [sure] |
+
+### Gap fill 4: controller boot/track object helpers (`0x1800cf140`–`0x1800e6120`)
+
+"Controller" below is the 0x4ce0-byte per-controller tracking object of a
+camera manager (LED count at `+0x1970`, matched-LED mask at `+0x48` of a
+candidate pose, 4-entry pose ring at `+0x0`…`+0x104`).
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1800cf140` | 179 | motion consistency check: from the two newest poses in the ring, form velocity and angular rate over `dt` (3rd argument) and return how far the given pose is from that extrapolation (4th argument) [likely] |
+| `0x1800cf380` | 70 | map one 2D point through the camera model (`0x18009eb50`), the scalar wrapper of the 8-lane map [sure] |
+| `0x1800cf440` | 70 | same, other argument order [sure] |
+| `0x1800cfc00` | 69 | midpoint of two pose estimates (`0x1800ef770` on each, weights 0.5) for the multi-camera path; callers `0x1800cf540`, `0x1800ef770` [likely] |
+| `0x1800d0070` | 35 | unsigned int → `std::string` (decimal); used by `0x18004e8f0` [sure] |
+| `0x1800d03e0` | 10 | replace the low 8 bytes of a 16-byte value [sure] |
+| `0x1800d0410` | 13 | Vec4 from two 8-byte halves [sure] |
+| `0x1800d0460` | 12 | store `clock()` in a timer [sure] |
+| `0x1800d05f0` | 76 | scaled norm of a vector (`‖c·v‖·k`), clamped to `10·k` [sure for the math] |
+| `0x1800d08c0` | 25 | store a pose built from a quaternion (`0x180045d50`) at controller `+0xf20` [sure] |
+| `0x1800d09e0` | 37 | resize a bit-set of up to 256 bits, clearing the bits above the new size in each word [sure] |
+| `0x1800d0b40` | 58 | gather up to `n` LED positions for one model into an 8-lane block, padding with the value at `0x18031a5c0` [likely] |
+| `0x1800d0cc0` | 16 | reset the controller's pose state: clear `+0x3354`, copy a fresh state (`0x18009fd80`, `0x1800d0d30`) to `+0x1af0` and `+0x20e0`, clear `+0x1f94` [sure] |
+| `0x1800d14b0` | 72 | is a point inside a cone: angle between the normalised direction and an axis against a cosine limit [likely] |
+| `0x1800d15f0` | 151 | largest angle in degrees between the three axes of a rotation and a reference rotation (`acos` of column dot products) [likely] |
+| `0x1800d18c0` | 118 | rotation vector → quaternion (exp map); below `sqrt(FLT_EPSILON)` uses the series `0.5 + θ²/48` [sure] |
+| `0x1800d1b80` | 55 | take a stored camera pose (`+0x10a40 + 0x40·cam` of the manager), compose it with the given pose and run the consistency check `0x1800cf140` [sure] |
+| `0x1800d22c0` | 33 | swap item `i` and item `j` in every array of an 11-array blob store [sure] |
+| `0x1800d2be0` | 39 | release several RnD::Vectors of the controller object (part of its destructor) [sure] |
+| `0x1800d2d30` | 90 | construct an object using the shared `RnD::DefaultAllocator` (static init as `0x1800a9db0`) [sure] |
+| `0x1800d2fd0` | 38 | release six RnD::Vectors (destructor body) [sure] |
+| `0x1800d37e0` | 157 | configure the controller's RANSAC: copy three 128-byte setting blocks to `+0x6b0`, set the thresholds from `+0x634`/`+0x638`/`+0x690` (confidence 0.99), point the solver at its buffers and initialise it (`0x1800c18a0`, `0x1800c6df0`) [sure] |
+| `0x1800d3a70` | 18 | full reset of a controller: clear `+0x601` and `+0x3354`, fresh state as `0x1800d0cc0`, then `0x1800a0ab0` [sure] |
+| `0x1800d4e10` | 185 | when a pose hint is present (`+0x3360`, or bit 8 of `+0x3364`): build a pose from the quaternion at `+0x3380` and the translation at `+0x33c0` and store it as the prior at `+0x3300`…`+0x3320`, flag `+0x3334` [likely] |
+| `0x1800d5a70` | 109 | accept a new pose for a controller: store it at `+0x10`, refresh derived data (`0x1800daff0`), set `+0x4bc`, seed the state at `+0x1af0` when none exists, classify the distance (`0x1800db5f0`), update the overlay data (`0x1800e4df0`) [likely] |
+| `0x1800d5c10` | 10 | copy a state into `+0x1af0` and classify the distance (`0x1800db5f0`) [sure] |
+| `0x1800d9310` | 186 | copy constructor of a 0x5e0-byte controller pose record (pose, seven 128-byte blocks, then scalar fields up to `+0x5e0`) [sure] |
+| `0x1800d9ab0` | 133 | count the matched LEDs whose normal faces the camera (cosine above the threshold at `+0x6a4`; 0.7 for the back-facing test) [likely] |
+| `0x1800da220` | 81 | mean of a per-LED value over the matched-LED mask (0 when none) [sure] |
+| `0x1800dcb00` | 213 | tracking step with distance-dependent settings: picks one of four parameter tables (`0x180318b88` below 100 mm, `0x180318b60` below 200 mm, `0x180318bd8` below 300 mm, `0x180318bb8` beyond; squared mm), matches LEDs (`0x1800e2330`), projects (`0x18004d380`), scores (`0x1800dd5d0`), solves (`0x1800df5b0`); with fewer than 3 matches it retries from the prior (`0x1800ddb90`), then finishes in `0x1800e0d20` [likely] |
+| `0x1800dd170` | 84 | per-camera refine gate: skip when the state at `+0x49c` is 1 and fewer than 6 frames passed (`+0x5dc`), else run the refine from an identity start [likely] |
+| `0x1800ddad0` | 18 | score a candidate (`0x1800dd5d0`); if it is valid and not rejected, optionally merge its LED mask into the accepted mask [sure] |
+| `0x1800e09f0` | 28 | copy each LED's matched blob (index at `+0x43c`) position and size out of the blob store [sure] |
+| `0x1800e0ad0` | 29 | largest of three floats at `+0x19b0` [sure] |
+| `0x1800e0b60` | 71 | predict where a point lands in a camera: transform (`0x180046240`) if it is in front (z ≥ 0) and scale the search radius by `+0x1974` [likely] |
+| `0x1800e0cb0` | 12 | debug print of two counters and a value per controller (`"%s B=%d %d %6.1f"`, `" T=%d %d %6.1f"`) [sure] |
+| `0x1800e1c30` | 28 | remap each matched LED's blob index through a renumbering table (`+0xa8` of the store), or −1 [sure] |
+| `0x1800e25a0` | 95 | for one camera: if the camera sees the controller (bit in `+0x8960`), compose its pose with the camera transform and project the LEDs (`0x1800efd70`) [sure for the flow] |
+| `0x1800e29b0` | 18 | construct four 536-byte per-camera blocks (`0x1800ef930`) [sure] |
+| `0x1800e4d00` | 56 | rotation from a quaternion, then the angle to a reference axis via `0x1800d15f0` [likely] |
+| `0x1800e5cc0` | 35 | unsigned int → `std::string` (duplicate of `0x1800d0070`) [sure] |
+| `0x1800e5d80` | 110 | copy constructor of an RnD::Vector of 8-byte items (same allocator) [sure] |
+| `0x1800e6120` | 83 | copy constructor of an RnD::Vector of 4-byte items [sure] |
+
+### Gap fill 5: containers, images, spot helpers (`0x1800e6340`–`0x1800f4320`)
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1800e6340` | 31 | clear a vector of 32-byte `RnD::Vector` items (free each inner buffer through its allocator) [sure] |
+| `0x1800e63e0` | 21 | same, other instance [sure] |
+| `0x1800e6990` | 31 | `std::find` of an 8-byte value (unrolled by 4) [sure] |
+| `0x1800e6a50` | 83 | copy constructor of an RnD::Vector of 2-byte items [sure] |
+| `0x1800e6ee0` | 14 | uniform random int in `[lo, hi)` from the twister [sure] |
+| `0x1800e7660` | 21 | shrink a vector of inner vectors to `n` items, freeing the cut ones [sure] |
+| `0x1800e76d0` | 31 | clear a vector of inner vectors (third instance of `0x1800e6340`) [sure] |
+| `0x1800e7a60` | 14 | `std::string` from a `[begin, end)` range [sure] |
+| `0x1800e7a90` | 103 | assign a range to an RnD::Vector of 8-byte items (reallocate when the capacity is short) [sure] |
+| `0x1800e8760` | 21 | destroy a range of inner vectors [sure] |
+| `0x1800e8c10` | 83 | copy-construct one inner vector into place (allocate and copy its items) [sure] |
+| `0x1800e8dd0` | 13 | free one inner vector and zero it [sure] |
+| `0x1800e9310` | 83 | copy constructor of an RnD::Vector of 4-byte items (duplicate of `0x1800e6120`) [sure] |
+| `0x1800e9cf0` | 14 | Vec2 with lane `i & 1` replaced [sure] |
+| `0x1800e9d30` | 14 | duplicate of `0x1800e9cf0` [sure] |
+| `0x1800e9d70` | 21 | Vec2 lane write through a (pointer, lane) proxy [sure] |
+| `0x1800ea0d0` | 18 | release two RnD::Vectors (destructor body) [sure] |
+| `0x1800ea130` | 36 | `RnD::Spots` destructor body: release its five vectors; caller `0x1800ea090` [sure] |
+| `0x1800ea240` | 94 | image object constructor from a 64-byte descriptor: copy the descriptor, allocate `width × height` pixels through the default allocator, element code 4 [likely] |
+| `0x1800eec90` | 26 | image buffer constructor: flags `0x40000`, buffer from the given allocator or the default one (`0x1800ef5f0`) [sure] |
+| `0x1800ef140` | 16 | of two pixel references (image, x, y), return the one with the smaller u16 value [sure] |
+| `0x1800ef1a0` | 38 | copy a u16 image row by row (stride `+0x14`, width `+0x10`, height `+0x12`) [sure] |
+| `0x1800ef5f0` | 18 | get the shared `RnD::DefaultAllocator` (thread-safe static init) [sure] |
+| `0x1800ef770` | 96 | mean reprojection distance of a pose over a camera's observations; an observation that cannot be projected counts 999 [likely] |
+| `0x1800ef930` | 52 | per-camera block constructor: capacities 24 and 24, counters zero; used by `0x1800e29b0` [sure] |
+| `0x1800efae0` | 58 | reset four per-camera counter blocks [sure] |
+| `0x1800f0530` | 25 | Vec2 "all lanes equal" mask [sure] |
+| `0x1800f0640` | 41 | index of the smallest of 24 floats (three 8-lane blocks) when it is below the limit at `0x18031a5c0`, else −1 [sure] |
+| `0x1800f1c60` | 42 | Vec2 distance `‖a − b‖` [sure] |
+| `0x1800f20b0` | 24 | scalar `sin` and `cos` through `0x18009e2a0` [sure] |
+| `0x1800f2130` | 104 | eigen-decomposition of a symmetric 2×2 (blob covariance): both eigenvalues and unit eigenvectors, degenerate case when the off-diagonal product is below 1e-11 [sure] |
+| `0x1800f3010` | 86 | for 256 stored 2D points, 8 at a time: scaled squared distance to a query point [likely] |
+| `0x1800f3100` | 56 | RnD::Vector constructor with room for 32 8-byte items [sure] |
+| `0x1800f3910` | 118 | nearest stored point to a query within a radius; when the 8th argument exceeds the 6th it uses the plain search `0x1800f32c0` instead [likely] |
+| `0x1800f3d30` | 59 | transpose a 3×3 and return its three columns [sure] |
+| `0x1800f3e70` | 111 | transform a point by an M34 held in AVX registers [sure] |
+| `0x1800f3ef0` | 61 | repack a 3×4 matrix from AVX halves into row form [sure] |
+| `0x1800f4320` | 68 | rotation matrix → quaternion: `sqrt` of `1 ± diag` combinations in double precision, signs copied from the off-diagonal terms [likely] |
+
+### Gap fill 6: P3P inputs, pose Jacobians and LM matrix plumbing (`0x1800f59e0`–`0x1800ffa90`)
+
+The LM solvers (`WeightedLMSolver<…,6>`, part A "Solver classes") keep
+their vectors and matrices in small dense objects: `{…, data +0x20/+0x28/
++0x30, size, allocator +0x28/+0x48/+0x60}` with 32-byte aligned storage.
+Several constructors take a pointer into a larger expression object and
+step back to its start (`a2 − 41`, `a2 − 241`, `a2 − 240`): these are the
+copy-from-expression paths. Allocation goes through the allocator at
+`0x1805f0700` / `0x1805f0718`. Callers listed as `0x18023d8xx`–`0x18023daxx`
+are exception-unwind funclets.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1800f59e0` | 89 | 8-lane P3P input: for three observations, form unit bearing rays (8 hypotheses at once) [likely] |
+| `0x1800f5b10` | 34 | three 2D observations → homogeneous Vec4 (x, y, 1, 0) [sure] |
+| `0x1800f5b90` | 31 | same, other argument layout [sure] |
+| `0x1800f6890` | 28 | split an M34 into its 3×3 rotation and translation [sure] |
+| `0x1800f6920` | 43 | M34 → M44 with last row (0, 0, 0, 1) [sure] |
+| `0x1800f6d80` | 174 | 6×6 adjoint of a rigid pose: R in the two diagonal 3×3 blocks and `[t]×·R` in the off-diagonal block (blocks written by `0x1800f8960`); caller `0x1800f76a0` [likely] |
+| `0x1800f72d0` | 44 | rigid inverse of the pose stored at `+0x40` of a cost object [sure] |
+| `0x1800f73f0` | 22 | free a dense buffer (`+0x30`) through its allocator (`+0x28`); unwind funclets call it [sure] |
+| `0x1800f7430` | 22 | free a dense buffer (`+0x30`, allocator `+0x50`) [sure] |
+| `0x1800f7580` | 44 | rigid inverse of the pose stored at `+0x50` [sure] |
+| `0x1800f76a0` | 148 | propagate a 6×6 covariance through a pose: `Ad · C · Adᵀ` with `Ad` from `0x1800f6d80`, scaled by `s²` (3rd argument) [likely] |
+| `0x1800f7de0` | 22 | free a dense buffer (allocator `+0x50`) [sure] |
+| `0x1800f8570` | 26 | free a dense buffer (`+0x20`, allocator `+0x60`) [sure] |
+| `0x1800f85f0` | 22 | free a dense buffer (`+0x28`, allocator `+0x48`) [sure] |
+| `0x1800f8670` | 22 | same, other instance [sure] |
+| `0x1800f86b0` | 12 | fill a dense vector with a scalar (`0x1800fe9e0`) [sure] |
+| `0x1800f8750` | 22 | free a dense buffer (`+0x30`, allocator `+0x28`) [sure] |
+| `0x1800f87a0` | 16 | fill 48 floats at `+0x10` with a scalar [sure] |
+| `0x1800f87d0` | 61 | splat the nine entries of a 3×3 into a broadcast table [sure] |
+| `0x1800f8960` | 24 | copy a 3×3 block into a 6×6 at block row/column (i, j) [sure] |
+| `0x1800f8a60` | 21 | dense matrix copy-from-expression constructor (`0x1800ff7c0`), alignment 16 [sure for the form] |
+| `0x1800f8ad0` | 18 | dense vector copy-from-expression constructor (`0x1800ff540`) with a scalar factor [sure for the form] |
+| `0x1800f8b30` | 77 | evaluate a dense expression into a vector (element loop with the scale at `+0xd0`) [likely] |
+| `0x1800f99f0` | 31 | release the solver's buffers when `+0x100` is set; funclet `0x18023d830` [sure] |
+| `0x1800fb220` | 31 | same for the multi-camera solver; funclet `0x18023d860` [sure] |
+| `0x1800fbda0` | 35 | reset a dense vector (free, then null fields) [sure] |
+| `0x1800fc150` | 29 | dense vector constructor with `n` floats, rounded up to 32 bytes [sure] |
+| `0x1800fc1f0` | 26 | dense vector destructor [sure] |
+| `0x1800fc260` | 22 | dense buffer destructor (`+0x28`/`+0x48`) [sure] |
+| `0x1800fc2b0` | 22 | same, other instance [sure] |
+| `0x1800fc360` | 25 | dense matrix constructor for `rows × cols` with the given alignment [sure] |
+| `0x1800fc410` | 20 | fill with a scalar and return the size (0 when unset) [sure] |
+| `0x1800fc490` | 22 | dense buffer destructor (`+0x30`/`+0x28`) [sure] |
+| `0x1800fc540` | 63 | splat the nine entries of a 3×3 into a broadcast table (second instance of `0x1800f87d0`) [sure] |
+| `0x1800fc8a0` | 77 | weighted residuals for the multi-camera cost: compute residuals (`0x180107700`), then, unless weighting is off (`+0x130`), multiply each by its weight; when off, copy through `0x180100280`; caller `0x1800fb2b0` [likely] |
+| `0x1800fca70` | 21 | copy-from-expression constructor (as `0x1800f8a60`) [sure for the form] |
+| `0x1800fcae0` | 18 | copy-from-expression constructor with a scalar (as `0x1800f8ad0`) [sure for the form] |
+| `0x1800fcb40` | 53 | dense matrix view/constructor over an existing buffer (rows, cols, strides) [likely] |
+| `0x1800fcca0` | 77 | evaluate a dense expression into a vector (as `0x1800f8b30`) [likely] |
+| `0x1800fcf60` | 13 | squared norm of the six floats at `[4..9]` (parameter step or gradient) [sure for the math] |
+| `0x1800fd100` | 68 | accumulate `Jᵀ·r` over six parameters with special cases for fewer than 4 residual blocks; callers `0x1800f9620`, `0x1800fae70` [likely] |
+| `0x1800fd250` | 53 | build the normal-equation matrix through `0x1800fef60`, using the default allocator for scratch [likely] |
+| `0x1800fd4f0` | 12 | expression object → its data pointer (null-safe) [sure for the form] |
+| `0x1800fd5f0` | 33 | dense matrix constructor rounded to 24-float rows [sure] |
+| `0x1800fdb40` | 19 | dense buffer reassign: free, then zero the fields [sure] |
+| `0x1800fe0c0` | 21 | same pattern, other layout [sure] |
+| `0x1800fe210` | 20 | same pattern, other layout [sure] |
+| `0x1800fe420` | 26 | 3×3 times a 3-vector from broadcast tables (output of `0x1800f87d0`) [likely] |
+| `0x1800fe5b0` | 46 | weighted residuals for the single-camera cost (flag `+0x120`), as `0x1800fc8a0` [likely] |
+| `0x1800fe720` | 46 | same, layout with the flag at `+0x130` [likely] |
+| `0x1800fe8c0` | 16 | copy-from-expression constructor with an explicit alignment [sure for the form] |
+| `0x1800fe930` | 14 | copy-from-expression constructor with scalar and alignment [sure for the form] |
+| `0x1800feaf0` | 41 | dense matrix view over a buffer (as `0x1800fcb40`) [likely] |
+| `0x1800fec00` | 30 | evaluate a dense expression into a vector (third instance) [likely] |
+| `0x1800fedf0` | 41 | accumulate `Jᵀ·r` (as `0x1800fd100`, other cost) [likely] |
+| `0x1800fef60` | 95 | normal-equation accumulation `JᵀWJ` over residual blocks; caller `0x1800fd250` [guess] |
+| `0x1800ff180` | 43 | scaled `Jᵀ·r` with a damping term (λ, 4th argument) [guess] |
+| `0x1800ff2d0` | 12 | expression object → data pointer (second instance) [sure for the form] |
+| `0x1800ff360` | 35 | dense vector copy-assign (reuse the buffer when sizes match) [sure] |
+| `0x1800ff540` | 126 | evaluate a scaled vector expression into a new buffer (six entries per block); callers `0x1800f76a0`, `0x1800f8ad0`, `0x1800fcae0`, `0x1800fe930` [likely] |
+| `0x1800ff7c0` | 58 | evaluate a matrix expression into a new buffer through `0x180102c10`; callers `0x1800f76a0`, `0x1800f8a60`, `0x1800fca70`, `0x1800fe8c0` [likely] |
+| `0x1800ffa90` | 21 | dense buffer reassign (fourth instance) [sure] |
+
+### Gap fill 7: dense-expression evaluators, robust scale, distortion lanes (`0x1800ffbf0`–`0x180109f80`)
+
+Most functions from `0x1800ffbf0` to `0x180102ed0` evaluate one kind of
+dense expression of the LM solver into a buffer (copy, scaled copy,
+product with the 6×6 kernel `0x180102c10`, element-wise loops through a
+(matrix, linear index) iterator). They have no direct caller because the
+solver reaches them through its templates' vtables. Their exact
+expression types were not resolved; the shape of each body is given.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1800ffbf0` | 22 | expression → (data pointer, `rows × cols`) pair [sure] |
+| `0x1800ffdd0` | 39 | gather ten scalar pointers into a contiguous 3×3-plus-one record [likely] |
+| `0x1800ffff0` | 55 | difference of two (pointer, index) iterators, normalised by the row length [likely] |
+| `0x180100280` | 54 | sum of squares of a dense float vector (unweighted residual cost); callers `0x1800fc710`, `0x1800fc8a0`, `0x1800fe5b0`, `0x1800fe720` [sure] |
+| `0x180100330` | 92 | evaluate a scaled 6-column expression (factor at `+0xd0`) into a new matrix [likely] |
+| `0x180100560` | 53 | dense vector copy-assign (second instance of `0x1800ff360`) [sure] |
+| `0x180100730` | 127 | evaluate a scaled vector expression into a new buffer (as `0x1800ff540`) [likely] |
+| `0x180100990` | 60 | evaluate a matrix expression into a new buffer through `0x180102c10` [likely] |
+| `0x180100b90` | 15 | advance an iterator `(ptr, index)` by `n` [sure] |
+| `0x180100e70` | 26 | copy nine floats into a dense matrix in row order [sure] |
+| `0x180100f20` | 53 | copy between two element iterators (row/column from `index / cols`, `index % cols`) [sure for the form] |
+| `0x180101020` | 34 | fill through an element iterator [sure for the form] |
+| `0x180101390` | 124 | evaluate a scaled vector expression (third instance) [likely] |
+| `0x1801015e0` | 56 | evaluate a matrix expression through `0x180102c10` (second instance) [likely] |
+| `0x1801018e0` | 28 | scatter a list of ints into a 3-row, 4-stride matrix in column order [sure for the form] |
+| `0x1801019a0` | 35 | copy between element iterators (second instance) [sure for the form] |
+| `0x180101c70` | 124 | evaluate a scaled vector expression (fourth instance) [likely] |
+| `0x180101ec0` | 56 | evaluate a matrix expression through `0x180102c10` (third instance) [likely] |
+| `0x180102150` | 29 | append ints through an element iterator [sure for the form] |
+| `0x180102280` | 124 | evaluate a scaled vector expression (fifth instance) [likely] |
+| `0x1801024d0` | 56 | evaluate a matrix expression through `0x180102c10` (fourth instance) [likely] |
+| `0x1801026d0` | 115 | evaluate a scaled 6-column expression (second instance of `0x180100330`) [likely] |
+| `0x180102920` | 46 | 6×6 product through `0x180102c10` into a fixed 6×6 [likely] |
+| `0x180102a30` | 25 | 6×6 product, then copy the 6 × 3 result block [likely] |
+| `0x180102ab0` | 25 | duplicate of `0x180102a30` [sure] |
+| `0x180102c10` | 33 | the 6×6 kernel: `out = M·N` (6 × 6 times 6 × k, scaled by the float argument); called by all the evaluators above [likely] |
+| `0x180102d60` | 9 | copy one double [sure] |
+| `0x180102ed0` | 9 | copy one double (duplicate) [sure] |
+| `0x180103460` | 69 | single-camera reprojection residual: transform an LED by the pose (`0x180046240`), project, subtract the observation, return the 2D error and its squared length [likely] |
+| `0x180104260` | 32 | 2 × 3 Jacobian block times a 3-vector (projection chain step) [likely] |
+| `0x180104450` | 102 | 8-lane distortion: rational polynomial in r² (numerator from model `+0x20..+0x38`, divided by a second polynomial) [likely] |
+| `0x180104520` | 175 | 8-lane distortion with the tangential and thin-prism terms (coefficients `+0x24..+0x44`) [likely] |
+| `0x180104810` | 14 | robust scale: `1.483 · median · (1 + 5 / (n − p))`, median by partial sort (`0x1801090f0`) [sure] |
+| `0x1801048e0` | 88 | rotation vector → quaternion with `sincos` (`0x18009e2a0`), angle scaled by the float argument [likely] |
+| `0x180104a10` | 89 | rotation vector → rotation matrix through a quaternion (`0x180045d50`) [likely] |
+| `0x180104b50` | 163 | derivative of the exp map at a rotation vector (3×3 Jacobian of `0x180104e30`), with a small-angle branch [guess] |
+| `0x180105050` | 205 | 8-lane projection with Jacobians: for 8 points, the projected pixel and its derivatives with respect to the pose parameters, through the model map `0x1800c08a0` [likely] |
+| `0x1801052b0` | 9 | wrapper: project with distortion (`0x180103580`) with the "no Jacobian" flag 0 [sure] |
+| `0x180107040` | 84 | cost helper: pose from the 6-vector (rotation vector `+0x10`, translation `+0x1c`) through the exp map `0x180104e30`, composed with the rig transform (`0x1800451e0`) [sure for the flow] |
+| `0x180107170` | 47 | residual scale of a cost: parameter count 3 or 2 from the robustifier's slot 4, then the median rule (`0x1801046e0`) over the residuals at `+0xb8` [likely] |
+| `0x1801083d0` | 84 | as `0x180107040` for the multi-camera cost [sure for the flow] |
+| `0x180108500` | 47 | as `0x180107170` for the multi-camera cost (`+0xc8`) [likely] |
+| `0x180108620` | 19 | dense view constructor over an external buffer: data pointer and length from the arguments, one column, no allocator (decompiler had no function here; read from the disassembly) [sure] |
+| `0x180108660` | 12 | median helper: partial sort so the middle element is in place, return a pointer to it [sure] |
+| `0x180108810` | 35 | reset a dense vector, then size it (free, then allocate) [sure] |
+| `0x180108bb0` | 49 | pose from the 6-vector with a scale on the rotation part (exp map) [likely] |
+| `0x180108c70` | 47 | residual scale (third instance of `0x180107170`) [likely] |
+| `0x180108d80` | 47 | residual scale (fourth instance) [likely] |
+| `0x180108eb0` | 36 | reset and size a dense matrix [sure] |
+| `0x180109080` | 23 | rebind a dense vector to an external buffer (free the old one first) [sure] |
+| `0x180109280` | 44 | pose from the 6-vector with a scale (second instance of `0x180108bb0`) [likely] |
+| `0x180109350` | 35 | reset and size a dense matrix (second instance) [sure] |
+| `0x180109950` | 44 | insertion sort of a float range [sure] |
+| `0x180109f50` | 19 | set every weight of a vector to 1.0 (robustifier "no weighting") [sure] |
+| `0x180109f80` | 19 | duplicate of `0x180109f50` [sure] |
+
 ---
 
 ## Part B: ctrl-tracker UKF internals
@@ -785,7 +1213,7 @@ only zeroes fields, a record copy or an obfuscated-string decoder. The
 role column is in our own words and is `[sure]` for the shape; what the
 caller does with the value is in the caller's own entry.
 
-793 functions.
+789 functions.
 
 ### app:dialog (3)
 
@@ -809,7 +1237,7 @@ caller does with the value is in the caller's own entry.
 | `0x18015e340` | core | const_ret | wrapper around `SetEvent` | none (vtable/callback) |
 | `0x18015e480` | core | const_ret | wrapper around `ReleaseMutex` | none (vtable/callback) |
 
-### ctrl-boot (134)
+### ctrl-boot (131)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -820,7 +1248,6 @@ caller does with the value is in the caller's own entry.
 | `0x18009e430` | core | thunk | forwards to `0x18009e2a0` | none (vtable/callback) |
 | `0x18009f500` | core | thunk | forwards to `0x18009f530` with extra constant arguments | none (vtable/callback) |
 | `0x18009f770` | ref | dtor | destructor (frees itself when the flag argument is set) | none (vtable/callback) |
-| `0x18009fd80` | core | zero_init | constructor/reset: sets about 44 fields to zero or defaults | `0x1800474f0`, `0x18004a9d0` +14 |
 | `0x1800a1130` | core | eh_ctor | constructs an array of 6 × 0x40-byte elements (no-op element function) | none (vtable/callback) |
 | `0x1800a1170` | core | eh_ctor | constructs an array of 6 × 0x40-byte elements (no-op element function) | none (vtable/callback) |
 | `0x1800a1670` | core | zero_init | constructor/reset: sets about 7 fields to zero or defaults | none (vtable/callback) |
@@ -864,10 +1291,8 @@ caller does with the value is in the caller's own entry.
 | `0x1800b3f00` | core | eh_ctor | destroys an array at +0x2 of 3 × 0x180-byte elements (element function `0x1800b3f50`) | none (vtable/callback) |
 | `0x1800b6e80` | core | eh_ctor | constructs an array at +0x2 of 4 × 0xaa0-byte elements (element function `0x1800ba770`) | none (vtable/callback) |
 | `0x1800b6f30` | core | eh_ctor | destroys an array at +0x2 of 4 × 0xaa0-byte elements (element function `0x1800b6f70`) | none (vtable/callback) |
-| `0x1800b6f70` | core | dtor | destructor (frees itself when the flag argument is set) | `0x180049240`, `0x18004fe10` +3 |
 | `0x1800ba770` | core | zero_init | constructor/reset of `RnD::MersenneTwister`: sets about 23 fields to zero or defaults | `0x180049240`, `0x18004fe10` +1 |
 | `0x1800bb680` | core | vec_grow | RnD::Vector grow/insert for 4-byte elements (allocates through the allocator, moves the old items) | none (vtable/callback) |
-| `0x1800bc490` | core | copy | copies a record field by field (about 30 fields) | `0x1800b9740`, `0x1800baf90` +9 |
 | `0x1800bffd0` | core | const_ret | returns a constant | none (vtable/callback) |
 | `0x1800c0100` | core | const_ret | bitwise select: bits of argument 2 where the mask (argument 3) is set, else argument 1 | none (vtable/callback) |
 | `0x1800c01f0` | core | setter | copies two packed floats with both signs flipped | none (vtable/callback) |
@@ -948,14 +1373,13 @@ caller does with the value is in the caller's own entry.
 | `0x180109d40` | core | const_ret | returns the constant 0 | none (vtable/callback) |
 | `0x180109d60` | core | dtor | destructor of `RnD::Robustifier` (frees itself when the flag argument is set) | none (vtable/callback) |
 
-### ctrl-tracker (64)
+### ctrl-tracker (63)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
 | `0x180051380` | core | eh_ctor | destroys an array at +0x700 of 64 × 0x1f0-byte elements (no-op element function) | `0x18023d1c0` |
 | `0x1800513d0` | core | eh_ctor | destroys an array of 4 × 0x40-byte elements (no-op element function) | `0x18004ab50`, `0x180050010` +7 |
 | `0x1800513f0` | core | eh_ctor | destroys an array of 16 × 0x5f0-byte elements (no-op element function) | `0x18023d2e0` |
-| `0x180051430` | core | eh_ctor | destroys an array of 6 × 0x40-byte elements (no-op element function) | `0x18004ab50`, `0x180050010` +9 |
 | `0x180051a70` | ref | vec_grow | RnD::Vector grow/insert for 8-byte elements (allocates through the allocator, moves the old items) | none (vtable/callback) |
 | `0x180051ba0` | ref | vec_free | RnD::Vector release: frees the storage through its allocator and zeroes begin/end/capacity | none (vtable/callback) |
 | `0x180051c10` | ref | vec_grow | RnD::Vector grow/insert for 4-byte elements (allocates through the allocator, moves the old items) | none (vtable/callback) |

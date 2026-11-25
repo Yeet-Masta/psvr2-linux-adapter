@@ -3362,11 +3362,14 @@ below 1 m/s, else 20 cm).
   (`0x18006f020`) and applies the error on the left with GRP
   (`δq ⊗ q̂`, a = 1, f = 4), with the IMU noise as augmented sigma
   dimensions (accel noise before gyro noise).
-- Also from §C.4.3 (2026-11-25): the Linux file clips the gyro at a fixed
-  43.6332 rad/s, Sony at ∓33.1613 (index 3–4) or ∓66.3225 rad/s (index
-  5–16) on real controllers; its accel clip of 6 g matches. Sony's output
+- Also from §C.4.3 (2026-11-25): the Linux file now takes the gyro clip
+  per hardware rev like setImuPose (`ControllerUkf::GyroRangeForRev`:
+  ∓33.1613 rad/s for rev 1, ∓66.3225 otherwise, set when the controller's
+  feature 0x20 is read); its accel clip of 6 g matches. Sony's output
   predictor (`FUN_1800821a0`: constant velocity, aim `t_ref − 16 ms`, up to
-  45 ms more while turning) has no Linux counterpart yet.
+  45 ms more while turning) is not copied on purpose: the Linux driver
+  hands SteamVR the filter time as a negative `poseTimeOffset` plus the
+  velocities, and SteamVR extrapolates to its own display time.
 - The UKF solver internals are now in `function-catalogue.md` §B.1:
   packed Cholesky without jitter, inverse of S by `DPPTRF` + `DPPTRI`.
   Open: when `DPPTRF` finds S not positive definite (positive info) the

@@ -427,6 +427,7 @@ void Psvr2ControllerDriver::UpdateBattery( const SenseState &s )
 			snprintf( buf, sizeof( buf ), "%04x", hw );
 			vr::VRProperties()->SetStringProperty( container_, vr::Prop_HardwareRevision_String, buf );
 		}
+		ukf_.SetGyroRange( ControllerUkf::GyroRangeForRev( hw ) );
 		vr::VRProperties()->SetBoolProperty( container_, vr::Prop_DeviceProvidesBatteryStatus_Bool, true );
 	}
 	if ( !s.battery_valid )

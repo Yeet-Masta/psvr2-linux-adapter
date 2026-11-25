@@ -22,7 +22,6 @@ constexpr double kDeg = 3.14159265358979323846 / 180.0;
 constexpr double kP0Pos = 0.0025, kP0Vel = 0.04;
 constexpr double kP0Att[3] = { 1.0 * kDeg * 1.0 * kDeg, 5.0 * kDeg * 5.0 * kDeg, 1.0 * kDeg * 1.0 * kDeg };
 constexpr double kGyroBase = 3.0e-4, kGyroOwn = 2.5e-5, kGyroCross = 6.25e-6, kGyroFixed = 3.04617;
-constexpr double kGyroRange = 43.6332;  // rad/s (2500 deg/s)
 constexpr double kAccBase = 8.0e-6, kAccExtra = 1.0e-4, kAccOwn = 2.5e-5, kAccCross = 6.25e-6, kAccFixed = 6.25;
 constexpr double kGateNear = 0.05, kGateFar = 0.20, kGateSpeed = 1.0;
 constexpr double kStillAccel = 1.96, kStillDamp = 0.99;
@@ -136,6 +135,14 @@ void RateNoise( const Vec3 &v, double own, double cross, double base, double fix
 }
 
 }  // namespace
+
+// Sony's setImuPose: ImuPoseIndex = 2*rev + 1 + hand. Index 3-4 (rev 1)
+// clips at 1900 deg/s, every other index of a real controller (rev 2-6,
+// and the fallback model for other or unreadable revs) at 3800 deg/s.
+double ControllerUkf::GyroRangeForRev( int rev )
+{
+	return rev == 1 ? 33.1613 : 66.3225;
+}
 
 void ControllerUkf::Reset()
 {
@@ -318,7 +325,7 @@ bool ControllerUkf::CovarianceStep( uint64_t to_us, const State &s )
 
 	// Q: Sony's IMU noise on the mean rate / accel, held over the interval.
 	double gv[3], av[3];
-	RateNoise( graw, kGyroOwn, kGyroCross, kGyroBase, kGyroFixed, kGyroRange, gv );
+	RateNoise( graw, kGyroOwn, kGyroCross, kGyroBase, kGyroFixed, gyro_range_, gv );
 	RateNoise( araw, kAccOwn, kAccCross, kAccBase + kAccExtra, kAccFixed, kAccRange, av );
 	const double T2 = T * T;
 	for ( int i = 0; i < 3; i++ )

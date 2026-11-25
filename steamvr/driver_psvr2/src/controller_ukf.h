@@ -54,6 +54,10 @@ public:
 	// Floors on the optical noise sigmas (m). Sony: position none, rotation 0.
 	void SetRotSigmaFloor( double m ) { rot_sigma_floor_ = m; }
 	void SetPosSigmaFloor( double m ) { pos_sigma_floor_ = m; }
+	// Gyro clip range (rad/s) for the process noise, set per hardware rev
+	// like Sony's setImuPose (docs/sony-re/controller-tracking.md §C.4.3).
+	void SetGyroRange( double r ) { gyro_range_ = r; }
+	static double GyroRangeForRev( int rev );
 
 	void Reset();
 
@@ -108,4 +112,5 @@ private:
 	vrmath::Vec3 bg_hint_;
 	double rot_sigma_floor_ = 0.001;
 	double pos_sigma_floor_ = 0.0;
+	double gyro_range_ = 43.6332;  // Sony's config default (2500 deg/s)
 };

@@ -310,6 +310,10 @@ int psvr2_read_pose(psvr2_t *p, struct psvr2_pose *out, int block)
 		out->position[i] = f_from_le(s.position[i]);
 	for (int i = 0; i < 4; i++)
 		out->orientation[i] = f_from_le(s.orientation[i]);
+	for (int i = 0; i < 3; i++)
+		out->delta_position[i] = f_from_le(s.delta_position[i]);
+	for (int i = 0; i < 4; i++)
+		out->delta_orientation[i] = f_from_le(s.delta_orientation[i]);
 	return 1;
 }
 

@@ -53,6 +53,13 @@ struct psvr2_pose_sample {
 	__le32	accel_bias[3];	/* +0x60: m/s^2 */
 	__le32	error_variance;	/* +0x184 */
 	__u32	map_id;		/* +0x1e4: upper 16 bits change = map latch */
+	/*
+	 * +0x2c: the record's second pose, same layout as position /
+	 * orientation. Sony's INS uses it as the "delta" pose: reported =
+	 * delta o pose (controller-tracking.md §A.5.2) [likely].
+	 */
+	__le32	delta_position[3];
+	__le32	delta_orientation[4];
 };
 
 #define PSVR2_POSE_FLAG_VALID	(1u << 0)	/* well-formed SLP record */

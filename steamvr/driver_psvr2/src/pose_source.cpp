@@ -75,6 +75,13 @@ PoseSource::PoseSource() : dev_( psvr2_open() ), ins_( new psvr2_ins ), last_sla
 	LoadImuCalibration();
 }
 
+void PoseSource::SetInsDelta( bool on )
+{
+	psvr2_ins_set_delta( ins_.get(), on ? 1 : 0 );
+	if ( on )
+		DriverLog( "psvr2: headset INS: mode-0 blender on the SLAM delta pose (headset_ins_delta)" );
+}
+
 PoseSource::~PoseSource()
 {
 	if ( dev_ )
@@ -157,6 +164,11 @@ bool PoseSource::ReadSlam( vr::DriverPose_t &out )
 	}
 	for ( int i = 0; i < 4; i++ )
 		s.quat[i] = sample.orientation[i];
+	for ( int i = 0; i < 3; i++ )
+		s.delta_pos[i] = sample.delta_position[i];
+	for ( int i = 0; i < 4; i++ )
+		s.delta_quat[i] = sample.delta_orientation[i];
+	s.has_delta = 1;
 	s.variance = sample.error_variance;
 	psvr2_ins_push_slam( ins_.get(), &s );
 	if ( !cal_done_ && ++cal_tries_ % 200 == 0 )

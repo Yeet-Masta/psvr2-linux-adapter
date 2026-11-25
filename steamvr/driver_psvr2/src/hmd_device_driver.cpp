@@ -108,6 +108,9 @@ Psvr2HmdDriver::Psvr2HmdDriver()
 	vr::EVRSettingsError ins_err = vr::VRSettingsError_None;
 	const bool ins = vr::VRSettings()->GetBool( kSettingsSection, "headset_ins", &ins_err );
 	pose_source_->SetInsEnabled( ins_err != vr::VRSettingsError_None || ins );
+	vr::EVRSettingsError delta_err = vr::VRSettingsError_None;
+	const bool delta = vr::VRSettings()->GetBool( kSettingsSection, "headset_ins_delta", &delta_err );
+	pose_source_->SetInsDelta( delta_err == vr::VRSettingsError_None && delta );
 
 	if ( !pose_source_->HasPose() )
 		DriverLog( "psvr2: /dev/psvr2-pose not found — HMD will not track (is the module loaded?)" );

@@ -26,6 +26,9 @@ public:
 	// the 2 kHz IMU to "now". Falls back to the SLAM pose until the IMU
 	// stream is open and the INS has found the frame. On by default.
 	void SetInsEnabled( bool on ) { ins_enabled_ = on; }
+	// Sony's mode-0 blender on the SLAM record's second pose (setting
+	// headset_ins_delta, default off; controller-tracking.md §A.5.2).
+	void SetInsDelta( bool on );
 
 private:
 	struct Sample

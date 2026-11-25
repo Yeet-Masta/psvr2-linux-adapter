@@ -15,6 +15,11 @@
 #define SIXDOF_TIMEOUT	500000000LL	/* 500 ms without valid SLAM */
 #define IMU_STALL	100000000LL	/* 100 ms without IMU */
 #define BATCH		64
+#define STILL_N		300		/* ring statistics window (FUN_180173830) */
+#define STILL_NS	1500000000LL	/* stationary after 1.5 s still */
+#define B0_ERR_K	0.05f		/* blender +0x68 */
+#define B0_MIN_POS	0.0005f		/* blender +0x70..+0x78 */
+#define B0_MIN_ROT	1e-6f		/* blender +0x7c..+0x84 */
 
 /* ---- frame candidates --------------------------------------------------- */
 
@@ -220,6 +225,144 @@ static void tilt_correct(struct psvr2_ins_state *s, const struct psvr2_ins_sampl
 	memcpy(s->pose + 3, q, sizeof(q));
 }
 
+/* ---- mode-0 blender on the delta pose (FUN_180181dd0, §A.5.2) ----------- */
+
+/* Pose (p, q xyzw) -> 6-vector: p and the quaternion vector part, w >= 0. */
+static void vec6(float *e, const float *p)
+{
+	const float s = p[6] > 0.0f ? 1.0f : -1.0f;
+	e[0] = p[0], e[1] = p[1], e[2] = p[2];
+	e[3] = s * p[3], e[4] = s * p[4], e[5] = s * p[5];
+}
+
+static void pose6(float *p, const float *e)
+{
+	const float n = e[3] * e[3] + e[4] * e[4] + e[5] * e[5];
+	p[0] = e[0], p[1] = e[1], p[2] = e[2];
+	p[3] = e[3], p[4] = e[4], p[5] = e[5];
+	p[6] = n < 1.0f ? sqrtf(1.0f - n) : 0.0f;
+}
+
+static void rotate(float *r, const float *q, const float *v)
+{
+	const float vq[4] = { v[0], v[1], v[2], 0.0f }, qc[4] = { -q[0], -q[1], -q[2], q[3] };
+	float t[4], u[4];
+	psvr2_ins_quat_mul(t, q, vq);
+	psvr2_ins_quat_mul(u, t, qc);
+	r[0] = u[0], r[1] = u[1], r[2] = u[2];
+}
+
+/* a o b */
+static void compose(float *r, const float *a, const float *b)
+{
+	float t[3];
+	rotate(t, a + 3, b);
+	r[0] = a[0] + t[0], r[1] = a[1] + t[1], r[2] = a[2] + t[2];
+	psvr2_ins_quat_mul(r + 3, a + 3, b + 3);
+}
+
+static void invert(float *r, const float *a)
+{
+	const float qc[4] = { -a[3], -a[4], -a[5], a[6] };
+	float t[3];
+	rotate(t, qc, a);
+	r[0] = -t[0], r[1] = -t[1], r[2] = -t[2];
+	memcpy(r + 3, qc, sizeof(qc));
+}
+
+/* The error pose E expressed in out's body axes, as a 6-vector. */
+static void body6(float *e, const float *E, const float *out)
+{
+	const float qc[4] = { -out[3], -out[4], -out[5], out[6] };
+	float b[7], t[4];
+	rotate(b, qc, E);
+	psvr2_ins_quat_mul(t, qc, E + 3);
+	psvr2_ins_quat_mul(b + 3, t, out + 3);
+	vec6(e, b);
+}
+
+static int blend0(struct psvr2_ins *ins, float *out, const float *tg, float dt, const float *w_world)
+{
+	float A[6] = { 0, 0, 0, fabsf(w_world[0]) * dt, fabsf(w_world[1]) * dt, fabsf(w_world[2]) * dt };
+	float inv[7], E[7], er[6], Eb[7], e[6], e2[6], c[6], C[7], r[7];
+	const float snap[6] = { POS_GATE, POS_GATE, POS_GATE, ROT_GATE, ROT_GATE, ROT_GATE };
+	int jump = 0;
+
+	for (int i = 0; i < 7; i++)
+		if (isnan(tg[i]) || isnan(out[i]))
+			return 0;
+	for (int i = 3; i < 6; i++)
+		if (isnan(A[i]))
+			return 0;
+	invert(inv, out);
+	compose(E, tg, inv);
+	vec6(er, E);
+	for (int i = 0; i < 6; i++)
+		ins->b0_err[i] += (er[i] - ins->b0_err[i]) * B0_ERR_K;
+	pose6(Eb, ins->b0_err);
+	body6(e, Eb, out);
+	body6(e2, E, out);
+
+	const float tgt[6] = {
+		fmaxf(B0_MIN_POS, A[0]) + 20.0f * A[4] + 20.0f * A[5],
+		fmaxf(B0_MIN_POS, A[1]) + 20.0f * A[5] + 20.0f * A[3],
+		fmaxf(B0_MIN_POS, A[2]) + 20.0f * A[3] + 20.0f * A[4],
+		fmaxf(B0_MIN_ROT, 4.0f * A[3]),
+		fmaxf(B0_MIN_ROT, 4.0f * A[4]),
+		fmaxf(B0_MIN_ROT, 4.0f * A[5]),
+	};
+	for (int i = 0; i < 6; i++) {
+		const float m = fabsf(e[i]);
+		if (m > snap[i])
+			jump = 1;
+		ins->b0_gain[i] += (tgt[i] - ins->b0_gain[i]) * 1.0f;	/* +0x60 = 1.0 */
+		c[i] = (e2[i] > 0.0f ? 1.0f : -1.0f) * fmaxf(0.0f, m) * ins->b0_gain[i];
+		if (isnan(c[i]))
+			jump = 1;
+	}
+	if (jump) {
+		memcpy(out, tg, 7 * sizeof(float));
+		return 1;
+	}
+	pose6(C, c);
+	compose(r, out, C);
+	memcpy(out, r, sizeof(r));
+	qnorm(out + 3);
+	return 0;
+}
+
+/* Sony's stillness test (FUN_1801732f0) over the newest STILL_N samples. */
+static int still_now(const struct psvr2_ins *ins)
+{
+	const unsigned int n = ins->count < STILL_N ? ins->count : STILL_N;
+	double m[6] = { 0 }, s[6] = { 0 };
+
+	if (n < 5)
+		return 0;
+	for (unsigned int k = 0; k < n; k++) {
+		const struct psvr2_ins_sample *x = &ins->ring[ring_idx(ins, k)];
+		const float v[6] = { x->accel[0], x->accel[1], x->accel[2], x->gyro[0], x->gyro[1], x->gyro[2] };
+		for (int i = 0; i < 6; i++) {
+			m[i] += v[i];
+			s[i] += (double)v[i] * v[i];
+		}
+	}
+	double va = 0, vg = 0;
+	for (int i = 0; i < 6; i++) {
+		const double mean = m[i] / n, var = s[i] / n - mean * mean;
+		if (i < 3)
+			va += var * var;
+		else
+			vg += var * var;
+	}
+	return va < 3.0 * 0.05 * 0.05 && vg < 3.0 * 0.005 * 0.005;
+}
+
+void psvr2_ins_set_delta(struct psvr2_ins *ins, int on)
+{
+	ins->use_delta = on;
+}
+
 void psvr2_ins_tick(struct psvr2_ins *ins)
 {
 	struct psvr2_ins_sample b[BATCH];
@@ -248,7 +391,23 @@ void psvr2_ins_tick(struct psvr2_ins *ins)
 		memcpy(hold, ins->out.pose, sizeof(hold));
 		psvr2_ins_strapdown(&ins->out, &ins->out, ins->period, n, b);
 		psvr2_ins_strapdown(&ins->vio, &ins->vio, ins->period, n, b);
+		if (still_now(ins)) {
+			ins->still_ns += (int64_t)n * 500000;
+			ins->stationary = ins->still_ns > STILL_NS;
+		} else {
+			ins->still_ns = 0;
+			ins->stationary = 0;
+		}
 		if (ins->sixdof) {
+			if (ins->use_delta) {
+				/* Blender +0x3b0: delta toward the VIO delta, rate in world axes. */
+				float ww[3];
+				rotate(ww, ins->out.pose + 3, ins->out.prev_gyro);
+				if (ins->stationary)
+					psvr2_ins_blend1(ins->out.delta, ins->vio.delta, T, POS_GATE, ROT_GATE, NULL, NULL);
+				else if (blend0(ins, ins->out.delta, ins->vio.delta, T, ww))
+					ins->delta_snaps++;
+			}
 			psvr2_ins_blend1(ins->out.pose, ins->vio.pose, T, POS_GATE, ROT_GATE, ins->out.vel,
 					 ins->vio.vel);
 			memcpy(ins->out.gyro_bias, ins->vio.gyro_bias, sizeof(ins->out.gyro_bias));
@@ -403,6 +562,14 @@ void psvr2_ins_push_slam(struct psvr2_ins *ins, const struct psvr2_ins_slam *s)
 		memcpy(v.accel_bias, s->accel_bias, sizeof(v.accel_bias));
 	v.gravity[1] = -9.8f;
 	v.delta[6] = 1.0f;
+	if (ins->use_delta && s->has_delta && !bad_vec(s->delta_pos, 100.0f)) {
+		float d[7];
+		memcpy(d, s->delta_pos, sizeof(s->delta_pos));
+		decode_q(d + 3, s->delta_quat, ins->frame / 24);
+		qnorm(d + 3);
+		if (psvr2_ins_pose_ok(d))
+			memcpy(v.delta, d, sizeof(d));
+	}
 
 	/* Previous sample (at or before t_slam) seeds the trapezoid. */
 	const unsigned int n = newer_than(ins, s->t_ns);
@@ -434,6 +601,11 @@ void psvr2_ins_push_slam(struct psvr2_ins *ins, const struct psvr2_ins_slam *s)
 		ins->out = v;
 		ins->latched = 1;
 		ins->latches++;
+		/* FUN_1801828f0: both blenders reset at the latch. */
+		memset(ins->b0_err, 0, sizeof(ins->b0_err));
+		memset(ins->b0_gain, 0, sizeof(ins->b0_gain));
+	} else {
+		/* The output keeps its own delta; the VIO filter carries the new one. */
 	}
 	if (!ins->have_state || n == 0)
 		ins->t_ins_ns = n ? ins->ring_ns[ring_idx(ins, 0)] : (s->t_ns > ins->t_ins_ns ? s->t_ns : ins->t_ins_ns);

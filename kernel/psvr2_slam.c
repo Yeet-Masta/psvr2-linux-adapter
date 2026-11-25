@@ -218,6 +218,8 @@ static void psvr2_slam_process(struct psvr2_slam *sl, int len)
 	memcpy(&sample.error_variance, sl->buf + 0x184,
 	       sizeof(sample.error_variance));
 	sample.map_id = get_unaligned_le32(sl->buf + 0x1e4);
+	memcpy(sample.delta_position, sl->buf + 0x2c, sizeof(sample.delta_position));
+	memcpy(sample.delta_orientation, sl->buf + 0x38, sizeof(sample.delta_orientation));
 	if (sample.state == 3 || sample.valid_flag == 1 || sample.substate == 5)
 		sample.flags |= PSVR2_POSE_FLAG_TRACKING;
 

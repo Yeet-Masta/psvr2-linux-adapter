@@ -36,6 +36,8 @@ struct psvr2_pose {
 	float	 gyro_bias[3];		/* rad/s */
 	float	 accel_bias[3];		/* m/s^2 */
 	float	 error_variance;
+	float	 delta_position[3];	/* record +0x2c, raw frame like position */
+	float	 delta_orientation[4];	/* record +0x38, same order as orientation */
 };
 
 struct psvr2_eye {

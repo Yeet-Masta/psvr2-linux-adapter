@@ -17,9 +17,13 @@
  *   wants n > 30 good samples and a +0x188 value we do not get).
  * - 3DoF tilt correction is a plain complementary step (Sony's
  *   FUN_180171400 is not ported). The output position is held in 3DoF.
- * - Blender: mode 1 on the pose only. Sony's mode-0 blender moves the
- *   output's delta pose toward the VIO delta from the SLAM sample
- *   (controller-tracking.md §A.5.2); here both deltas stay the identity.
+ * - Blender: mode 1 on the pose (Sony's +0x470). Sony's mode-0 blender
+ *   (+0x3b0) moves the output's delta pose toward the VIO delta taken from
+ *   the SLAM sample's second pose (controller-tracking.md §A.5.2); it runs
+ *   here only with psvr2_ins_set_delta(ins, 1), because which record pose
+ *   is the delta is [likely], not sure. Off: both deltas are the identity.
+ * - Stillness (§A.5.7): variance test over the newest 300 IMU samples,
+ *   stationary after 1.5 s; it switches the delta blend to mode 1.
  */
 #ifndef PSVR2_INS_H
 #define PSVR2_INS_H
@@ -44,6 +48,9 @@ struct psvr2_ins_slam {
 	float quat[4];			/* exactly as libpsvr2 reports it */
 	float vel[3], gyro_bias[3], accel_bias[3];
 	float variance;			/* record +0x184 */
+	float delta_pos[3];		/* record +0x2c, raw frame */
+	float delta_quat[4];		/* record +0x38, as libpsvr2 reports it */
+	int has_delta;
 };
 
 struct psvr2_ins {
@@ -72,6 +79,12 @@ struct psvr2_ins {
 	int det_have;
 
 	unsigned int latches, resets, slam_drops;
+
+	int use_delta;			/* psvr2_ins_set_delta */
+	float b0_err[6], b0_gain[6];	/* mode-0 blender state */
+	int64_t still_ns;
+	int stationary;
+	unsigned int delta_snaps;
 };
 
 void psvr2_ins_init(struct psvr2_ins *ins, float accel_scale, float gyro_scale);
@@ -80,6 +93,8 @@ int psvr2_ins_set_calibration(struct psvr2_ins *ins, const void *imu_calib, unsi
 			      const void *imu_set_calib, unsigned int n13);
 /* One raw IMU sample (accel s16[3], gyro s16[3]) at its capture time. */
 void psvr2_ins_push_imu(struct psvr2_ins *ins, const int16_t *accel, const int16_t *gyro, int64_t t_ns);
+/* Run Sony's mode-0 blender on the SLAM delta pose (default off). */
+void psvr2_ins_set_delta(struct psvr2_ins *ins, int on);
 /* Integrate the pushed samples into both filters. */
 void psvr2_ins_tick(struct psvr2_ins *ins);
 /* One SLAM sample. Call psvr2_ins_tick() first so the IMU is current. */

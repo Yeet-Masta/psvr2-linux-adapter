@@ -5,6 +5,9 @@
  * late in a chosen quaternion order. Checks that the INS finds the frame
  * and that its pose at "now" beats the latest SLAM sample extrapolated
  * with finite-difference velocities (what the driver did before).
+ * Delta case: from 8 s on the SLAM samples carry a 3 cm map correction in
+ * their second pose and the main pose moves by -3 cm; with the mode-0
+ * delta blender the reported pose must come back onto the truth.
  */
 #include <math.h>
 #include <stdio.h>
@@ -115,7 +118,7 @@ struct slam_q {
 	double deliver;
 };
 
-static int run(int order, int map, int drop)
+static int run(int order, int map, int drop, int delta)
 {
 	struct psvr2_ins *ins = calloc(1, sizeof(*ins));
 	static struct slam_q q[64];
@@ -125,12 +128,13 @@ static int run(int order, int map, int drop)
 
 	double e_ins_r = 0, e_ins_p = 0, e_b_r = 0, e_b_p = 0, m_ins_r = 0, m_ins_p = 0;
 	int ne = 0, found_at = -1, dof3 = 0;
-	double m_drop_r = 0;
+	double m_drop_r = 0, m_delta_p = 0;
 	struct psvr2_ins_slam last = { 0 }, prev = { 0 };
 	int have_last = 0;
 
 	rs = 7 + order * 31 + map;
 	psvr2_ins_init(ins, (float)kAs, (float)kGs);
+	psvr2_ins_set_delta(ins, delta);
 	const float *M = maps[map];
 
 	for (long k = 0; k * dt < T; k++) {
@@ -176,11 +180,15 @@ static int run(int order, int map, int drop)
 			double qn[4], nz[3] = { 0.0003 * gauss(), 0.0003 * gauss(), 0.0003 * gauss() }, dqn[4];
 			qexp(dqn, nz);
 			qmul(qn, qt_true, dqn);
+			const double dlt[3] = { delta && tn >= 8.0 ? 0.03 : 0.0, 0.0, 0.0 }, qid[4] = { 0, 0, 0, 1 };
 			for (int i = 0; i < 3; i++) {
-				e->s.pos[i] = (float)(p[i] + 0.0003 * gauss());
+				e->s.pos[i] = (float)(p[i] - dlt[i] + 0.0003 * gauss());
 				e->s.vel[i] = (float)v[i];
+				e->s.delta_pos[i] = (float)dlt[i];
 			}
 			encode_q(e->s.quat, qn, order);
+			encode_q(e->s.delta_quat, qid, order);
+			e->s.has_delta = 1;
 			e->s.variance = 0.01f;
 			e->deliver = tn + 0.012;
 		}
@@ -237,6 +245,10 @@ static int run(int order, int map, int drop)
 				const double d = last.pos[i] + last.vel[i] * age - pt[i];
 				eb += d * d;
 			}
+			if (delta && tn >= 8.0 && tn < 15.0) {
+				if (ep > m_delta_p) m_delta_p = ep;
+				continue;
+			}
 			if (tn >= 10.0 && tn < 12.0) {
 				if (er > m_drop_r) m_drop_r = er;
 				dof3 += psvr2_ins_query(ins, (int64_t)llround(tq * 1e9), pp, qq, vv) == 2;
@@ -263,6 +275,9 @@ static int run(int order, int map, int drop)
 	printf("  SLAM+fd rot %.4f deg              pos %.3f mm\n", e_b_r, e_b_p * 1e3);
 	if (drop)
 		printf("  2 s SLAM dropout: max rot %.3f deg, %d queries in 3DoF\n", m_drop_r, dof3);
+	if (delta)
+		printf("  delta 3 cm at 8 s: max pos %.1f mm while blending (8-15 s), %u delta snaps\n", m_delta_p * 1e3,
+		       ins->delta_snaps);
 	if (!ok_frame) {
 		int b = 0;
 		for (int i = 1; i < PSVR2_INS_NFRAME; i++)
@@ -280,10 +295,11 @@ int main(void)
 {
 	build_maps();
 	int ok = 1;
-	ok &= run(1, 7, 0);
-	ok &= run(0, 0, 0);
-	ok &= run(3, 17, 0);
-	ok &= run(1, 0, 1);
+	ok &= run(1, 7, 0, 0);
+	ok &= run(0, 0, 0, 0);
+	ok &= run(3, 17, 0, 0);
+	ok &= run(1, 0, 1, 0);
+	ok &= run(1, 7, 0, 1);
 	puts(ok ? "PASS" : "FAIL");
 	return ok ? 0 : 1;
 }

@@ -2405,8 +2405,8 @@ the INS is 6-DoF (`FUN_1801752b0`), else 3.
    §C.4.1).
 6. Two controllers: `FUN_1800a5e30` → `FUN_1800ad2b0`.
 7. LD `+0x08` → frame time offset; `DAT_18035ba14`.
-8. Meaning of status 6's fallback (`FUN_1801b99a0`, "OcclusionQueries")
-   and `+0x441d8[hand]`.
+8. ~~Status 6's fallback~~: part F §F.3.6 (an 80° view-cone clamp; the
+   enable byte `+0x441d8[hand]` is never set on PC).
 
 ### C.9 Function map
 
@@ -2915,9 +2915,7 @@ that hand's arm state):
      is slerped 75 % toward the needed rotation, twists are limited to
      ±60° about the bone axis (swing–twist, `0x1801afaf0`), and the elbow
      solution (up or down) follows the "arm raised" flag, flipped when the
-     hand moves more than 1.5 cm [likely: how the rotation is split
-     between the joints is in `0x1801aeaf0`, `0x1801aefb0`, `0x1801af610`,
-     not yet written up];
+     hand moves more than 1.5 cm (joint limits in §F.3.5);
    - output per hand (stride 0x50 from the object start): +0x10 elbow,
      +0x1c wrist, +0x28 **hand position**;
    - the return value is an angle in radians; the IR thread accepts it if
@@ -2931,6 +2929,41 @@ that hand's arm state):
 5. Statistics: distance moved since the last frame, binned at
    0.05/0.1/0.2/0.3/0.4 m into counters (`irt+0x4f4a4`, `irt+0x4f4b0`),
    split by fixes older than 2 s [likely: diagnostics only].
+
+#### F.3.5 Joint limits of the FK chain [sure unless tagged]
+
+Each joint function takes the parent bone's world pose and the child pose
+the chain wants, expresses the child rotation in the parent frame
+(`q_local = conj(q_parent) ⊗ q_child`), splits it into a **twist** about
+the bone axis z (`0x1801afaf0`) and the remaining **swing**, clamps the
+angles (`0x1801b0f50` axis–angle, `0x18016f2d0` rebuild), and composes
+the result back onto the parent. If nothing was clamped the child pose is
+returned unchanged. Hand 1 mirrors the sign of the hinge axis or offset.
+
+| Joint | Function | Parent frame | Twist about z | Swing |
+|---|---|---|---|---|
+| Shoulder | `0x1801aefb0` | parent rotated by 45° about y (−45° for hand 1) | clamped to ±90° | clamped to ±100 **rad**, so never limited (another degrees/radians slip) |
+| Elbow | `0x1801aeaf0` | parent | clamped to ±100° | only its component about **+y** (−y for hand 1) is kept, clamped to 0..160°; the rest of the swing is dropped (a hinge) |
+| Wrist | `0x1801af610` | parent | removed (clamped to 0) | clamped to ±75° |
+
+So the forearm can twist ±100° at the elbow, the wrist bends up to 75° in
+any direction but cannot twist, and the elbow bends one way only.
+
+#### F.3.6 Pose-output helpers (`FUN_180189c70`) [sure unless tagged]
+
+- `0x1801b11e0` (arm-model object `irt+0x4d380`): when the hand's
+  model flag `+0x29c + hand` is set, return the model hand position at
+  time t, linear between the two slots `+0x2a0 + 12·hand` and
+  `+0x2b8 + 12·hand`, with `(t − slot time) / 100 000 µs` as the weight
+  (the slot time is at `+0x2d0 + 8·hand`).
+- `0x1801b99a0` (status 6, "OcclusionQueries"): takes the head pose at t
+  (`OcclusionQueriesVrTracker` vtable `+0x10`) composed with the config
+  transform (`+0x08`), pitches the view axis 5° down, and if the held
+  controller position lies **more than 80° off the view axis**
+  (`0x1801b93f0`), rotates it about the eye point onto the 80° cone. The
+  caller uses it only when `irt+0x441d8 + hand` is set. That byte is
+  zeroed by the IR-tracker constructor and nothing in the DLL writes it,
+  so on PC status 6 does not occur [likely].
 
 ### F.4 Function map
 
@@ -2959,9 +2992,9 @@ that hand's arm state):
 | `0x1801afaf0` | swing–twist: twist of a quaternion about an axis |
 | `0x1801b0f50` | quaternion → axis–angle, angle in (−π, π] |
 | `0x180170dc0` | slerp (shortest path; lerp when cos > 0.9999) |
-| `0x1801aeaf0`, `0x1801aefb0`, `0x1801af610` | joint solvers used by the FK chain (not yet written up) |
+| `0x1801aefb0`, `0x1801aeaf0`, `0x1801af610` | shoulder, elbow, wrist joint limits (§F.3.5) |
 | `0x1801b0dc0`, `0x1801b0e70`, `0x1801b10b0` | other-mode helpers of `0x1801b37b0` (unused on PC) |
-| `0x1801b11e0`, `0x1801b99a0` | arm-model helpers called from the optical solve (not yet written up) |
+| `0x1801b11e0`, `0x1801b99a0` | model hand position at t; status-6 view-cone clamp (§F.3.6) |
 
 ---
 

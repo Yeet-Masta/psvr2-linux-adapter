@@ -2,8 +2,10 @@
 // Offline check of ControllerUkf on a simulated controller: 1 kHz IMU with
 // noise and bias, 60 Hz optical fixes with noise, 25 ms latency, outliers and
 // a 1 s dropout. Prints error statistics; exits non-zero if they are off.
+// UKF_ARM=1: during the dropout, arm-model pseudo fixes (truth + a 4 cm
+// model error + 1 cm noise) as the driver feeds them after 0.3 s.
 //
-//   ./build.sh && ./ukf_sim
+//   ./build.sh && ./ukf_sim && UKF_ARM=1 ./ukf_sim
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -76,6 +78,9 @@ int main()
 		ukf.SetPosSigmaFloor( std::atof( e ) * 1e-3 );
 	if ( const char *e = std::getenv( "UKF_ROT_FLOOR_MM" ) )
 		ukf.SetRotSigmaFloor( std::atof( e ) * 1e-3 );
+	const bool arm = std::getenv( "UKF_ARM" ) && std::atoi( std::getenv( "UKF_ARM" ) ) != 0;
+	double next_arm = 0.0, drop_end_err = 0.0;
+	int arm_applied = 0;
 	std::deque<Pending> pending;
 	double next_fix = 0.05;
 	int applied = 0, gated = 0, inits = 0, outliers = 0;
@@ -121,6 +126,20 @@ int main()
 				pending.push_back( { t + latency, f } );
 			}
 		}
+		if ( arm && ukf.Initialized() && t >= next_arm && us > ukf.LastFixUs() + 300000 )
+		{
+			next_arm = t + fix_dt;
+			ControllerUkf::Fix f;
+			f.us = us;
+			f.pos = vrmath::Add( vrmath::Add( TruePos( t ), { 0.04, 0.0, 0.0 } ), noise( 0.01 ) );
+			f.has_rot = false;
+			f.pseudo = true;
+			f.sigma = Norm( Sub( f.pos, ukf.Position() ) ) < 0.1 ? 0.005 : 0.05;
+			if ( ukf.AddFix( f ) == ControllerUkf::kApplied )
+				arm_applied++;
+		}
+		if ( ukf.Initialized() && t >= 11.0 && t < 11.0 + imu_dt )
+			drop_end_err = Norm( Sub( ukf.Position(), TruePos( t ) ) );
 		while ( !pending.empty() && pending.front().deliver <= t )
 		{
 			const auto r = ukf.AddFix( pending.front().fix );
@@ -167,7 +186,10 @@ int main()
 	std::printf( "fixes: applied %d, gated %d (outliers %d), inits %d\n", applied, gated, outliers, inits );
 	std::printf( "pos rms %.2f mm (max %.2f), rot rms %.3f deg; latest-fix hold rms %.2f mm\n", rms_pos,
 	             max_pos * 1000.0, rms_rot, rms_hold );
-	std::printf( "1 s dropout: max pos error %.1f mm\n", drop_max * 1000.0 );
+	std::printf( "1 s dropout: max pos error %.1f mm; filter error at its end %.1f mm%s\n", drop_max * 1000.0,
+	             drop_end_err * 1000.0, arm ? " (arm model)" : "" );
+	if ( arm )
+		std::printf( "arm-model pseudo fixes applied %d\n", arm_applied );
 	const Vec3 ab = ukf.AccelBias();
 	std::printf( "accel bias est (%.3f %.3f %.3f), true (%.3f %.3f %.3f)\n", ab.x, ab.y, ab.z, ba.x, ba.y, ba.z );
 	std::printf( "gyro bias est (%.4f %.4f %.4f), true (%.4f %.4f %.4f)\n", gb.x, gb.y, gb.z, bg.x, bg.y, bg.z );
@@ -177,7 +199,7 @@ int main()
 	// bounded by the motion over the gap.
 	const bool bias_ok = Norm( Sub( gb, bg ) ) < 0.2 * Norm( bg ) && Norm( Sub( ab, ba ) ) < 0.2 * Norm( ba );
 	bool ok = inits <= 2 && rms_pos < 2.0 && rms_rot < 0.3 && gated >= outliers && gated <= outliers + 2 && bias_ok &&
-	          drop_max < 0.35;
+	          drop_max < 0.35 && ( !arm || ( drop_end_err < 0.08 && arm_applied > 30 ) );
 	std::printf( "%s\n", ok ? "PASS" : "FAIL" );
 	return ok ? 0 : 1;
 }

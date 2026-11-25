@@ -149,6 +149,7 @@ void ControllerUkf::Reset()
 	init_ = false;
 	rejects_ = 0;
 	last_fix_us_ = 0;
+	last_pseudo_us_ = 0;
 	for ( auto &row : P_ )
 		std::fill( std::begin( row ), std::end( row ), 0.0 );
 }
@@ -375,6 +376,8 @@ bool ControllerUkf::Update( State &s, const Fix &f )
 		if ( f.cam_dist > kFarDist )
 			sp = kSigmaPosFar;
 	}
+	if ( f.sigma > 0.0 )
+		sp = f.sigma;
 	sp = std::max( sp, pos_sigma_floor_ );
 	sr = std::max( sr, rot_sigma_floor_ );
 
@@ -545,7 +548,9 @@ ControllerUkf::Result ControllerUkf::AddFix( const Fix &f_in )
 	Fix f = f_in;
 	if ( f.us > ring_.back().us )
 		f.us = ring_.back().us;  // the IMU has not caught up: apply at its newest time
-	if ( f.us < ring_.front().us || ( init_ && f.us <= last_fix_us_ ) )
+	if ( f.pseudo && ( !init_ || f.has_rot || f.us <= std::max( last_fix_us_, last_pseudo_us_ ) ) )
+		return kRejected;
+	if ( f.us < ring_.front().us || ( init_ && !f.pseudo && f.us <= last_fix_us_ ) )
 		return kRejected;
 
 	// Last sample at or before the fix time.
@@ -558,7 +563,19 @@ ControllerUkf::Result ControllerUkf::AddFix( const Fix &f_in )
 	s.us = f.us;
 
 	Result res;
-	if ( !init_ )
+	if ( f.pseudo )
+	{
+		CovarianceStep( f.us, s );
+		if ( !Update( s, f ) )
+		{
+			Reset();
+			return kRejected;
+		}
+		Guard( s );
+		last_pseudo_us_ = f.us;
+		res = kApplied;
+	}
+	else if ( !init_ )
 	{
 		if ( !f.has_rot )
 			return kRejected;
@@ -596,9 +613,12 @@ ControllerUkf::Result ControllerUkf::AddFix( const Fix &f_in )
 			res = kApplied;
 		}
 	}
-	rejects_ = 0;
-	last_fix_us_ = f.us;
-	fix_pos_ = s.p;
+	if ( !f.pseudo )
+	{
+		rejects_ = 0;
+		last_fix_us_ = f.us;
+		fix_pos_ = s.p;
+	}
 
 	// Replay the IMU after the fix time.
 	cur_ = s;

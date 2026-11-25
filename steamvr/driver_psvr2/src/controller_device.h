@@ -81,6 +81,7 @@ private:
 	void IoThread();
 	void HandleState( const SenseState &s );
 	void FeedUkf( const SenseState &s, double dt );
+	void FeedArmModel( uint64_t now_us );
 	void FillOutput( SenseOutput &out );
 	vr::DriverPose_t BuildPose();
 	// Queue an alert buzz: alternating on/off durations in seconds.
@@ -181,6 +182,11 @@ private:
 	bool ukf_enabled_ = true;
 	uint64_t ukf_hold_us_ = 300000;  // Sony: optical position held after 0.3 s
 	uint64_t ukf_seq_used_ = 0;
+	// Arm-model pseudo measurements (setting optical_arm_model, default on;
+	// docs/sony-re/controller-tracking.md §F.3.4).
+	bool arm_model_enabled_ = true;
+	uint64_t arm_last_us_ = 0, arm_moved_us_ = 0;
+	unsigned int arm_fixes_ = 0;
 	uint64_t imu_host_us_ = 0;       // IMU sample time on the host clock
 	std::mutex imu_mutex_;
 	vr::HmdQuaternion_t imu_q_ = vrmath::Identity();

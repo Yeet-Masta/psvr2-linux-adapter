@@ -7,6 +7,7 @@
 #include <cstring>
 #include <poll.h>
 
+#include "arm_model.h"
 #include "driverlog.h"
 #include "hand_simulation.h"
 #include "hmd_device_driver.h"
@@ -352,6 +353,7 @@ void Psvr2ControllerDriver::LoadSettings()
 	SenseHid::SetLedSync( GetBoolSetting( "optical_tracking", false ) );
 	ukf_enabled_ = GetBoolSetting( "optical_ukf", true );
 	ukf_hold_us_ = uint64_t( std::clamp( GetFloatSetting( "optical_ukf_hold_ms", 300.0f ), 0.0f, 5000.0f ) * 1000.0f );
+	arm_model_enabled_ = GetBoolSetting( "optical_arm_model", true );
 	ukf_.SetRotSigmaFloor( std::clamp( GetFloatSetting( "optical_ukf_rot_sigma_mm", 1.0f ), 0.01f, 100.0f ) * 1e-3 );
 	ukf_.SetPosSigmaFloor( std::clamp( GetFloatSetting( "optical_ukf_pos_sigma_mm", 0.0f ), 0.0f, 100.0f ) * 1e-3 );
 	default_trigger_ = DefaultTriggerEffect();
@@ -571,6 +573,7 @@ void Psvr2ControllerDriver::FeedUkf( const SenseState &s, double dt )
 		std::lock_guard<std::mutex> lock( optical_mutex_ );
 		o = optical_;
 	}
+	FeedArmModel( imu_host_us_ );
 	if ( !o.have || o.seq == ukf_seq_used_ )
 		return;
 	ukf_seq_used_ = o.seq;
@@ -583,6 +586,43 @@ void Psvr2ControllerDriver::FeedUkf( const SenseState &s, double dt )
 	const ControllerUkf::Result r = ukf_.AddFix( f );
 	if ( r == ControllerUkf::kInitialized )
 		DriverLog( "psvr2: %s controller: optical filter (re)started", left_ ? "left" : "right" );
+}
+
+// Sony's arm model as a position-only measurement (docs/sony-re/controller-tracking.md §F.3.4
+// step 4): once the optical fix is 0.3 s old, or the controller is out of
+// view after recent motion, at most once per 1/60 s. The output still holds
+// the last fix position (§C.5); this only keeps the filter near the body so
+// it is close when the LEDs come back.
+void Psvr2ControllerDriver::FeedArmModel( uint64_t now_us )
+{
+	if ( !arm_model_enabled_ || !hmd_ || !ukf_.Initialized() || now_us < arm_last_us_ + 16666 )
+		return;
+	const vr::DriverPose_t head = hmd_->GetPose();
+	if ( !head.poseIsValid )
+		return;
+	const vrmath::Vec3 head_pos{ head.vecPosition[0], head.vecPosition[1], head.vecPosition[2] };
+	const vrmath::Vec3 pred = ukf_.Position();
+	const vrmath::Vec3 &v = ukf_.Velocity();
+	if ( std::sqrt( v.x * v.x + v.y * v.y + v.z * v.z ) >= armmodel::kMovedSpeed )
+		arm_moved_us_ = now_us;
+	const bool right = !left_;
+	const bool stale = now_us > ukf_.LastFixUs() + uint64_t( armmodel::kStaleS * 1e6 );
+	const bool moved = arm_moved_us_ && now_us < arm_moved_us_ + uint64_t( armmodel::kMovedWindowS * 1e6 );
+	if ( !stale && !( moved && armmodel::OutOfView( head_pos, head.qRotation, pred, right ) ) )
+		return;
+	const vr::HmdQuaternion_t grip = vrmath::Mul( vrmath::Mul( ukf_.Orientation(), kImuToGrip ), calibration_ );
+	const armmodel::Result a = armmodel::Solve( head_pos, head.qRotation, grip, pred.y, right );
+	const vrmath::Vec3 d{ a.hand.x - pred.x, a.hand.y - pred.y, a.hand.z - pred.z };
+	const double dist = std::sqrt( d.x * d.x + d.y * d.y + d.z * d.z );
+	ControllerUkf::Fix f;
+	f.us = now_us;
+	f.pos = a.hand;
+	f.has_rot = false;
+	f.pseudo = true;
+	f.sigma = dist < armmodel::kAgreeDist ? armmodel::kSigmaAgree : armmodel::kSigmaDisagree;
+	if ( ukf_.AddFix( f ) == ControllerUkf::kApplied && ( ++arm_fixes_ % 600 ) == 1 )
+		DriverLog( "psvr2: %s controller: arm model fixes %u (offset %.3f m)", left_ ? "left" : "right", arm_fixes_, dist );
+	arm_last_us_ = now_us;
 }
 
 void Psvr2ControllerDriver::HandleState( const SenseState &s )

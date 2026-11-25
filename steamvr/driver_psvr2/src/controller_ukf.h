@@ -39,6 +39,11 @@ public:
 		bool has_rot = true;       // false: position only
 		vrmath::Vec3 head_rel;     // IMU position in the head frame, m (noise zone)
 		double cam_dist = 0.0;     // controller distance from the camera rig, m
+		// Arm-model pseudo measurement (docs/sony-re/controller-tracking.md §F.3.4):
+		// position only with this sigma; no gate [ours], no re-init, and
+		// LastFixUs() / FixPosition() keep referring to the optical fixes.
+		bool pseudo = false;
+		double sigma = 0.0;        // m, > 0 overrides the noise model
 	};
 
 	enum Result
@@ -107,6 +112,7 @@ private:
 	double P_[N][N] = {};
 	uint64_t p_us_ = 0;  // time the covariance refers to
 	uint64_t last_fix_us_ = 0;
+	uint64_t last_pseudo_us_ = 0;
 	vrmath::Vec3 fix_pos_;
 	int rejects_ = 0;
 	vrmath::Vec3 bg_hint_;

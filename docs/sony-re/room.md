@@ -474,11 +474,89 @@ most 256, and go on only if at least `searcher+0x04` remain. Then
 `FUN_1801fd280` (671 lines) checks the candidates and estimates the pose,
 and, when frame `0x9ae68` is 1, `FUN_1801f8a90` runs.
 
-Still open: how searches A and B rank keyframes (`FUN_1801fa220`,
-`FUN_1801fa720`, `FUN_1801f7fd0`), the descriptor matching
-(`FUN_1801f90d0`, `FUN_1801fbac0`), the pose check in `FUN_1801fd280`
-(`FUN_1801fc140`, `FUN_1801f94a0` → `FUN_18022bb70`), the config values
-behind `searcher+0x04/+0x20/+0x38/+0x3c`, UpdateMap and OptimizeMap.
+#### Keyframe retrieval: vocabulary-tree bag of words [sure unless tagged]
+
+Search B (`FUN_1801fb880` → `FUN_1801fa720`) ranks keyframes by image
+similarity:
+
+1. **Word lookup** (`FUN_1801f4430`). Each query descriptor (32 × s16,
+   the 64 bytes per keypoint) walks a vocabulary tree from the root.
+   - A node is 24 bytes: `+1` leaf flag, `+2` child count (2 or 3), `+8`
+     child indices (s16), `+16` child centres (32 × s16 each).
+   - At each level it takes the child with the smallest squared
+     Euclidean distance (int16 differences, AVX2), for at most
+     `vocab+0x04` levels or until a leaf.
+   - Every node it passes gets its count raised (u16 per node). The
+     non-zero nodes become a sparse vector: sorted node ids plus counts.
+2. **Weighting** (`FUN_1801f4090`): `w_i = count_i · idf_i` (float per
+   node at `vocab+0x38`), then L1-normalised (all zero if the sum is 0).
+3. **Score** (`FUN_180227d30`): histogram intersection over the common
+   node ids, `Σ min(q_i, k_i)`, in 0…1, higher = more alike (SSE4.2
+   `pcmpestri` merge of the two sorted id lists).
+4. Score every map keyframe (`FUN_1801f51d0`), or, with the per-search
+   flag set, only the current keyframe plus up to 9 graph neighbours
+   (`FUN_180226580(map, kf, 9, …)`). Sort (`FUN_1801f3950`), keep the
+   best in the 12-slot list (`FUN_1801f7fd0`). Every listed keyframe with
+   score ≤ 1.0 gets a query hit (`FUN_180225f90`).
+5. If the tracking state's last keyframe (`+0x1d4` equal to `+0x38`, pose
+   valid) is still in the map, it is put first with score 778.0, ahead of
+   any real score.
+
+How search A (`FUN_1801fb280` → `FUN_1801fa220`) and the prior search
+(`FUN_1801fb540`) pick their keyframes was not read; both use the same
+matcher below.
+
+#### Feature matching (`FUN_1802282a0`, from `FUN_1801f9ac0`) [sure]
+
+Per candidate keyframe: nearest neighbour over its features by squared
+descriptor distance, normalised by 2³⁵.
+
+- Accept only if the best distance is < 0.0064 (normalised) and
+  `best < 0.8 · second best` (ratio test on squared distances).
+- Each keyframe feature keeps only its closest query keypoint (a closer
+  one replaces it), so matches are one to one.
+- Keypoints with a negative state byte are skipped.
+
+#### Pose solve (`FUN_18022bb70`) [sure for the structure, likely for the weights]
+
+Gauss-Newton on a 6-DoF pose, iteration count from the caller (`+0x04`
+of its config):
+
+- Per match (`FUN_18022b390`): project the keyframe's 3-D point with the
+  current pose (divide by z), take the 2-D residual against the keypoint,
+  and whiten it with the square root of a 2 × 2 matrix built from the
+  feature's covariance plus identity [likely]. Add `JᵀJ` and `Jᵀr` to a
+  6 × 6 system.
+- Mirror the upper triangle, factor and solve (`FUN_180229910`,
+  `FUN_1802296c0`), apply the step through the exponential map
+  (`FUN_180237190`).
+
+`FUN_1801f90d0` runs, per candidate (at most the search count): match
+(`FUN_1801f9ac0`), then for each candidate that passed, a geometric check
+(`FUN_1801fd070`), the solve (`FUN_1801f9eb0`), and a pose sanity test
+(`FUN_1801d6230`). A pose that passes is stored in the slot and the
+keyframe gets a match credit (`FUN_180225fa0`).
+
+#### Choosing the result (`FUN_1801fd280`) [sure]
+
+Each solved slot holds a 6 × 6 covariance and the inlier count (`+0x188`).
+Its confidence is:
+
+```
+sp = sqrt(P[0][0] + P[1][1] + P[2][2])     // position block
+sr = sqrt(P[3][3] + P[4][4] + P[5][5])     // rotation block
+f(s, lim) = (s <= lim) ? 0.5 + 0.5 * (lim - s) / lim : 0.5
+conf = min(inliers, 100) * f(sp, 0.005) * f(sr, 0.004)
+```
+
+The slot with the highest confidence wins. `FUN_1801fc140` and
+`FUN_1801f94a0` then refine it (again through `FUN_18022bb70`) before the
+result is written.
+
+Still open: search A and the prior search's keyframe choice, the
+geometric check in `FUN_1801fd070`, the refinement steps, the config
+values behind `searcher+0x04/+0x20/+0x38/+0x3c` and the vocabulary's
+source (built in, or loaded with the map), UpdateMap and OptimizeMap.
 
 ### RP frame (unpack of the EP 0x8a record) — `FUN_1801ab410`
 

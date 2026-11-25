@@ -1393,8 +1393,14 @@ Blob record arrays (per camera manager): `+0x50` x,y; `+0x70`, `+0x90`,
   weight (store `+0xe8`) is ≥ 3 (2 when the store byte `+0x160` is set,
   or the major ≥ 32/π), store flag byte `+0xa8` bit 2 clear, bit 1 clear
   when the table flag is set, and with bit 0 set major/minor ≤ the table
-  ratio. Not ported: the flag byte's source bits were not traced (it is
-  not the LD `flags` word as is) [open].
+  ratio. The flag byte is built when `FUN_18004b0a0` fills the camera's
+  blob store from the decoded LD blobs (traced 2026-11-25) [sure]: a blob
+  whose decoded flag word has bit `0x400` is left out; bit 0 = the two
+  decoded u16 extents [likely: bbox width and height] sum to more than 7;
+  bit 1 = kind 5 (pre-solved blob; its major/minor become the larger and
+  smaller extent ÷ π); bit 2 = kind 3. The same pass sets the score
+  array (`+0xc8`) to 1.0, which the background model then overwrites
+  (part E). Not ported yet.
 - Test (`test_led_solver`, occlusion block): a patch of 1–3 neighbouring
   LEDs in the middle of one camera, IMU 1° off, through
   `psvr2_led_track_state`. 3-LED patches within 40 mm: Sony match

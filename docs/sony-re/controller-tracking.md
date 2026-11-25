@@ -2603,8 +2603,8 @@ Tags as elsewhere: `[sure]` read from the code, `[likely]`, `[guess]`.
 - A landmark is dropped after **40** missed frames in a camera, or **300**
   once that camera has seen it at least **10** times [sure].
 - Output: per camera, a float per blob (0 = not background; otherwise the
-  matched landmark's score) [sure]. Where the controller solver reads it
-  is still open (§E.5).
+  matched landmark's score) [sure]. The controller solver never reads it
+  (§E.5) [likely], so the model is optional for a port.
 
 ### E.2 Objects and calls [sure]
 
@@ -2694,12 +2694,24 @@ Accepted points become landmarks with an initial value 20.0 per camera
 | `0x1800b82f0` | 39 | Background2 slot 3: scores from 288-byte spot records [sure] |
 | `0x18004c9c0` | 22 | debug: draws the active model through slot 4 [sure] |
 
-### E.5 Open
+### E.5 Where the score goes [likely]
 
-- Which solver step reads the per-blob score (blob store array at
-  `+0xc8`, copied to the camera managers by `0x1800a0480`), and with what
-  threshold.
-- Exact matching and scoring rule in `0x1800b3090`.
+Traced 2026-11-25. The per-blob score array (`+0xc8` of the frame's blob
+store) is copied into each camera manager's store (`0x1800a0480`,
+manager `+0x18160`). The blob collector `0x1800e2330` (called by the
+boot and tracking paths `0x1800d5070`, `0x1800db980`, `0x1800dbda0`,
+`0x1800dc210`, `0x1800dc680`, `0x1800dcb00`, `0x1800e2a00`) copies it
+into its filtered list (array `+0x68`) next to position, size and id,
+and `0x1800e2a00` keeps it in step when it shuffles that list. Its blob
+filter tests the blob **flags** (`+0xa8`: bits 0–2, set by the LD decode,
+not by the background model), the size and the radius, never the score.
+No function in `0x180090000–0x180110000` reads the score as a number; the
+only reader is the debug overlay (slot 4). So on PC the background model
+is computed every frame but **does not change the controller solve**,
+and a port can leave it out without changing Sony's result.
+
+Still open (only matters for the overlay): the exact matching and
+scoring rule in `0x1800b3090`.
 
 ---
 

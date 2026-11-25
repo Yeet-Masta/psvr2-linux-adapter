@@ -1606,7 +1606,7 @@ driver-from-head, chaperone file, INS, LED sync, UKF). What is still open:
 | INS mode-0 adaptive blender, stillness / shock switches, SLAM good-frame count | blender `0x180181400` and its callers (controller-tracking.md §A.3.1) | core | `psvr2_ins.h` says only mode 1 is done; mode-0 gains are unknown. |
 | Extreme-environment blob modes 2–4 | ledsync / ctrlboot (`controller-tracking.md` part B) | core | Need tracker settings that are 0 in a normal install. |
 | Hardware checks | UKF, two-controller sync, BROAD divider | core | Implemented, not yet confirmed on hardware (`development.md` part A). |
-| Background model (static IR lights) | `RnD::Background`, `0x1800b40e0` and stages (`controller-tracking.md` part E) | core | Not in the driver: Sony scores every blob against a 3D map of static lights before the controller solve. Where the solver reads the score is still open. |
+| Background model (static IR lights) | `RnD::Background`, `0x1800b40e0` and stages (`controller-tracking.md` part E) | core | Not in the driver. Sony scores every blob against a 3D map of static lights, but the controller solve never reads the score (controller-tracking.md §E.5) [likely]: optional. |
 
 #### C.3.2 Core functions no doc describes yet
 

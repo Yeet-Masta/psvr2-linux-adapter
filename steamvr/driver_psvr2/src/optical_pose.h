@@ -30,6 +30,7 @@
 #include "libpsvr2.h"
 #include "psvr2_led_solver.h"
 #include "sie_c.h"
+#include "occlusion_latch.h"
 #include "vr_math.h"
 
 class Psvr2ControllerDriver;
@@ -84,6 +85,14 @@ private:
 		vr::HmdQuaternion_t q_last = vrmath::Identity();  // fused IMU at last
 		int fails = 0, good = 0;
 		uint64_t fix_us = 0;  // frame time of the last fix handed to the controller
+		// This frame's fix, published after the occlusion latch ran.
+		struct Pending
+		{
+			bool have = false, pos_only = false;
+			vrmath::Vec3 pos, head_rel;
+			vr::HmdQuaternion_t rot = vrmath::Identity();
+			double cam_dist = 0.0;
+		} pending;
 		// Sync view of the last solved frame (HasSyncView).
 		uint64_t view_us = 0;
 		float view_w[PSVR2_SOLVER_CAMS][PSVR2_LED_MAX] = {};
@@ -114,6 +123,12 @@ private:
 	Psvr2HmdDriver *hmd_;
 	Psvr2ControllerDriver *controllers_[2];
 	Hand hands_[2];
+	// Occluded-controller latch (setting optical_latch, default on).
+	void RunLatch( uint64_t frame_us, const vrmath::Pose &world_from_rig, const vr::DriverPose_t &head );
+	void Publish( int hand, uint64_t frame_us );
+	OcclusionLatch latch_;
+	bool latch_enabled_ = true;
+	int latch_logged_ = -1;
 	bool have_rig_ = false;
 	psvr2_rig_camera cams_[PSVR2_SOLVER_CAMS] = {};
 	psvr2_solver_cfg cfg_{};

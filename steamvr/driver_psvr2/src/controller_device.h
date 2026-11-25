@@ -62,8 +62,18 @@ public:
 	// innovation gate rejects it (docs/sony-re/controller-tracking.md §C.4.1).
 	// head_rel: the IMU position in the head frame (m); cam_dist: distance
 	// from the camera rig (m). Both select the filter's measurement noise.
+	// pos_only: the occlusion latch's carried position (no orientation).
 	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu,
-	                 const vrmath::Vec3 &head_rel, double cam_dist );
+	                 const vrmath::Vec3 &head_rel, double cam_dist, bool pos_only = false );
+	// The controller filter's newest state, for the occlusion latch (any
+	// thread). False while the filter is not running.
+	struct UkfView
+	{
+		uint64_t us = 0, last_fix_us = 0;
+		vrmath::Vec3 pos, vel;
+		vr::HmdQuaternion_t rot = vrmath::Identity();  // world <- IMU
+	};
+	bool UkfSnapshot( UkfView &v ) const;
 
 	// SteamVR haptic event for our haptic component.
 	void OnHaptic( const vr::VREvent_HapticVibration_t &h );
@@ -171,7 +181,11 @@ private:
 		vrmath::Vec3 head_rel;
 		double cam_dist = 0.0;
 		int rejects = 0;
+		bool pos_only = false;
 	};
+	mutable std::mutex ukf_view_mutex_;
+	bool ukf_view_ok_ = false;
+	UkfView ukf_view_;
 	std::mutex optical_mutex_;
 	Optical optical_;
 	uint64_t optical_seq_used_ = 0;  // IoThread

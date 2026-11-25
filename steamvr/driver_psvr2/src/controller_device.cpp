@@ -574,6 +574,15 @@ void Psvr2ControllerDriver::FeedUkf( const SenseState &s, double dt )
 		o = optical_;
 	}
 	FeedArmModel( imu_host_us_ );
+	{
+		std::lock_guard<std::mutex> lock( ukf_view_mutex_ );
+		ukf_view_ok_ = ukf_.Initialized();
+		ukf_view_.us = ukf_.TimeUs();
+		ukf_view_.last_fix_us = ukf_.LastFixUs();
+		ukf_view_.pos = ukf_.Position();
+		ukf_view_.vel = ukf_.Velocity();
+		ukf_view_.rot = ukf_.Orientation();
+	}
 	if ( !o.have || o.seq == ukf_seq_used_ )
 		return;
 	ukf_seq_used_ = o.seq;
@@ -581,6 +590,7 @@ void Psvr2ControllerDriver::FeedUkf( const SenseState &s, double dt )
 	f.us = o.us;
 	f.pos = o.pos;
 	f.rot = o.rot;
+	f.has_rot = !o.pos_only;
 	f.head_rel = o.head_rel;
 	f.cam_dist = o.cam_dist;
 	const ControllerUkf::Result r = ukf_.AddFix( f );
@@ -891,9 +901,16 @@ bool Psvr2ControllerDriver::ImuOrientation( vr::HmdQuaternion_t &q, double &yaw 
 	return imu_valid_ && attached_;
 }
 
+bool Psvr2ControllerDriver::UkfSnapshot( UkfView &v ) const
+{
+	std::lock_guard<std::mutex> lock( ukf_view_mutex_ );
+	v = ukf_view_;
+	return ukf_view_ok_;
+}
+
 bool Psvr2ControllerDriver::OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos,
                                         const vr::HmdQuaternion_t &world_from_imu, const vrmath::Vec3 &head_rel,
-                                        double cam_dist )
+                                        double cam_dist, bool pos_only )
 {
 	std::lock_guard<std::mutex> lock( optical_mutex_ );
 	Optical &o = optical_;
@@ -929,6 +946,7 @@ bool Psvr2ControllerDriver::OpticalFix( uint64_t frame_us, const vrmath::Vec3 &p
 	o.us = frame_us;
 	o.pos = pos;
 	o.rot = world_from_imu;
+	o.pos_only = pos_only;
 	o.seq++;
 	return true;
 }

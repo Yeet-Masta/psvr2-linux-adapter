@@ -144,7 +144,7 @@ extern "C" int psvr2_read_calibration( psvr2_t *, const char *name, void *buf, u
 
 bool Psvr2ControllerDriver::OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos,
                                         const vr::HmdQuaternion_t &world_from_imu, const vrmath::Vec3 &,
-                                        double )
+                                        double, bool )
 {
 	const vr::HmdQuaternion_t c = vrmath::Mul( world_from_imu, vrmath::Conj( q_ ) );
 	const double t = double( frame_us - g_t0 ) * 1e-6;

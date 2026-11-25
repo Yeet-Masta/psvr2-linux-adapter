@@ -225,6 +225,11 @@ OpticalPose::OpticalPose( Psvr2HmdDriver *hmd, Psvr2ControllerDriver *const cont
 	rig_offset_ = { GetFloat( "optical_rig_offset_x", -0.005f ), GetFloat( "optical_rig_offset_y", -0.009f ),
 	                GetFloat( "optical_rig_offset_z", -0.011f ) };
 	rig_tilt_deg_ = GetFloat( "optical_rig_tilt_deg", 6.0f );
+	{
+		vr::EVRSettingsError le = vr::VRSettingsError_None;
+		const bool on = vr::VRSettings()->GetBool( kSection, "optical_latch", &le );
+		latch_enabled_ = le != vr::VRSettingsError_None || on;
+	}
 	for ( int i = 0; i < 2; i++ )
 		LoadHand( i );
 
@@ -376,6 +381,7 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 		}
 	}
 
+	hands_[0].pending.have = hands_[1].pending.have = false;
 	// A tracked hand claims its blobs before a searching one boots on them.
 	const int first = !hands_[0].tracking && hands_[1].tracking ? 1 : 0;
 	for ( int k = 0; k < 2; k++ )
@@ -390,6 +396,10 @@ void OpticalPose::Frame( uint64_t frame_us, const psvr2_blob_set blobs[PSVR2_LD_
 		h.frames++;
 		SolveHand( hand, frame_us, world_from_rig, lists, wt );
 	}
+	if ( latch_enabled_ )
+		RunLatch( frame_us, world_from_rig, head );
+	Publish( 0, frame_us );
+	Publish( 1, frame_us );
 
 	const uint64_t now = NowMicros();
 	if ( now - log_at_us_ >= 2000000 )
@@ -792,11 +802,70 @@ void OpticalPose::Accept( int hand, Hand &h, uint64_t frame_us, const vrmath::Po
 	}
 	const double cam_dist =
 		std::sqrt( rig_pose.t[0] * rig_pose.t[0] + rig_pose.t[1] * rig_pose.t[1] + rig_pose.t[2] * rig_pose.t[2] ) * 1e-3;
-	if ( controllers_[hand]->OpticalFix( frame_us, imu_pos, world_imu, head_rel, cam_dist ) )
+	h.pending.have = true;
+	h.pending.pos_only = false;
+	h.pending.pos = imu_pos;
+	h.pending.rot = world_imu;
+	h.pending.head_rel = head_rel;
+	h.pending.cam_dist = cam_dist;
+}
+
+void OpticalPose::Publish( int hand, uint64_t frame_us )
+{
+	Hand &h = hands_[hand];
+	if ( !h.pending.have )
+		return;
+	h.pending.have = false;
+	if ( controllers_[hand]->OpticalFix( frame_us, h.pending.pos, h.pending.rot, h.pending.head_rel,
+	                                     h.pending.cam_dist, h.pending.pos_only ) &&
+	     !h.pending.pos_only )
 	{
 		h.fixes++;
 		h.fix_us = frame_us;
 	}
+}
+
+// Sony's occluded-controller latch (docs/sony-re/controller-tracking.md §F.2), in the rig frame.
+void OpticalPose::RunLatch( uint64_t frame_us, const vrmath::Pose &world_from_rig, const vr::DriverPose_t &head )
+{
+	const vrmath::Pose rig_from_world = vrmath::Invert( world_from_rig );
+	auto to_rig = [&]( const vrmath::Vec3 &p ) { return vrmath::Compose( rig_from_world, { vrmath::Identity(), p } ).pos; };
+	OcclusionLatch::HandIn in[2];
+	Psvr2ControllerDriver::UkfView v[2];
+	for ( int i = 0; i < 2; i++ )
+	{
+		in[i].has_state = controllers_[i]->UkfSnapshot( v[i] );
+		if ( in[i].has_state )
+		{
+			const double dt = ( double( frame_us ) - double( v[i].us ) ) * 1e-6;
+			in[i].pos = to_rig( vrmath::Add( v[i].pos, vrmath::Scale( v[i].vel, std::clamp( dt, -0.1, 0.1 ) ) ) );
+		}
+		in[i].fix_now = hands_[i].pending.have;
+		if ( in[i].fix_now )
+			in[i].fix_pos = to_rig( hands_[i].pending.pos );
+		in[i].last_fix_us = hands_[i].fix_us;
+	}
+	const OcclusionLatch::Out o = latch_.Frame( frame_us, in );
+	if ( latch_.State() != 0 && latch_.Latched() != latch_logged_ )
+		DriverLog( "psvr2: optical latch: %s carried by the other controller (%u latches)",
+		           HandName( latch_.Latched() ), latch_.Entries() );
+	latch_logged_ = latch_.State() != 0 ? latch_.Latched() : -1;
+	if ( o.action == OcclusionLatch::kNone )
+		return;
+	Hand &h = hands_[o.hand];
+	const vrmath::Vec3 pw = vrmath::Compose( world_from_rig, { vrmath::Identity(), o.pos } ).pos;
+	if ( o.action == OcclusionLatch::kReplace )
+	{
+		h.pending.pos = pw;
+		return;
+	}
+	const vrmath::Vec3 hp{ head.vecPosition[0], head.vecPosition[1], head.vecPosition[2] };
+	h.pending.have = true;
+	h.pending.pos_only = true;
+	h.pending.pos = pw;
+	h.pending.rot = v[o.hand].rot;
+	h.pending.head_rel = vrmath::Rotate( vrmath::Conj( head.qRotation ), vrmath::Add( pw, vrmath::Scale( hp, -1.0 ) ) );
+	h.pending.cam_dist = std::sqrt( o.pos.x * o.pos.x + o.pos.y * o.pos.y + o.pos.z * o.pos.z );
 }
 
 void OpticalPose::Confirm( int hand, Hand &h )

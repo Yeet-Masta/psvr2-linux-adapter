@@ -28,6 +28,7 @@ add_library(driver_psvr2 MODULE
     src/optical_pose.cpp
     src/controller_ukf.cpp
     src/arm_model.cpp
+    src/occlusion_latch.cpp
     src/blink_finder.cpp
     "${LIBPSVR2_DIR}/sie/libpad/psvr2_hidsync.c"
     "${LIBPSVR2_DIR}/sie/libpad/psvr2_sense_output.c"

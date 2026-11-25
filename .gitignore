@@ -50,3 +50,4 @@ userspace/lib/test_led_solver
 userspace/lib/test_ins
 __pycache__/
 steamvr/driver_psvr2/tools/ukf_sim/ukf_sim
+steamvr/driver_psvr2/tools/latch_sim/latch_sim

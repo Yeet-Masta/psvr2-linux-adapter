@@ -21,7 +21,15 @@ public:
 	}
 	int HardwareRevision() const { return rev_; }
 	bool OpticalFix( uint64_t frame_us, const vrmath::Vec3 &pos, const vr::HmdQuaternion_t &world_from_imu,
-	                 const vrmath::Vec3 &head_rel, double cam_dist );
+	                 const vrmath::Vec3 &head_rel, double cam_dist, bool pos_only = false );
+	// No controller filter in the replay: the occlusion latch stays idle.
+	struct UkfView
+	{
+		uint64_t us = 0, last_fix_us = 0;
+		vrmath::Vec3 pos, vel;
+		vr::HmdQuaternion_t rot = vrmath::Identity();
+	};
+	bool UkfSnapshot( UkfView & ) const { return false; }
 	Psvr2HmdDriver *Hmd() const { return hmd_; }
 
 	// Replay side.

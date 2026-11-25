@@ -990,6 +990,7 @@ merged file.
 | part A §A.9.1 | `ImuPoseIndex` table always used | Pure translation by pad `+0x48`; table only for a NULL vector |
 | part A §A.9.4 | Stale optical pose unspecified | 0.3 s stale: position held, rotation from UKF, status 3 |
 | function-catalogue.md part F | `0x1801bf850` returns the libpad version word | It writes the host µs clock (`0x1801c8210`) through its pointer argument |
+| controller-tracking.md §A.5.6, part C §C.2b.1, §C.4.2 | setImuPose writes ∓33.16 / 250 at device `+0x6c8`/`+0x6cc`/`+0x7d0` (meaning open), over process-noise base `+0x6c8`; ∓33.16 for index 3–8 | Those are manager-relative: device `+0x6a0`/`+0x6a4` gyro clip range and `+0x7a8` IMU rate; ∓33.16 only for index 3–4 (`controller-tracking.md` §C.4.3) |
 | controller-tracking.md §G.2 and controller-tracking.md §G.3 | Process callback `0x1800638d0`; `h(x)` = slot +0x18 `0x18005fad0` | `0x1800638d0` is the work-area allocator; process + measurement are one per-sigma-point function `0x18006f020`, `h` is slot +0x48 `0x180060030` (controller-tracking.md §G.2.1) |
 
 ### A.13 Where the Linux driver stands

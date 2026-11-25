@@ -355,8 +355,9 @@ Example (index 1): rotation columns ≈ (−0.276, −0.197, 0.941),
 (0.0145, 0.0129, −0.0084) m. The table is used only when no pad vector is
 passed; Sony always passes one, so the stored transform is a pure
 translation by pad `+0x48` (part C §C.2b.1). Indices ≥ 3 can take a per-device matrix argument
-(calibration) instead of the table and also set limits ±33.16 and 250.0 at
-`+0x6c8`/`+0x6cc`/`+0x7d0` [meaning unknown]. Read the tables with the
+(calibration) instead of the table and also set the gyro clip range and
+the IMU rate: manager-relative `+0x6c8`/`+0x6cc`/`+0x7d0` are device
+`+0x6a0`/`+0x6a4`/`+0x7a8` (§C.4.3). Read the tables with the
 section reader; do not commit them.
 
 #### A.5.7 Stillness test and tilt correction (`FUN_18017cdb0` IMU tick, `FUN_180171400`) [sure unless tagged]
@@ -2236,8 +2237,10 @@ solve through A. Its translation-like floats at `+0x28..+0x30` are used
   model origin in IMU frame) [likely: v = IMU position in the LED-model
   frame, mm, since the model is right-handed and the left pad's x is
   mirrored around −5.35 mm].
-- Index ≥ 3 also sets UKF `+0x6c8/+0x6cc` = ∓33.1613 (rev 1, index 3–8)
-  or ∓66.3225 (index 9–16) and `+0x7d0` = 250.0 [meaning open].
+- Index ≥ 3 also sets the gyro clip range to ∓33.1613 rad/s (index 3–4)
+  or ∓66.3225 rad/s (index 5–16) and the IMU rate to 250 Hz. These
+  addresses are manager-relative; device-relative they are `+0x6a0`,
+  `+0x6a4`, `+0x7a8` (§C.4.3). The IMU pose above is device `+0x7e0`.
 - Tables used only when `v` is NULL (column-major, translation in m),
   for reference [sure for values]:
 
@@ -2354,25 +2357,107 @@ part H).
 
 | Off | Value | Meaning |
 |---|---|---|
-| +0x6a0/+0x6a4 | ∓43.6332 | ±2500 °/s in rad/s [guess: gyro range] |
-| +0x6a8/+0x6ac | ∓6.0 | [guess: bias/accel limit] |
+| +0x6a0/+0x6a4 | ∓43.6332 | gyro clip min/max, rad/s (±2500 °/s) [sure]; setImuPose sets ∓33.1613 (index 3–4) or ∓66.3225 (index 5–16) (§C.4.3) |
+| +0x6a8/+0x6ac | ∓6.0 | accel clip min/max, g [sure] (§C.4.3) |
 | +0x6b0..+0x6b8 | 3.0e-4 ×3 | process noise base, block 1 |
-| +0x6c0..+0x6c8 | 8.0e-6 ×3 | process noise base, block 2 (+0x6c8/+0x6cc then overwritten by setImuPose: ∓33.16 / ∓66.32) |
+| +0x6c0..+0x6c8 | 8.0e-6 ×3 | process noise base, block 2 (setImuPose does not touch it; §C.4.3) |
 | +0x6d0, +0x6d4, +0x6d8 | 2.5e-5, 6.25e-6, 3.04617 | rate noise own, cross, fixed |
 | +0x6dc, +0x6e0, +0x6e4, +0x6e8 | 1e-4, 2.5e-5, 6.25e-6, 6.25 | second block extra, own, cross, fixed |
-| +0x6ec..+0x6f4 | 1.9038590e-7 ×3 | [guess] |
-| +0x744..+0x74c | 1.0e-6 ×3 | [guess] |
+| +0x6ec..+0x6f4 | 1.9038590e-7 ×3 | copied to filter `+0x1b8` by `FUN_18007a1f0`; reader not traced [guess: gyro bias walk] |
+| +0x744..+0x74c | 1.0e-6 ×3 | [guess: accel bias walk] |
 | +0x754..+0x760 | 3.0462e-10, 3.0462e-6, 7.6154e-9, 1.0e-8 | [guess: optical measurement variances; 3.046e-6 rad² = (0.1°)², 1e-8 m² = (0.1 mm)²] |
 | +0x764, +0x768 | 0.05236 (3°), 0.01745 (1°) | [guess] |
-| +0x76c | 10 (int) | |
+| +0x76c | 10 (int) | entries of a 16-byte ring at filter `+0x238` (`FUN_18007a1f0`) [sure] |
 | +0x770 | 1.5 | |
 | +0x778 / +0x780 / +0x784 | 0.05 m / 0.20 m / 1.0 m/s | optical gate (§C.4.1) [sure] |
 | +0x77c | 0.0333 | |
 | +0x788, +0x78c | 0.01, 1.0 | |
 | +0x790 | 100 (int) | |
-| +0x794..+0x7a8 | 0.8, 32.0, 0.34907 (20°), 2.0, 0.02, 177.78 | (+0x798..+0x7a0 are overview.md §A.11 q9 "limits") |
-| +0x7b0 / +0x7b8 / +0x7c0 | −1 (u64) / 14000 (u64) / 7 | |
-| +0x7c8, +0x7cc, +0x7d4 | 0.5236 (30°), 0.045, 0.2618 (15°) | |
+| +0x794..+0x7a8 | 0.8, 32.0, 0.34907 (20°), 2.0, 0.02, 177.78 | (+0x798..+0x7a0 are overview.md §A.11 q9 "limits"); +0x7a8 = IMU rate in Hz, 250 after setImuPose (§C.4.3) [sure] |
+| +0x7b0 / +0x7b8 / +0x7c0 | −1 (u64) / 14000 (u64) / 7 | +0x7b8 = output latency in µs for the predictor (§C.4.3) [sure] |
+| +0x7c4 | 1 (u8) | predictor horizon mode on (§C.4.3) [sure] |
+| +0x7c8, +0x7cc, +0x7d4 | 0.5236 (30°), 0.045, 0.2618 (15°) | +0x7c8: rate (rad/s) at which the extra horizon reaches +0x7cc; +0x7cc: extra horizon, s (§C.4.3) [sure] |
+| +0x7d0 | 0 (u16) | low byte: add ½·a·dt² in the predictor (off) [sure] |
+| +0x7d8 / +0x7dc | 16 / −1 | |
+
+#### C.4.3 Config placement, per-model overrides, clipping and output prediction [sure unless tagged]
+
+**Placement.** The UKF devices sit at `manager + 0x28 + hand·0x2218`
+(`FUN_18005d5d0`, and every `8728·i + a1 + 40` in the manager). The
+offsets in §C.4.2 are device-relative. `FUN_18005f1b0` (setImuPose) uses
+manager-relative addresses: its `+0x6c8`, `+0x6cc`, `+0x7d0`, `+0x808` are
+device `+0x6a0`, `+0x6a4`, `+0x7a8`, `+0x7e0`. Earlier notes (§A.5.6,
+part C §C.2b.1) read them as device offsets.
+
+The device holds **two copies** of the config:
+
+- `+0x6a0`, 0x1e0 bytes (config plus the IMU pose at `+0x7e0`). Read by
+  the process noise (`FUN_180062880`, `FUN_180062950`), the optical gate
+  in `FUN_180065b70`, and the predictor (`FUN_1800821a0`).
+- `+0x48`, 0x140 bytes: the filter's copy. Written at init
+  (`FUN_18007a1f0`, from `FUN_1800638f0`) and at reset (`FUN_18007a860`,
+  from `FUN_180063f50`). The IMU push reads its clip ranges.
+
+Init (`FUN_18005d5d0`) fills both copies from one local config. The IR
+thread then calls setImuPose, which changes only the `+0x6a0` copy. It
+then resets the device with `FUN_18005eac0`. That copies `+0x6a0` out and
+back through `FUN_180063f50`, so the filter copy gets the new values
+[likely: the reset is gated by a per-device flag in `FUN_18018aaf0`].
+
+**Per-model overrides** (setImuPose, `ImuPoseIndex` = 2·rev + 1 + hand):
+
+| Index | Gyro clip (device +0x6a0/+0x6a4) | IMU rate (+0x7a8) |
+|---|---|---|
+| 0–2 | ∓43.6332 rad/s (default) | 177.78 Hz (default) |
+| 3–4 (rev 1) | ∓33.1613 rad/s (±1900 °/s) | 250 Hz |
+| 5–16 | ∓66.3225 rad/s (±3800 °/s) | 250 Hz |
+
+The old note "∓33.16 for index 3–8" was wrong: cases 5–8 jump to the
+same block as 9–16.
+
+**Clipping** (`FUN_180079750`, from the IMU push `FUN_18007a9a0`). Per axis
+of the incoming sample (gyro x, y, z against `[min, max]` = filter copy
+`+0x00/+0x04`; accel x, y, z against `+0x08/+0x0c`):
+
+```
+flag = (v <= min) ? -1 : (v >= max) ? +1 : 0      // sample +0x30..+0x35
+any_gyro  = flag_0 | flag_1 | flag_2  != 0        // sample +0x36
+any_accel = flag_3 | flag_4 | flag_5  != 0        // sample +0x37
+```
+
+A non-zero flag makes the process noise use the "fixed" variance for that
+axis (3.04617 for gyro, 6.25 for accel; §C.4.2). Accel samples are in g,
+so the accel clip is ±6 g.
+
+**IMU rate use** (`FUN_18007a1f0`): rings of `n = rate/2` entries (capped
+at 200; above that a decimation factor `(rate/2)/200` is kept), and
+buffers of 2·rate and 3·rate. With 250 Hz: 125 entries, half a second.
+
+**Output predictor** (`FUN_1800821a0`, from `FUN_180068620` and
+`FUN_18007e8f0`). It extrapolates the newest state (or the given one,
+whichever is closer to the target time `t`) to a later time:
+
+```
+dt = min(t - t_state, cap)          // cap = max(0.1, +0x7cc) if +0x7c4 else 0.1 s
+if +0x7c4:
+    half = 500000 / rate            // µs; 2000 µs at 250 Hz
+    t0   = t_ref - half - latency   // t_ref: 4th argument; latency = +0x7b8 = 14000 µs
+    extra = max(0, t_x - t0)        // t_x: [likely] the target time
+    if +0x7c8 != 0:
+        lim = +0x7cc                // 0.045 s
+        if |w| < +0x7c8: lim = +0x7cc * |w| / +0x7c8
+        extra = min(extra, lim)
+    dt = max(0, t0 + extra - t_state)
+p'   = p + v*dt   (+ 0.5*a*dt^2 if low byte of +0x7d0)
+v'   = v          (+ a*dt         if the same byte)
+q'   = q rotated by w*dt (FUN_1800818d0); the second attitude block alike
+t'   = t_state + dt
+```
+
+So with the defaults the prediction aims at `t_ref − 16 ms` plus up to
+45 ms more while the controller turns fast (full at 30 °/s), and position
+uses constant velocity only. Which time `t_ref` is (display or vsync time)
+was not traced.
 
 ### C.5 Output, staleness and not-tracking (Q3, last part) [sure]
 
@@ -3277,6 +3362,11 @@ below 1 m/s, else 20 cm).
   (`0x18006f020`) and applies the error on the left with GRP
   (`δq ⊗ q̂`, a = 1, f = 4), with the IMU noise as augmented sigma
   dimensions (accel noise before gyro noise).
+- Also from §C.4.3 (2026-11-25): the Linux file clips the gyro at a fixed
+  43.6332 rad/s, Sony at ∓33.1613 (index 3–4) or ∓66.3225 rad/s (index
+  5–16) on real controllers; its accel clip of 6 g matches. Sony's output
+  predictor (`FUN_1800821a0`: constant velocity, aim `t_ref − 16 ms`, up to
+  45 ms more while turning) has no Linux counterpart yet.
 - The UKF solver internals are now in `function-catalogue.md` §B.1:
   packed Cholesky without jitter, inverse of S by `DPPTRF` + `DPPTRI`.
   Open: when `DPPTRF` finds S not positive definite (positive info) the

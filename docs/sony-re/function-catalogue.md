@@ -3356,3 +3356,92 @@ The libpad manager singleton `0x180354bb8` holds the two pad objects at
 | `0x18004ab10` | 11 | set the global byte `0x1805f6c48` from the argument; caller `0x180192ae0` |
 | `0x180193a00` | 15 | if the IR tracker `0x180355510` exists, set the UKF manager's flag pair (`0x18005d2d0`, `0x18005f8f0`); else error `0x8a740009` |
 | `0x180193a40` | 19 | destroy the IR tracker `0x180355510`: set its stop flag, virtual destructor, free; caller `0x1801a2a40` |
+
+## Part K: Remaining "ref" functions outside the relocaliser
+
+Functions triaged **ref** (read for understanding, nothing to port) that
+were still undescribed. Grouped rows; behaviour in our own words from the
+decompile. Tags: [sure] unless marked.
+
+### K.1 Containers and small library glue
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180050160`, `0x18004d870` | 33, 29 | find in a `std::map<int, …>` red-black tree (global tree `0x1805f0708`): walk from the root comparing the key at node `+0x1c` |
+| `0x180050270`, `0x180050ee0` | 10, 7 | destroy a map: recursive free of the right subtree, then iterate left |
+| `0x180050d50`, `0x1800525b0`, `0x180052430` | 17, 19, 12 | copy a map / clone one node (0x28-byte nodes: left, parent, right, colour `+0x18`, nil flag `+0x19`, key `+0x1c`) / construct a node with a key |
+| `0x180051480` | 107 | map insert with red-black rebalance |
+| `0x180051770` | 5 | length check: throws when the global map holds the maximum element count |
+| `0x180050e30` | 13 | allocate, 32-byte aligned for sizes ≥ 0x1000 (MSVC big-block rule) |
+| `0x180052140`, `0x180052210` | 12, 24 | duplicate a C string (`calloc`) / build a `std::string` from a C string |
+| `0x180157870` | 10 | `std::string` inequality (size, then `memcmp`) |
+| `0x180157c90` | 7 | box one pointer into a new 8-byte object |
+| `0x180157db0`, `0x180158510` | 7, 10 | reset one / a range of `std::function` objects (call the target's destroy slot `+0x20`) |
+| `0x180157d50`, `0x180158130`, `0x1801581b0` | 6, 7, 6 | `std::ofstream` destructors (vbase fix-up, file buffer close, ostream dtor; scalar-deleting form) |
+| `0x18015a330` | 16 | copy a `std::string` into a caller buffer with NUL, then free the string |
+| `0x180158570` | 15 | free a vector of 0x20-byte elements |
+| `0x1801aad80`, `0x1801aadb0`, `0x1801aaea0`, `0x1801aaed0` | 4 each | `memmove` range copy returning the end pointer (four STL instantiations) |
+| `0x1801ab0b0`, `0x1801ab180`, `0x1801aba20` | 24, 24, 54 | `std::deque` clear (free each block) / grow the block map |
+| `0x1801aa7b0` | 4 | `_close(fd)` when fd ≥ 0, else −1 |
+| `0x180125b40` | 2 | empty function |
+
+### K.2 Controller-boot work buffers (`ctrl-boot`)
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1800cdd60`, `0x1800cdee0` | 13, 14 | allocate an image buffer through the tracker allocator (`0x1800ef5f0`): row stride rounded up to 16 bytes, 1 or 2 bytes per pixel; store height `+0x12`, stride `+0x14` |
+| `0x1800cdd20`, `0x1800cde40`, `0x1800cdea0`, `0x1800cdf80` | 8 each | release such a buffer through the allocator's free slot (`+0x18`) |
+| `0x1800cdfe0` | 32 | construct a vector of 16-byte items in allocator memory |
+| `0x1800eb810`, `0x1800ec350`, `0x1800ecf00`, `0x1800ece20` | 73, 73, 68, 18 | vector of 48-byte records: assign, copy, range insert, erase |
+| `0x1800ebb20` | 57 | resize the 48-byte record vector to match another list |
+| `0x1800ebd40` | 54 | fill the records from 2-D points, subtracting 0.5 px (pixel-centre convention) |
+| `0x1800ed850` | 17 | union-find merge of two labels (roots via `0x1800ed830`); used by `ConnectedComponents` |
+| `0x1800f25f0` | 21 | 2 × 2 symmetric matrix → its square-root axes (eigen-decomposition `0x1800f23a0`, `sqrt` of each eigenvalue) |
+| `0x18004d610` | 43 | boot-statistics summary from globals (`0x1805e69a8..0x1805e69bc`): averages per frame for the log |
+
+### K.3 VrTrace, USB and thread glue
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x18010a840`, `0x18010a8c0`, `0x18010a940`, `0x18010a9c0`, `0x18010aa40`, `0x18010aac0` | 17 each | VrTrace replay: find a record id in the 128-entry index (`+0x24`, 8 bytes each) and copy it out, capped at 80 / 48144 / 48 / 2448 / 32 / 352 bytes (one reader per record type) |
+| `0x18011a260` | 30 | per pad (0/1): copy its 256-entry ring under the pad lock |
+| `0x180120090` | 8 | under a mutex: store a flag at `+0x70` and state 3 at `+0x1a` |
+| `0x180123a70`, `0x180123ac0` | 8 each | stop an endpoint reader thread: set its stop flag, `WinUsb_AbortPipe` on EP `0x8d` / `0x8a`, then join |
+| `0x180132340` | 16 | start a worker thread (`0x18012cdd0`) with `_beginthreadex` |
+| `0x18012f7f0` | 7 | bump a counter, clear two words and publish the block to the share memory (`0x18015ff00`) |
+| `0x180130850`, `0x180131750`, `0x1801318f0` | 22, 12, 12 | thread-safe static initialisers for cached flags |
+| `0x180131b00`, `0x180131bd0` | 16, 20 | state predicates: true when the object is active (`+0xb8` = 1) and its state is in a fixed set |
+| `0x180134580` | 59 | read a SteamVR setting through `IVRSettings_003` (interface cached in `0x180354cd0`) |
+
+### K.4 User config and share memory (`config`, `ipc`)
+
+`ShareManager` and the config manager are in part H; these are the last
+pieces.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180158290`, `0x18015a3e0` | 37, 210 | build the user config path: `SHGetFolderPathW(CSIDL_LOCAL_APPDATA)` + `\Sony\PlayStation VR2\config.ini`, UTF-8 |
+| `0x180158440` | 20 | UTF-16 → UTF-8 (`WideCharToMultiByte`, code page 65001) |
+| `0x18015bdb0` | 109 | create the user `config.ini` when missing (log "create user config.ini") and load it |
+| `0x18015c230` | 119 | parse one config value as int (`stoi`) or string, by type 1 / 2 |
+| `0x18015c6a0` | 37 | open a file stream (`_Fiopen`) for the config writer |
+| `0x18015f0d0` | 5 | write one key with `WritePrivateProfileStringA` (section and key strings in 768-byte slots) |
+| `0x180154f60` | 11 | config-record constructor: defaults 3, 3, 24, rest zero |
+| `0x18015ec40` | 141 | config-update watcher: compares values and logs "[ConfigUpdate] … -> …" |
+| `0x18015f8c0` | 24 | printf-style append of one log line into the share-memory log ring |
+| `0x180158600` | 438 | ShareManager open: create or open the named events, mutexes and file mapping `SHARE_VRT2_WIN_*` |
+| `0x18015bcf0` | 25 | ShareManager singleton (`0x180354f78`, 0x2430 bytes) create |
+| `0x180157b70`, `0x180157ba0`, `0x180157f70` | 5, 6, 45 | share-memory worker threads: wait on the event, run the queued callbacks, broadcast at exit |
+| `0x18015b4d0`, `0x18015c840`, `0x18015c8a0`, `0x18015c920`, `0x18015d3d0`, `0x18015d460`, `0x18015d860`, `0x18015d8d0`, `0x18015da80`, `0x18015dae0`, `0x18015ebe0`, `0x18015fa80`, `0x18015fba0`, `0x18015fe90`, `0x18015ff00` | 5–41 | share-block getters and setters: each takes its named mutex, copies one field group of the mapped block (`*(mgr+0x23e0)`), bumps a sequence counter on writes, releases |
+
+### K.5 Small math (Eigen-style reductions) and relocaliser glue
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180175930`, `0x180175960`, `0x1801759b0`, `0x1801759d0`, `0x180175a30`, `0x180175a60`, `0x18017e150`, `0x18017e180`, `0x18017e210` | 3–6 | thin wrappers that pass a vector or matrix view to one of the reductions below |
+| `0x180175aa0`, `0x180175cd0`, `0x180175f00`, `0x1801760e0`, `0x18017e240`, `0x18017e470` | 55–77 | SIMD reductions over a float vector or matrix column: max of absolute values, sum of squares (4-wide, then the tail) |
+| `0x1801762d0`, `0x18017e650` | 8 each | stable norm: scaled sum of squares, `sqrt(ssq)·scale` |
+| `0x180175770`, `0x18017dff0`, `0x180182c10` | 28–37 | normalise a 3-vector (unchanged below FLT_EPSILON); `0x180182c10` also prints it with `%+8.4e` |
+| `0x1801aa7f0`, `0x1801aab80` | 58, 29 | 3 × 3 rotation → quaternion (Shepperd: trace path, else largest diagonal) |
+| `0x1801ab250`, `0x1801ab270`, `0x1801ab2b0`, `0x1801abe20` | 3–10 | `Relocalizer` / `RelocalizerThread` destructors and stop: set the stop flag, join, destroy the queues and locks |
+| `0x1801abf50` | 5 | copy the latest relocaliser result (`0x1803635e0`) under its lock |

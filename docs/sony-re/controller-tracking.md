@@ -65,7 +65,7 @@ following sample (offsets are the 512-byte record):
 | 0x0f | u8 | Counted per slot when non-zero (ver ≥ 0x120, else forced 0) |
 | 0x10 | float[3] | `wTi` position, m (world ← IMU) |
 | 0x1c | float[4] | `wTi` rotation, **x, y, z, w** (identity reset writes 1.0 at index 3; see corrections) |
-| 0x2c | float[3] + float[4] | Second pose (same layout); stored as the filter's previous / reference pose [likely] |
+| 0x2c | float[3] + float[4] | Second pose (same layout); becomes the VIO filter's **delta** pose, reported = delta ∘ pose [likely], so a frame offset rather than a previous pose (§A.5.2) |
 | 0x48 | float[3] | `wVi` velocity, m/s |
 | 0x54 | float[3] | **Gyro bias**, rad/s (reset if any NaN or norm > 1.0) |
 | 0x60 | float[3] | **Accel bias**, m/s² (reset if any NaN or norm > 1.7) |
@@ -987,8 +987,13 @@ The descriptor handed to the tracker is
 0x58 in the descriptor.
 
 The "preset" (info `+0x10`) is pad `+0x1298`. `FUN_18011bae0` copies it
-from byte `+0x6f` of libpad's controller state sample. The HID origin of
-that byte was not traced.
+from byte `+0x6f` of libpad's controller state sample. The sample reader
+`FUN_1801bde70` fills that byte from pad `+0x33f8` (2026-11-25) [sure],
+which is the libpad **sync-mode** byte (`+0x33e0 + 0x18`) that
+`FUN_1801c1820` sets in the output path `FUN_1801cbeb0` (§B.3: mode 2 for
+firmware < `0x1006d` or after 4 failed probes, else the result of the
+feature-0x81 probe). So the preset *is* the libpad sync mode, 0 before
+the first probe and 2 in steady state.
 
 #### B.2.4 Tuning block = boot config (`ConfigFile0.trk` keys) [sure]
 
@@ -1901,8 +1906,9 @@ So:
   between probes).
 - The `controllers.md` part C table row "Mode 1: firmware < 0x1006d or probe failed 4
   times" is wrong; it is mode 2.
-- The dev driver's "libpad sync mode 1/2 stands in for preset" should
-  expect mode 2, timing 500/50, in steady state.
+- The preset is this sync-mode byte itself (§B.2.3), so the dev driver's
+  use of the sync mode as preset is exact; expect mode 2, timing 500/50,
+  in steady state.
 
 #### B.3.8 BG fit step (`FUN_180196ff0`) [sure]
 

@@ -10,6 +10,7 @@ Parts:
 - [Part D: Trivial functions](#part-d-trivial-functions)
 - [Part E: Library and runtime code](#part-e-library-and-runtime-code)
 - [Part F: libpad internals](#part-f-libpad-internals)
+- [Part G: Headset USB glue, hand skeleton and jsoncpp](#part-g-headset-usb-glue-hand-skeleton-and-jsoncpp)
 
 ---
 
@@ -2120,7 +2121,7 @@ driver uses the system's C++ library, jsoncpp and LAPACK.
 The f2c CLAPACK block (`lib:linalg`) has its own hand-written part,
 part C.
 
-370 functions: flirt 154, string 108, vtable 108.
+369 functions: flirt 154, vtable 108, string 107.
 
 ### app:dialog (23)
 
@@ -2430,7 +2431,7 @@ part C.
 | `0x18023c2c8` | fluff | flirt | `_RTC_Initialize` | MSVC C runtime |
 | `0x18023c304` | fluff | flirt | `_RTC_Terminate` | MSVC C runtime |
 
-### lib:json+config (49)
+### lib:json+config (48)
 
 | Function | Verdict | Evidence | Identity / role | Library |
 |----------|---------|----------|-----------------|---------|
@@ -2439,7 +2440,6 @@ part C.
 | `0x180140960` | fluff | string | uses 'Bad unicode escape sequence in string: four digits expected.', 'Bad unicode escape sequence in string: hexadecimal digit exp' | jsoncpp |
 | `0x180140b80` | fluff | string | uses 'Bad unicode escape sequence in string: four digits expected.', 'Bad unicode escape sequence in string: hexadecimal digit exp' | jsoncpp |
 | `0x180140dd0` | fluff | string | uses 'in Json::Value::duplicateAndPrefixStringValue(): Failed to a', 'in Json::Value::duplicateAndPrefixStringValue(): length too' | jsoncpp |
-| `0x180140eb0` | fluff | string | uses 'in Json::Value::duplicateStringValue(): Failed to allocate s' | jsoncpp |
 | `0x1801411f0` | fluff | string | uses 'in Json::Value::find(key, end, found): requires objectValue' | jsoncpp |
 | `0x180141790` | fluff | string | uses 'for detail.' | jsoncpp |
 | `0x180142010` | fluff | string | uses 'for detail.' | jsoncpp |
@@ -2792,3 +2792,165 @@ Layout used below:
 | `0x1801d46f0` | 47 | rotate the reported orientation by a correction when the gravity vector is near unit length (‖g‖ within 0.08 of 1) [likely] |
 | `0x1801d5750` | 28 | 3×3 matrix inverse (adjugate / determinant) |
 | `0x1801d59e0` | 18 | per-axis difference of a vector from a stored reference |
+
+---
+
+## Part G: Headset USB glue, hand skeleton and jsoncpp
+
+The classifier put these in `map+steamvr`. Most of the range
+`0x180135d10`–`0x18013f420` is the statically linked **jsoncpp** (it was
+not matched by the MSVC FLIRT sets); the rest is the headset USB thread
+classes, getters of the headset state, the hand skeleton and a few room
+helpers. jsoncpp value types: 0 null, 1 int, 2 uint, 3 real, 4 string,
+5 bool, 6 array, 7 object.
+
+### G.1 Headset USB threads, state getters, room glue [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801200d0` | 64 | pose record → four-row matrix (quaternion at `+0xc` to rotation, rows initialised to identity); caller `0x1801214a0` |
+| `0x180120e80` | 25 | VrTracker2 reset under its mutex: index −1, flags cleared, state 3, log `[VrTracker2][%s][%d] pass, mapid:(…), uniid:(…)` |
+| `0x1801211c0` | 18 | under the tracker mutex, latch the current map id (`+0x8e8` ← `+0x50`) and set the "pending" flag `+0x2390`; caller `0x1801a4040` |
+| `0x1801212a0` | 36 | destroy the global room object `0x180354ca0` (`0x180120f20`, then free its vectors); caller `0x1801a2a40` |
+| `0x180122030` | 43 | `CaesarManager` destructor: stop the clock thread (`0x18017afa0`) and delete the seven USB thread objects |
+| `0x1801220f0` | 12 | `CaesarUsbThread` base destructor (thread, event, mutex); unwind funclets call it |
+| `0x180122220` | 20 | `CaesarUsbThreadImuStatus` destructor: set stop flag `+0x1e0`, abort pipe `0x88`, then the base |
+| `0x1801222a0` | 21 | `CaesarUsbThreadLeddet` destructor (pipe `0x89`) |
+| `0x1801223b0` | 21 | `CaesarUsbThreadRelocPre` destructor (pipe `0x8a`) |
+| `0x180122440` | 20 | `CaesarUsbThreadSlamTracking` destructor (pipe `0x83`) |
+| `0x1801224c0` | 43 | `CaesarManager` deleting destructor |
+| `0x180123930` | 15 | `CaesarUsbThreadGenData` stop: stop flag, abort pipe `0x8b` |
+| `0x180123980` | 15 | `CaesarUsbThreadImage` stop (pipe `0x87`) |
+| `0x1801239d0` | 15 | `CaesarUsbThreadImuStatus` stop (pipe `0x88`) |
+| `0x180123a20` | 15 | `CaesarUsbThreadLeddet` stop (pipe `0x89`) |
+| `0x180123b10` | 15 | `CaesarUsbThreadSlamTracking` stop (pipe `0x83`) |
+| `0x180124610` | 17 | copy the 0x1084-byte calibration record stored at GenData `+0x42d50` and its 16-bit counter |
+| `0x180124660` | 17 | copy the 0x1084-byte record at GenData `+0x41ccc` and its counter |
+| `0x180124870` | 14 | read one status byte (`+0x4e6e` of the IMU/status thread) under its lock; callers `0x180132890`, `0x180134730`, `0x18018aaf0`, `0x180190300` |
+| `0x180124b50` | 29 | copy the newest buffered image frame (2 MiB slots, index `+0x200424`) and its counter |
+| `0x180124d50` | 19 | copy the newest LD packet (0x9050 bytes at `+0x9280`) and its counter; callers `0x180118920`, `0x18018aaf0` |
+| `0x180124dd0` | 23 | microseconds since the last status packet (0 if none yet); callers `0x180126b80`, `0x1801270c0`, `0x180128030` |
+| `0x1801250d0` | 59 | copy four 128-byte per-camera records (`+0x420`) and a counter |
+| `0x180125200` | 17 | read a status word (`+0x280`) under the lock |
+| `0x180125240` | 18 | copy a 128-character string from the status thread (`+0x15c`); callers `0x1801a02b0`, `0x1801a47c0` |
+| `0x1801252e0` | 14 | read the last status timestamp (`+0x4b40`); caller `0x180118920` |
+| `0x180127df0` | 27 | running min / max / sum / count of an int (latency statistics) |
+| `0x180128030` | 81 | image-stream packet: copy the frame into a VrTrace buffer (`0x18015a070`) when capture is on, stamp it with the headset clock (`0x180124c90`, `0x180124dd0`), update the statistics; caller `0x180125e00` |
+| `0x180128670` | 48 | `vector<int>` reallocate-and-insert; caller `0x18012af70` |
+
+### G.2 Hand skeleton [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180128770` | 22 | factory: new `HandSkeletonWithController` (0x1510 bytes), bind pose table `0x18034d880` |
+| `0x1801287f0` | 22 | factory: new `HandSkeletonWithoutController`, pose table `0x18034d2b0` |
+| `0x1801289a0` | 98 | `HandSkeletonBase` constructor: hand id, 31 bones × two pose sets (identity rotations, zero offsets) |
+| `0x180128b60` | 11 | in-place `HandSkeletonWithController` constructor |
+| `0x180128ba0` | 11 | in-place `HandSkeletonWithoutController` constructor |
+| `0x180128be0` | 15 | bone transform reset (identity quaternion, zero position) |
+| `0x180128c60` | 21 | release two owned objects (`+0x10`, `+0x18`) through their virtual destructors |
+| `0x180128cd0` | 21 | `HandSkeleton` deleting destructor |
+| `0x180128d30` | 11 | `HandSkeletonBase` deleting destructor |
+| `0x180128d60` | 11 | `HandSkeletonWithController` deleting destructor |
+| `0x180128d90` | 11 | `HandSkeletonWithoutController` deleting destructor |
+| `0x180128e50` | 30 | add the per-bone offset table to the 31 bone positions and refresh [likely] |
+| `0x180128f90` | 40 | per-frame skeleton update: read inputs (`0x180128f00`), run the two virtual steps, then add bone offsets |
+| `0x1801293a0` | 8 | `HandSkeletonBase` empty virtual |
+| `0x180129c10` | 8 | `HandSkeletonBase` empty virtual |
+| `0x18012b860` | 175 | static init of the timing/state block used by `0x18012bc00` (thread-safe statics, clock reads) [likely] |
+| `0x18012bc00` | 28 | map a state from `0x18012b860` and two flags to a 0..4 result code; callers `0x180134800`, `0x180160230` [likely] |
+| `0x18012c0f0` | 96 | `operator<<(ostream&, const char*)` with width padding (MSVC STL instance) |
+
+### G.3 jsoncpp [sure for the identity; the function names are jsoncpp's]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180135d10` | 74 | `std::string operator+(const char*, const std::string&)` |
+| `0x180135e90` | 9 | trivially-copyable move of a range (memmove) |
+| `0x180135ec0` | 9 | same |
+| `0x180135ef0` | 9 | same |
+| `0x180135f20` | 9 | same |
+| `0x180135f50` | 35 | copy a `std::map<CZString, Value>` subtree (node copy: key `0x180138220`, value `0x180138cf0`) |
+| `0x180136040` | 30 | destroy a range of `std::string` |
+| `0x1801360d0` | 30 | same, other element stride |
+| `0x180136160` | 103 | `vector<48-byte>` (Reader error record) reallocate-and-insert |
+| `0x1801363e0` | 103 | same for the second reader |
+| `0x180136660` | 64 | `vector<std::string>` reallocate-and-insert |
+| `0x1801367d0` | 54 | `vector<PathArgument>` (40 bytes) reallocate-and-insert |
+| `0x180136940` | 87 | `vector<Value*>` reallocate-and-insert |
+| `0x180136ae0` | 87 | `vector<std::string>` reallocate-and-insert (second instance) |
+| `0x180136c70` | 77 | `vector<PathArgument>` reallocate-and-insert (second instance) |
+| `0x180136e00` | 118 | `std::map<std::string, …>` find |
+| `0x180136f90` | 23 | `std::map<CZString, Value>` recursive node destroy |
+| `0x180137020` | 37 | `std::map<std::string, …>` recursive node destroy |
+| `0x1801370e0` | 23 | `std::map<CZString, Value>` recursive destroy (second instance) |
+| `0x180137170` | 132 | map insert-position search with hint (`CZString <`) |
+| `0x1801373d0` | 59 | map lower bound by string key |
+| `0x1801374a0` | 49 | `valueToString(int)` |
+| `0x180137580` | 160 | object compare: lexicographical `<` over (key, value) pairs |
+| `0x1801377d0` | 42 | move a range of 48-byte error records |
+| `0x180137850` | 42 | same, second reader |
+| `0x1801378d0` | 46 | move a range of `std::string` |
+| `0x180137950` | 50 | move a range of `PathArgument` |
+| `0x180137ad0` | 74 | object equality over (key, value) pairs |
+| `0x180137c20` | 66 | map emplace by string key |
+| `0x180137d40` | 51 | map emplace by `CZString` key (`Value::resolveReference` path) |
+| `0x180137ea0` | 9 | memmove range helper |
+| `0x180137ed0` | 9 | same |
+| `0x180137f00` | 9 | same |
+| `0x180137f30` | 26 | `std::ostringstream` constructor |
+| `0x180137fe0` | 72 | `std::stringbuf` constructor from a string and mode |
+| `0x180138130` | 28 | `BuiltStyledStreamWriter` constructor (indentation, colon, null symbol, end-line, comment style, precision) |
+| `0x180138220` | 25 | `Value::CZString` copy constructor (duplicates owned strings, `0x180140eb0`) |
+| `0x18013a0e0` | 35 | `Value::swap` (payload, type, allocated flag) |
+| `0x18013a1c0` | 82 | `Json::parseFromStream` with a default `CharReaderBuilder`; logs `Error from reader: %s` |
+| `0x18013a3b0` | 50 | `Json::writeString` with a default `StreamWriterBuilder` |
+| `0x18013a520` | 22 | `CZString ==` |
+| `0x18013a570` | 69 | `Value ==` (per type; arrays and objects through `0x180137ad0`) |
+| `0x18013a6d0` | 44 | `Value::operator[](const std::string&)` |
+| `0x18013a790` | 44 | same (const instance) |
+| `0x18013a850` | 13 | `operator[](std::string)` forwarding to `resolveReference(begin, end)` |
+| `0x18013ab50` | 15 | `operator[](const char*)` |
+| `0x18013ab80` | 22 | `Value::find`-based const `operator[]`, returns the static null value when missing |
+| `0x18013ad70` | 18 | same for `const char*` |
+| `0x18013adb0` | 36 | map iterator decrement |
+| `0x18013ae20` | 48 | map iterator increment |
+| `0x18013aeb0` | 30 | `CZString <` |
+| `0x18013af20` | 89 | `Value <` (per type) |
+| `0x18013b150` | 30 | `CZString <` (comparator instance) |
+| `0x18013bdf0` | 88 | `std::deque` map growth (Reader node stack) |
+| `0x18013bfd0` | 88 | same, error deque |
+| `0x18013c1b0` | 88 | same, second reader's error deque |
+| `0x18013c390` | 177 | red-black tree insert-and-rebalance |
+| `0x18013c610` | 177 | same, other map |
+| `0x18013c8f0` | 33 | `vector<std::string>` reserve |
+| `0x18013ca10` | 45 | clear a deque of error records |
+| `0x18013cb00` | 45 | same, second reader |
+| `0x18013ccf0` | 43 | `Reader::addComment` (normalise end-of-line, attach to the current value) |
+| `0x18013cdb0` | 43 | same, `OurReader` |
+| `0x18013ce70` | 55 | `Reader::addError` |
+| `0x18013cf50` | 55 | `OurReader::addError` |
+| `0x18013d030` | 10 | `addError` then `recoverFromError` |
+| `0x18013d060` | 10 | same, `OurReader` |
+| `0x18013d090` | 24 | collect one `PathArgument` of the wanted kind |
+| `0x18013d130` | 32 | allocate `n` 32-byte items |
+| `0x18013d1a0` | 32 | allocate `n` 40-byte items |
+| `0x18013d220` | 17 | `Value::append` |
+| `0x18013d270` | 30 | `Value::asBool` |
+| `0x18013d370` | 38 | `Value::asDouble` |
+| `0x18013d3e0` | 38 | `Value::asFloat` |
+| `0x18013d460` | 56 | `Value::asInt64` (error "LargestUInt out of …" via the stream helpers) |
+| `0x18013d580` | 65 | `Value::asInt` ("LargestInt out of Int range") |
+| `0x18013d710` | 73 | `Value::asString` |
+| `0x18013d880` | 59 | `Value::asUInt64` |
+| `0x18013d9e0` | 64 | `Value::asUInt` |
+| `0x18013db50` | 16 | first element of a non-empty array/object, else a null marker |
+| `0x18013dcd0` | 133 | `codePointToUTF8` |
+| `0x18013de80` | 15 | `Value::compare` (−1 / 0 / 1 from `<`) |
+| `0x18013e0e0` | 18 | deallocate `n` 32-byte items |
+| `0x18013e180` | 83 | `Reader::decodeNumber` (token → value) |
+| `0x18013e760` | 83 | `OurReader::decodeNumber` |
+| `0x18013eed0` | 83 | `Reader::decodeNumber` integer path wrapper |
+| `0x18013f0e0` | 70 | integer token parse with overflow check (max/10 rule) |
+| `0x18013f210` | 83 | `OurReader` integer path wrapper |
+| `0x18013f420` | 70 | `OurReader` integer token parse (`LargestInt` limits) |

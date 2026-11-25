@@ -149,10 +149,10 @@ Regenerate with `python scripts/sony-re/triage/progress.py`.
 | Stage | Progress | Functions |
 |---|---|---|
 | Triaged | `████████████████████` 100% | 5175 / 5175 |
-| Documented (all) | `██████████████░░░░░░` 72% | 3747 / 5175 |
+| Documented (all) | `█████████████████░░░` 85% | 4382 / 5175 |
 | Documented (core) | `████████████████████` 100% | 2396 / 2396 |
-| Documented (ref) | `████████░░░░░░░░░░░░` 38% | 391 / 1025 |
-| Documented (fluff) | `███████████░░░░░░░░░` 55% | 960 / 1754 |
+| Documented (ref) | `████████████████████` 100% | 1025 / 1025 |
+| Documented (fluff) | `███████████░░░░░░░░░` 55% | 961 / 1754 |
 
 <details><summary>Core functions by subsystem</summary>
 

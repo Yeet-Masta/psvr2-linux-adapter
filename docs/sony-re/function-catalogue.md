@@ -14,6 +14,7 @@ Parts:
 - [Part H: ShareManager and ConfigManager glue](#part-h-sharemanager-and-configmanager-glue)
 - [Part I: INS glue, IMU ring and IR-tracker helpers](#part-i-ins-glue-imu-ring-and-ir-tracker-helpers)
 - [Part J: LedSync helpers, SteamVR glue, libpad manager and the rest](#part-j-ledsync-helpers-steamvr-glue-libpad-manager-and-the-rest)
+- [Part L: Relocaliser helpers](#part-l-relocaliser-helpers)
 
 ---
 
@@ -3445,3 +3446,113 @@ pieces.
 | `0x1801aa7f0`, `0x1801aab80` | 58, 29 | 3 × 3 rotation → quaternion (Shepperd: trace path, else largest diagonal) |
 | `0x1801ab250`, `0x1801ab270`, `0x1801ab2b0`, `0x1801abe20` | 3–10 | `Relocalizer` / `RelocalizerThread` destructors and stop: set the stop flag, join, destroy the queues and locks |
 | `0x1801abf50` | 5 | copy the latest relocaliser result (`0x1803635e0`) under its lock |
+
+---
+
+## Part L: Relocaliser helpers
+
+Part L covers the relocaliser helpers that Part B of [room.md](room.md) does not
+name one by one: the object API shims, containers, the dense and sparse linear
+algebra under the pose solve and OptimizeMap, the map-store accessors and the
+geometry kernels. The algorithms themselves are in room.md Part B; for a port
+these rows mostly say "use a library here". `loc` is the backend localiser
+object (`+0x1420` mode, `+0x1428` tracking state, `+0x1430` map store,
+`+0x1448` searcher), as in room.md.
+### L.1 Object API shims and backend calls [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801ddf10`, `0x1801ddf70`, `0x1801ddfe0`, `0x1801de010`, `0x1801de050`, `0x1801de090`, `0x1801de0d0`, `0x1801de100`, `0x1801de140`, `0x1801de180`, `0x1801def10`, `0x1801def50`, `0x1801df380`, `0x1801df3d0`, `0x1801df480`, `0x1801f0740` | 15–64 | API shims (`0x1801dd…`–`0x1801df…`): NULL handle → −5, backend not created → −4, else call one backend function and return its code. `0x1801ddf70` also frees the backend; `0x1801de180` copies a 112-byte status record out |
+| `0x1801de2a0` | 320 | API: copy the full localiser result (twelve 0xc4-byte candidate slots and the per-slot extras) into the caller's struct |
+| `0x1801ded90` | 102 | API: localise an externally supplied frame: switch the mode to 2 (`FUN_1801f1ac0`), check the frame and camera, run the search, restore the mode |
+| `0x1801f1ac0`, `0x1801f1ae0` | 9–12 | get / set the localiser mode (`loc+0x1420`); set the search mode (searcher `+0x20`) |
+| `0x1801ee200` | 127 | copy the tracking-state summary (anchor keyframe id, valid flag, then the following words of the state) to the caller |
+| `0x1801ee720`, `0x1801ee740`, `0x1801ee760`, `0x1801ee7a0` | 16–17 | one-line forwards to map-store queries on `loc+0x1430`, returning the store's negative code or 0 |
+| `0x1801ee090`, `0x1801f17b0` | 91–130 | export / import the localiser state blob: the buffer must hold the map image plus 1280 bytes (else −5); holds the ids `+0x15f0`/`+0x15f4`, the 0x90-byte tracking state, the mode and the 0x70-byte statistics `+0x1580`. Import clears the statistics and resets the tracking state and searcher first |
+| `0x1801f1120`, `0x1801f11f0`, `0x1801f4bf0` | 28–41 | set the id at `+0x15f0` (also passed to `FUN_180227d20`, which seeds a 64-bit counter) and clear the running statistics; clear the searcher's candidate table |
+| `0x1801f0cf0`, `0x1801f1a00` | 34–39 | walk a keyframe-id iterator (virtual `+0x10` has-next, `+0x18` next): drop each unused keyframe from the store (counted at `+0x1588`), or set a per-keyframe flag (`FUN_180227650`) |
+| `0x1801f1f00` | 247 | prune by viewing direction [likely]: per keyframe, yaw from its pose (degrees, 16 bins of 22.5°); a keyframe that loses its bin to a stronger one is flagged for removal |
+| `0x1801f1af0` | 194 | choose keyframes by id bitmask (≤ 96 ids, AVX compare masks) for a bulk map operation [likely] |
+| `0x1801dc0a0`, `0x1801f12c0` | 28–312 | reset a query/result record: twelve candidate slots with score 9999.0 and id −1 |
+| `0x1801ed0b0` | 126 | debug print of map counters (`"Map:%d,%d, …"`) |
+| `0x1801ed3d0`, `0x1801ed410`, `0x1801edc50`, `0x1801edec0`, `0x1801eec40`, `0x1801eecf0`, `0x1801ef0a0`, `0x1801efaa0`, `0x1801efad0`, `0x1801f0a90`, `0x1801f42c0`, `0x1801f45a0`, `0x1801f4720`, `0x1801fac60` | 12–85 | small backend steps around map load, visibility and keyframe drop: query the store, fill a result slot (−1 = none), test the frame flag `+0x9ae68`; called from load map (`FUN_1801ef410`), UpdateMap (`FUN_1801f2470`) and keyframe drop (`FUN_1801f71d0`) [likely] |
+| `0x1801d8800`, `0x1801d88c0`, `0x1801dc6e0`, `0x1801dc8b0` | 10–75 | result-record helpers for RunLocalizer / UpdateMap: fill or clear two 0xc4 halves; `0x1801dc8b0` tests whether a 6 × 6 matrix is a multiple of the identity |
+
+### L.2 Lifetime and containers [sure]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801ec600` | 328 | backend constructor: allocate the 0x2d0-byte parts, the map store, searcher and keyframe tables, and set the defaults listed in room.md (0.25, 2.0, 3.0 …) |
+| `0x1801eb680`, `0x1801eb730`, `0x1801edd00`, `0x1801f3e20`, `0x1801f3e90`, `0x1801f3f20`, `0x1801f55a0`, `0x1801f6f50`, `0x1801f7010`, `0x1801f7da0`, `0x1801f7e50`, `0x1801f9020` | 10–78 | backend destructor and its member destructors: free each table and array, then the map store |
+| `0x1801eb260`, `0x1801f61b0`, `0x1801f7080`, `0x1801f8750`, `0x1801fcd70` | 63–183 | member constructors: candidate slots (vector-constructed 0x34 / 0xc4 records), searcher tables (256 entries), keyframe buffers |
+| `0x180237670`, `0x180237750`, `0x180237850`, `0x180237890`, `0x180237950`, `0x180237970` | 16–234 | small array type used by the map store: element storage with a 32-byte header in front, grow (`FUN_180237970`, doubles), clear and free |
+| `0x1801d6880`, `0x1801ea780`, `0x1801ea7e0`, `0x1801ea800`, `0x1801ea820`, `0x1801ea840`, `0x1801ea860`, `0x1801f6de0`, `0x1801f79a0`, `0x1801f79c0`, `0x1801f79e0`, `0x180224fd0`, `0x18022c4c0` | 10–14 | deleting destructors: run the member destructor, then `free` |
+| `0x1801eb520`, `0x1801eb550`, `0x1801eb580`, `0x1801eb5b0`, `0x1801eb5e0`, `0x1801eb610`, `0x1801f3d60`, `0x1801f3d90`, `0x1801f5570`, `0x1801f6e90`, `0x1801f6ec0`, `0x1801f6ef0`, `0x1801f6f20`, `0x1801f7bc0`, `0x1801f7bf0`, `0x1801f7c20`, `0x1801f7dc0`, `0x180210ae0`, `0x18022e120`, `0x18022e150`, `0x1802377c0`, `0x1802377f0` | 13 | array destructors: count = 0, free the buffer |
+| `0x1801f0da0`, `0x1801f0e30`, `0x1801f0ec0`, `0x1801f0f50`, `0x1801f0fe0`, `0x1801f1090`, `0x1801f4860`, `0x1801f48f0`, `0x1801f49a0`, `0x1801f4a60`, `0x1801f4b10`, `0x1801f6be0`, `0x1801f7390`, `0x1801f7420`, `0x1801f74f0`, `0x1801f75b0`, `0x1801f7660`, `0x1801fcb90`, `0x1801fcc20`, `0x1801fccb0`, `0x1802143e0`, `0x1802326a0`, `0x180232750`, `0x1802382a0`, `0x180238360`, `0x180238410` | 35–218 | array resize: set the count; if it exceeds the capacity, allocate the new size (`FUN_1801aa7a0`), copy, free the old buffer; false on allocation failure |
+
+### L.3 Dense linear algebra (6 × 6 inverse, products) [likely: Eigen-style template code]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801d68b0`, `0x1801d6df0`, `0x1801d79e0`, `0x1801d7a90`, `0x1801d7b30`, `0x1801d7bd0`, `0x1801d8900` | 35–652 | LDLᵀ with symmetric pivoting of a 6 × 6 matrix and the solve against the identity (inverse), used by the pose sanity test `FUN_1801d6230`: pivot search, rank-1 updates, two 6-wide triangular solves; the caller then symmetrises the result. Fails on a zero pivot |
+| `0x1801d70c0`, `0x1801d7140`, `0x1801d71f0`, `0x1801d7230`, `0x1801d7260`, `0x1801d7290`, `0x1801d72b0`, `0x1801d7350`, `0x1801d75f0`, `0x1801d7880`, `0x1801d8710` | 12–155 | column reductions: sum of absolute values (the matrix 1-norm for the condition test), max |x| with index (pivot search), 16- and 8-wide SIMD loops plus a tail |
+| `0x1801d8970` | 5356 | blocked matrix-product kernel (packed panels, 24 × 4 register tiles) shared by every dense product below |
+| `0x1801db160`, `0x1801db4c0`, `0x1801db660`, `0x1801db7c0`, `0x1801dbc60`, `0x1801e27e0`, `0x1801e2ef0` | 67–295 | pack routines for that kernel: copy the left operand in 24-row panels and the right operand in 4-column panels |
+| `0x1801dcb40`, `0x1801dd530` | 444–457 | blocked triangular solve (lower / upper) on panels of at most 0x20000 elements, calling the kernel for the trailing update |
+| `0x1801e1370`, `0x1801e13f0`, `0x1801e1480`, `0x1801e1510`, `0x1801e76f0`, `0x1801e7bd0`, `0x1801e80b0` | 16–236 | general product drivers for 6- and 12-column right sides (default sizes 6 and 12): block sizes, packing, kernel |
+| `0x1801e0550`, `0x1801e0630`, `0x1801e0710`, `0x1801e0770`, `0x1801e09c0`, `0x1801e0aa0`, `0x1801e0b80`, `0x1801e0be0`, `0x1801e0e70`, `0x1801e0f70`, `0x1801e1080`, `0x1801e1190`, `0x1801e17a0`, `0x1801e1b80`, `0x1801e2680`, `0x1801e2720` | 8–63 | small fixed-size products: one element of a 6 × 6 or 12 × 6 product, 3-vector dot, products into zeroed 6 × 6 / 12 × 6 outputs |
+| `0x1801e8590`, `0x1801e9560` | 839–1309 | large unrolled product / transpose kernels for the solver's 6 × 6 blocks (reached from the sparse code in L.4) |
+| `0x1801df920`, `0x1801e2060`, `0x1801eb020` | 41–42 | rotation matrix → quaternion (trace path when the trace > 0, else the largest diagonal, ×0.5) |
+| `0x1801e04b0`, `0x1801e2240`, `0x1801e2270`, `0x1801e2320`, `0x1801e23c0`, `0x1801e24c0`, `0x1801e54d0`, `0x1801e5ad0`, `0x1801e5b30`, `0x1801e7600` | 19–57 | pose / record initialisers: identity pose (w = 1.0, rest 0), zeroed 6 × 6 blocks; `0x1801e24c0` composes two poses (rotate, add translation) |
+| `0x1801e31a0`, `0x1801e39c0`, `0x1801e4c20`, `0x1801e52b0`, `0x1801e5560`, `0x1801e5820`, `0x1801e5b60`, `0x1801e71d0`, `0x1801e7390`, `0x1801e7690`, `0x1801e76c0` | 18–983 | relative pose with Jacobians between two keyframe poses (6 × 6 blocks for the edge) and its inverse; used when edges are created (`FUN_1801ed9f0`, `FUN_1801ef740`) and by the frame update [likely] |
+| `0x1801ec310`, `0x1801ec460`, `0x1801ec4f0`, `0x1801f3010`, `0x1801f31b0`, `0x1801f32c0`, `0x1801f8f50` | 12–72 | per-keyframe geometry for the visibility test and edges: transform a point into a keyframe, compare viewing angles in 90° quadrants with 12°/30°/45° limits [likely] |
+
+### L.4 Sparse solver internals (OptimizeMap) [likely: Eigen-style sparse template code]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801ffec0`, `0x180209840`, `0x180211070`, `0x1802111a0`, `0x1802112e0`, `0x180211790` | 14–163 | edge-cost helpers around `FUN_180211b10`: residual and 6 × 6 information blocks, Cauchy weight cache |
+| `0x1801ff410`, `0x1801ff590`, `0x1801ff950`, `0x1801ffd70`, `0x1802038b0`, `0x180237070` | 38–194 | per-iteration helpers of the solver `FUN_18021d4d0`: copy a pose, rotation log / exp (thread-safe static constants), small dense 6 × 6 solve via L.3 |
+| `0x180209d40`, `0x180209da0`, `0x180209e90`, `0x18020a3b0`, `0x18020a600`, `0x18020a6f0`, `0x18020aab0`, `0x18020aee0`, `0x180214120`, `0x1802144b0`, `0x1802144f0`, `0x180214600`, `0x180214aa0`, `0x180215060`, `0x180215350`, `0x1802156a0`, `0x180215750`, `0x1802170a0`, `0x1802171c0`, `0x180217940`, `0x180217bb0`, `0x180218540`, `0x1802187c0`, `0x180218c00`, `0x180218d90`, `0x180218ea0` | 18–363 | symbolic analysis: elimination tree, fill-reducing ordering and column counts, supernode detection [likely] |
+| `0x180219170`, `0x180219240`, `0x180219420`, `0x1802194b0`, `0x180219520`, `0x180219590`, `0x180219620`, `0x1802196b0`, `0x180219730`, `0x180219910`, `0x18021a620`, `0x18021b060`, `0x18021b980`, `0x18021c3b0`, `0x18021cd90`, `0x18021d0a0`, `0x18021d430`, `0x18021d480` | 14–1295 | numeric factorisation and the dense panel updates inside it (`FUN_1802158c0` family) |
+| `0x18020b400`, `0x18020b430`, `0x18020b4b0`, `0x18020b5a0`, `0x18020b5d0`, `0x18020b6d0`, `0x18020b750`, `0x18020b880`, `0x18020b9a0`, `0x18020bac0`, `0x18020bc60`, `0x18020bc90`, `0x18020bcc0`, `0x18020bcf0`, `0x18020bd70`, `0x18020be60`, `0x18020bee0`, `0x18020bf90`, `0x18020c010`, `0x18020c040`, `0x18020c500`, `0x18020c630`, `0x18020c990`, `0x18020cb50`, `0x18020cc90`, `0x18020cdd0`, `0x18020cf10`, `0x18020d010`, `0x18020d110`, `0x18020d210`, `0x18020d2b0`, `0x18020d350`, `0x18020da10`, `0x18020dbc0`, `0x18020e1c0`, `0x18020e4e0`, `0x18020fe00`, `0x180210230`, `0x180210280`, `0x1802102b0`, `0x1802102e0`, `0x180210310`, `0x180210340`, `0x180210370`, `0x180210400`, `0x1802104c0`, `0x180210600`, `0x180210630`, `0x180210660`, `0x180210690`, `0x180210890`, `0x1802108b0`, `0x180210b10`, `0x180210bf0`, `0x180210c30`, `0x180210d60`, `0x180210da0`, `0x180210e40`, `0x180210e80`, `0x180210ed0`, `0x180210f80` | 10–2044 | sparse matrix storage: compressed columns (outer index, inner index, values), insert, sort, resize, permute, transpose |
+| `0x1801fe0b0`, `0x1801fe1c0`, `0x1801fe3f0`, `0x1801fe780`, `0x1801feb10`, `0x1801ff180`, `0x180200480`, `0x1802005e0`, `0x180200a20`, `0x180200db0`, `0x1802010d0`, `0x180201860`, `0x180201c50`, `0x180201ef0`, `0x1802021a0`, `0x180202590`, `0x1802028b0`, `0x180202da0`, `0x180203050`, `0x180203540`, `0x180203b30`, `0x180203e40`, `0x180203eb0`, `0x180203f20`, `0x180203f60`, `0x1802047a0`, `0x180204fe0`, `0x1802051b0`, `0x1802054e0`, `0x180205760`, `0x1802057f0`, `0x180205890`, `0x180205920`, `0x180205a10`, `0x180206320`, `0x180206480`, `0x180206590`, `0x1802069d0`, `0x180206e10`, `0x180207100`, `0x1802073f0`, `0x180207b00`, `0x180207ca0`, `0x180208080`, `0x180208650`, `0x180208720`, `0x1802087c0`, `0x1802087f0`, `0x180208900`, `0x180208a10`, `0x180208b20`, `0x180208d50`, `0x180208f80`, `0x180209170`, `0x1802091f0`, `0x180209770`, `0x1802098a0`, `0x180209a70`, `0x180213ed0` | 12–443 | sparse expression templates: products, triangular solves and assignment of sparse × dense blocks used by the solver |
+
+Port note: everything in L.3 and L.4 is generic linear algebra. A port should
+use a library (Eigen, or the solver of its pose-graph library) rather than
+follow these functions.
+
+### L.5 Map store (`0x180224…`–`0x180233…`) [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+The store is one global image (layout in room.md, "Room map file"). Keyframe
+ids run 0–96 (`id ≥ 0x61` → −12); slot stride 0x2ed20; a 97-bit valid mask
+sits in a qword array in the image.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180232c30`, `0x180232d00`, `0x180232da0`, `0x180232e50` | 23–54 | read the map file: 0x28-byte header, then the 0x12cb760-byte body (else −11); the static file handle; SHA-256 digest check [likely] |
+| `0x180225370`, `0x180225fb0`, `0x180226f00`, `0x1802270a0`, `0x180227550`, `0x180232220`, `0x180232390`, `0x1802323f0`, `0x1802324b0`, `0x1802324d0` | 9–44 | logged map operations: "Add Keyframe", "Drop Keyframe Description", "Prune KeyframePose and PoseGraph", "Remove Keyframe Pose"; `FUN_180232220` opens an operation record by name |
+| `0x180225ad0`, `0x180225c00`, `0x180232820`, `0x180232890` | 9–38 | new map: bump the serial, write `map_id`, clear the tables |
+| `0x1802260b0`, `0x1802260e0`, `0x180226110`, `0x180226130`, `0x180226140`, `0x180226160`, `0x1802261a0`, `0x180226210`, `0x1802262d0`, `0x180226340`, `0x180226350`, `0x180226360`, `0x180226370`, `0x180226540`, `0x180226710`, `0x180226760`, `0x180226780`, `0x1802268f0`, `0x180226930`, `0x180226980`, `0x180226a90`, `0x180226b20`, `0x180226b50`, `0x180226ba0`, `0x180226c00`, `0x180226c40`, `0x180226d80`, `0x180226e60`, `0x180226e90`, `0x180226f80`, `0x180227580`, `0x1802275c0`, `0x180227600`, `0x180227650`, `0x180227680`, `0x1802276e0`, `0x180227860`, `0x1802278a0`, `0x180227c80`, `0x180227e70`, `0x180227ea0` | 9–177 | store API used by the backend (`loc+0x1430`): keyframe count, valid bit, pose, flags, edge table and statistics getters and setters; each checks the id and forwards into the image accessors below |
+| `0x18022f060`, `0x18022f140`, `0x18022f1f0`, `0x18022f360`, `0x18022f400`, `0x18022f530`, `0x18022f580`, `0x18022f5c0`, `0x18022f610`, `0x18022fbb0`, `0x18022fc40`, `0x18022fd60`, `0x18022fe30`, `0x18022fe80`, `0x18022fed0`, `0x1802300d0`, `0x1802300f0`, `0x180230120`, `0x180230170`, `0x1802301f0`, `0x180230250`, `0x180230370`, `0x1802303f0`, `0x180230470`, `0x1802304f0`, `0x180230590`, `0x180230740`, `0x1802307b0`, `0x180230810`, `0x1802308c0`, `0x180230c80`, `0x180230d00`, `0x180230d60`, `0x180230d80`, `0x180230da0`, `0x180230e80`, `0x180230f60`, `0x180230fc0`, `0x180231210`, `0x180231540`, `0x180231580`, `0x1802315d0`, `0x180231610`, `0x180231790`, `0x180231910`, `0x180231940`, `0x180231990`, `0x180231a30`, `0x180231aa0`, `0x180231b80`, `0x180231d40` | 9–178 | image accessors on the global map image: per-keyframe slot fields, the id table, edge records, counters, the valid mask |
+| `0x18022c990`, `0x18022ca40`, `0x18022cad0`, `0x18022cb60`, `0x18022ce00`, `0x18022d0d0`, `0x18022d3a0`, `0x18022d4b0`, `0x18022d5b0`, `0x18022d6b0`, `0x18022d9f0`, `0x18022dcf0`, `0x18022e040` | 18–164 | sorts of (key, index) pairs used by the store: introsort with median of three, heap fallback, insertion tail |
+| `0x180229bc0`, `0x180229c70`, `0x180229ce0`, `0x18022a0d0`, `0x18022a170`, `0x18022a190`, `0x18022a2f0`, `0x18022a3a0`, `0x18022a440`, `0x18022a570`, `0x18022a6b0`, `0x18022b2b0`, `0x18022b820`, `0x18022c380` | 12–661 | dense 6 × 6 factor and solve for the localiser pose step (`FUN_180229910`, `FUN_1802296c0`): pivoted LDLᵀ kernel `FUN_18022a6b0`, reductions, forward / back substitution |
+| `0x180232ff0`, `0x180233220`, `0x180233410` | 74–1388 | closed-form small solvers for the pose-hypothesis code below: quadratic / cubic roots and a large unrolled solve (`FUN_180233410`) [likely] |
+| `0x180224640`, `0x1802247c0`, `0x180224b50`, `0x180224ba0`, `0x180224c30`, `0x180224c80`, `0x180224d70`, `0x180224dc0`, `0x180224e50`, `0x180224ea0`, `0x180224ff0`, `0x180225080`, `0x180225400`, `0x180225800`, `0x180225bc0`, `0x180225c40`, `0x180225ff0`, `0x180228020`, `0x180228090`, `0x180228130`, `0x180228fb0`, `0x18022c480`, `0x18022c4f0`, `0x18022c580`, `0x18022c600`, `0x18022c6a0`, `0x18022c760`, `0x18022e3d0`, `0x18022e4b0`, `0x18022e7b0`, `0x18022ea90`, `0x18022ebe0`, `0x18022ecf0`, `0x18022ee00`, `0x18022ee20`, `0x18022ee40`, `0x1802324f0`, `0x180232840`, `0x1802328f0`, `0x180232990`, `0x180232b00` | 9–219 | store internals: keyframe insert / remove bodies, graph-edge lists, inverted-index lists, small arrays |
+
+### L.6 Localise and keyframe helpers, geometry kernels [likely unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801f4c50`, `0x1801f53c0`, `0x1801f8530`, `0x1801fa560`, `0x1801fa910`, `0x1801fbee0`, `0x1801fc0b0`, `0x1801fcaf0`, `0x1801fcfc0` | 9–150 | search and match steps: copy a candidate into a result slot, project keyframe points for a candidate, guided-patch wrapper calls (`FUN_180228ff0`) |
+| `0x1801f56e0`, `0x1801f60e0`, `0x1801f6100`, `0x1801f6330` | 21–518 | keyframe insert body ("Add Keyframe" path, `FUN_1801f7210`): copy features, descriptors and patches into a free slot |
+| `0x1801ea880`, `0x1801ea900`, `0x1801eab50`, `0x1801eac50`, `0x1801eaf50`, `0x1801f3410`, `0x1801f34d0`, `0x1801f3860` | 16–164 | sorts [sure]: introsort over floats by |x| (`FUN_1801eee10`), and over (score, id) pairs (`FUN_1801f3950`) |
+| `0x180234de0`, `0x1802359f0`, `0x180236020`, `0x1802364b0`, `0x180236c80` | 58–322 | pose from correspondences: minimal-sample solve with cubic / quartic roots (1/3, 27, 4.5 constants), used through `FUN_1802278a0` and the pooled solve `FUN_1801f94a0` |
+| `0x180238960`, `0x1802389f0`, `0x180238b00`, `0x180238d30` | 22–258 | patch correlation for the guided check [sure for the arithmetic]: sums and sums of squares of 8-bit pixels (SIMD), zero-variance test, normalised correlation |
+| `0x180237cd0`, `0x180237ef0`, `0x180237ff0`, `0x180238100`, `0x180238520`, `0x180238640`, `0x180238780`, `0x1802388c0` | 41–139 | inverted-index / graph list walkers for the map store: find, insert, remove an id (14 = not found) |
+| `0x1801f3310`, `0x1801f33a0`, `0x1801f3dc0`, `0x1801f3df0`, `0x1801f4310`, `0x1801f6cf0`, `0x1801f7190`, `0x1801f7ca0`, `0x1801f7df0`, `0x1801fe080`, `0x1801ffd10`, `0x180236000` | 9–54 | small glue: a 64-bit sequence counter, list index lookup, destructor and vtable slots of solver objects |
+| `0x1801ee7c0` | 124 | same-view test for UpdateMap: for keyframe k, any other valid keyframe whose relative rotation angle has cos > `loc+0x13fc` and whose distance is below `loc+0x1400` makes k redundant (these two thresholds are not the P-block same-view limits at `+0x1418`/`+0x141c`; their writer is not traced) [sure for the test; likely for the use] |
+| `0x1801eb910` | 228 | copy an internal keyframe / result record into the API layout field by field |
+| `0x180237820` | 13 | array destructor of the map-store list type |

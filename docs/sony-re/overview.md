@@ -1469,9 +1469,9 @@ anchored by log strings). 5175 functions; about 4800 have no strings.
 |----------|-----------|--------|
 | `0x18000xxxx–0x1803ffff` | VR dialogs, localisation strings, boundary meta (`sceBoundaryMeta.bin`) | UI only; skipped |
 | `0x180040000–0x18004ffff` | MSVC CRT / STL | Library; skipped |
-| `0x180050000–0x18006ffff` | Controller tracker core: `pad_tracker`, `UkfManager`, `LIT::searchOffsetByTimestamp`, Kalman steps | Identified; algorithm not decoded |
+| `0x180050000–0x18006ffff` | Controller tracker core: `pad_tracker`, `UkfManager`, `LIT::searchOffsetByTimestamp`, Kalman steps | Decoded (`controller-tracking.md` parts C, G, H) |
 | `0x180070000–0x18009ffff` | Dense linear algebra (BLAS/LAPACK-style "Lower/Transpose") | Library; skipped |
-| `0x1800a0000–0x1800fffff` | Tracker boot / multi-camera pose search (`ComputeBootStats`, `ConnectedComponents`, `ConfigFile0.trk`) | Identified; algorithm not decoded |
+| `0x1800a0000–0x1800fffff` | Tracker boot / multi-camera pose search (`ComputeBootStats`, `ConnectedComponents`, `ConfigFile0.trk`) | Decoded (`controller-tracking.md` part B; `function-catalogue.md` part A) |
 | `0x180100000–0x18011ffff` | VrTrace capture/replay | Debug only |
 | `0x180120000–0x18013ffff` | Map save/load, play area, universes, SteamVR glue | Map save scheduling, play-area state and chaperone writing decoded (`room.md` part A); rest partly |
 | `0x180140000–0x18015ffff` | jsoncpp + config manager | Library + glue |
@@ -1480,7 +1480,7 @@ anchored by log strings). 5175 functions; about 4800 have no strings.
 | `0x180190000–0x18019ffff` | LedSyncer, controller tracking glue | Commands decoded |
 | `0x1801a0000–0x1801affff` | SteamVR devices (HMD, Sense), properties, debug page | Partly |
 | `0x1801b0000–0x1801dffff` | libpad (HID I/O, `HID_SYNC`, calibration, output reports) | Calibration + sync decoded |
-| `0x1801e0000–0x18023ffff` | Relocaliser / SLAM backend (keyframes, pose graph, `map_id`) | Identified; not decoded |
+| `0x1801e0000–0x18023ffff` | Relocaliser / SLAM backend (keyframes, pose graph, `map_id`) | Pipeline, RP frame and map layout decoded (`room.md` part B); matching, map update and pose-graph solve not yet |
 
 The device protocol (every endpoint, every control report, the calibration
 blobs, LED models, LED-sync state) is mapped above. What remains is
@@ -1495,14 +1495,13 @@ reprojection cost over all cameras, and a boot search scored over many frames.
 1. **Hardware check** of the decoded formats: dump EP `0x89` ("LD"), `0x8b`
    ("VD"/"SIE" calibration) and `0x8d` (firmware log) from the kernel module
    after setting a camera mode, and confirm the layouts above.
-2. **LED table at `0x180260aa0`** and the 0x60-byte side table before each
-   LED model: which LEDs each sync phase lights.
-3. **Report `0x81` / `0x8f` / `0xa1` layouts** (firmware/hardware info).
-4. **Controller tracker algorithm** (`0x180050000–0x1800fffff`): boot search
-   and scoring parameters, UKF tuning. Reimplement; don't transcribe.
-5. **Relocaliser** (`0x1801e0000–0x18023ffff`) and the `0x8a` "RP" payload:
-   persistent room map.
-6. **Report `0x29`** in the SteamVR driver: 120 Hz.
+2. Done: LED table at `0x180260aa0` (`controllers.md` part C).
+3. Done: reports `0x81` / `0x8f` / `0xa1` (`headset.md` §A.2).
+4. Done: controller tracker algorithm (`controller-tracking.md`).
+5. **Relocaliser** (`0x1801e0000–0x18023ffff`): RP payload and map layout
+   are done (`room.md` part B); the matching, map update and pose-graph
+   solve are the largest part still undescribed.
+6. Done: report `0x29` and 120 Hz (`headset.md`, `development.md`).
 
 ---
 

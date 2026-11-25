@@ -359,6 +359,60 @@ translation by pad `+0x48` (part C §C.2b.1). Indices ≥ 3 can take a per-devic
 `+0x6c8`/`+0x6cc`/`+0x7d0` [meaning unknown]. Read the tables with the
 section reader; do not commit them.
 
+#### A.5.7 Stillness test and tilt correction (`FUN_18017cdb0` IMU tick, `FUN_180171400`) [sure unless tagged]
+
+Each IMU tick (step 6 of §A.3.1) takes statistics over the whole IMU ring
+(`FUN_180173830`, 300 samples once wrapped, at least 5): per-axis mean and
+variance of the accelerometer and of the gyro.
+
+**Stillness.** `FUN_1801732f0` passes when
+`|var_accel|² < 3·0.05²` and `|var_gyro|² < 3·0.005²` (parameter block
++0x00 and +0x08). While it passes, `still_us += 500·n` (n = samples this
+tick); otherwise `still_us = 0`. Stationary = `still_us > 1 500 000`
+(core `+0x564` / `+0x560`).
+
+**Tilt correction.** Runs when its enable byte (behind core `+0x190`) is
+set and the ring statistics are valid. Inputs: mean accel `a` (IMU frame),
+`va` = mean of the three accel variances, `vg` = mean of the three gyro
+variances, the output filter's orientation `q` (x, y, z, w), and
+`T = n·dt` (time covered by this tick). State: reference gravity `g`
+(world, `(0, −9.8, 0)`), a running world-frame estimate `m` of the
+measured specific force with spread `σ`, and a "large tilt" flag.
+
+```
+f   = q ⊗ a ⊗ q*                           // accel in world axes
+d   = | |a| − |g| |
+w   = max(1 − s(2d − 2) + s(−2d − 2), 1e-8)  // s(x) = 1/(1+e^−x); w ≈ 1 when |a| ≈ |g|
+wA  = 0.05 / σ                              // weight of the old estimate
+wB  = w · (T / (max(va,1e-8) / 0.05)) / (max(vg,1e-8) / 0.005)
+// weighted merge of two Gaussians (FUN_1801711f0)
+m'  = (wA·m + wB·f) / (wA + wB)
+v'  = (wA·(|m|² + σ²) + wB·(|f|² + max(va,1e-8)²)) / (wA + wB) − |m'|²
+if v' > 0: m = m', σ = sqrt(v')            // else keep the old estimate
+if σ or m is NaN: m = f, σ = 0.1; stop
+
+n   = (m × g) / (|m|·|g|)
+θ   = asin(min(|n|, 1)); if m·g > 0: θ = π − θ   // angle between m and −g
+tilt_out = |θ|
+flag = 1 if |θ| > 20°; flag = 0 if |θ| < 0.1° (hysteresis)
+k   = T / 0.05
+if flag == 0: k = k · (θ in degrees)²       // small errors are pulled in slowly
+if k > 0:
+    k = min(k, 1)
+    r = rotation by −θ·k about n/|n|        // quaternion (sin(−θk/2)·n̂, cos(−θk/2))
+    q = r ⊗ q                               // Hamilton, premultiplied (world axes)
+    m = r · m                               // keep the estimate consistent
+    applied_out = k·θ
+else applied_out = 0
+```
+
+The corrected `q` is written back to the output filter **only in 3DoF**
+(INS `+0x178` byte = 0); in 6DoF the estimate still runs but the
+orientation comes from the blender (§A.5.2). With a large error (flag
+set) the time constant is 50 ms. Below 20° the gain is multiplied by the
+square of the error in degrees, so a 1° error is corrected at rate
+`T/0.05` and a 0.1° error 100 × slower.
+
 ### A.6 Constants
 
 | Name | Value | Meaning | VA |
@@ -404,7 +458,7 @@ section reader; do not commit them.
   extrapolation. Not yet run on hardware.
 - Still missing on the headset path: Sony's mode-0 adaptive blender (the
   one PC runs on the output filter; gains now in §A.5.2), the stillness / shock switches (§A.3.1 step
-  6), tilt correction `FUN_180171400`, the SLAM `+0x188` good-frame count.
+  6), tilt correction `FUN_180171400` (now in §A.5.7), the SLAM `+0x188` good-frame count.
 - Validity: Sony treats `state == 3 || flag0e == 1 || substate == 5` as
   valid; check what the Linux code gates on.
 - Controllers (`controller_device.cpp`, `imu_fusion.h`) are IMU-only 3DoF
@@ -1927,7 +1981,7 @@ libpsvr2 (`psvr2_imu_stream_*`), and the driver path in `pose_source.cpp`
 (setting `headset_ins`). Test `test_ins.c` (part of `make check`).
 
 Left: mode-0 adaptive blender (gains unknown), stillness and shock
-switches, Sony's 3DoF tilt correction `FUN_180171400`, the `+0x188`
+switches (now §A.5.2 and §A.5.7), Sony's 3DoF tilt correction `FUN_180171400` (§A.5.7), the `+0x188`
 good-frame gate; the VD type 12 layout is read from code only (the
 driver rejects it if its diagonal is not within 20 % of the IIO scale).
 
@@ -2971,8 +3025,9 @@ the newest filter state to the measurement time in one go:
    variances (`0x180062880`, `0x180062950`). Up to 31 samples; if the span
    reaches the config time (`+0x2168` in the manager) the step is split.
 2. Each sigma point is propagated with that constant mean rate and
-   acceleration over the interval (process callback `0x1800638d0`), the
-   averaged variances being the 6 IMU noise terms of the augmentation.
+   acceleration over the interval and mapped to a predicted measurement in
+   the same call (`0x18006f020`, §G.2.1); the averaged variances are the 6
+   IMU noise terms of the augmentation.
 3. The propagated points go through the measurement's `h(x)` (§G.3); mean,
    innovation covariance and cross covariance give the gain; the correction
    is applied to the nominal state (`0x18006c760`, attitude by the rotation
@@ -2993,17 +3048,74 @@ its own time and the IMU states after it are replayed (`0x18007add0`,
 part A §A.5.5). The first valid measurement initialises the filter
 (`0x180068620`) with P0 from part A §A.5.5.
 
+#### G.2.1 Sigma-point function (`0x18006f020`) [sure unless tagged]
+
+The solver calls one function per sigma point that does both the process
+step and the measurement prediction. `0x1800638d0` (passed to the solver
+setup) is only its work-area allocator: it rounds a bump pointer up to an
+alignment.
+
+Sigma vector (doubles, converted to float), n = 21 + m:
+
+| Index | Content |
+|---|---|
+| 0..2 | δp, position (m) |
+| 3..5 | δv, velocity (m/s) |
+| 6..8 | δθ, attitude error (generalised Rodrigues parameters, see below) |
+| 9..11 | gyro bias error |
+| 12..14 | accel bias error |
+| 15..17 | accel noise |
+| 18..20 | gyro noise |
+| 21.. | the m measurement-noise terms |
+
+The nominal record holds the window means `f̄` (accel, g units) at
+`+0x00`, `ω̄` (gyro, rad/s) at `+0x18` and the attitude `q̂` (x, y, z, w) at
+`+0x30`, all doubles. The context holds `dt`, the IMU → controller
+rotation `M` and lever arm `l` (§A.5.6) and the measurement object.
+
+```
+// attitude error → quaternion: GRP with a = 1, f = 4 (USQUE form)
+s   = |δθ|²
+δq.w = (16 − s) / (16 + s)
+δq.v = δθ · (1 + δq.w) / 4
+q    = δq ⊗ q̂
+
+ω    = ω̄ − δb_g + n_g
+f    = f̄ − δb_a + n_a                          // g units
+q'   = integrate(q, ω, dt)                     // 0x18006bcd0
+v'   = δv + (R(q)·f − (0, 1, 0)) · 9.80665 · dt   // world Y up
+r    = R(q')·l                                 // lever arm in world axes
+ωw   = R(q')·ω
+pose.R = R(q')·M                               // 0x1800621a0
+pose.t = δp + (δv + v')/2 · dt + r
+v_pt   = v' + ωw × r                           // passed along, unused by h
+y      = h(pose) + n_meas                      // vtable +0x48
+```
+
+`h` (`0x180060030`, `DotMarkerData` slot `+0x48`): fails if the record is
+not valid. `y[0..2] = pose.t`; unless position-only,
+`y[3..11] = pose.R · (0.1, 0, 0)`, `pose.R · (0, 0.1, 0)`,
+`pose.R · (0, 0, 0.1)`: the three 10 cm tips **relative to the
+position** (not added to it). This matches the measured scalars of §G.4.
+
+The position and velocity in the sigma vector are therefore offsets from
+the nominal state's frame of this step (the nominal record carries no
+position or velocity); `0x18006c760` adds the corrected error back to the
+nominal state [likely for the frame bookkeeping, sure for the formulas
+above].
+
 ### G.3 Measurement interface (`DotMarkerData` vtable) [sure]
 
 | Slot | VA | Use |
 |---|---|---|
 | +0x08 | `0x18005f910` | position (and zero velocity) if valid |
 | +0x10 | `0x18005f950` | measured rotation as a 3×3 matrix (none if position-only) |
-| +0x18 | `0x18005fad0` | predicted measurement `h(x)` [likely] |
+| +0x18 | `0x18005fad0` | fills two diagonal 3×3 blocks, 1e-4 and 1e-6 [likely: a default covariance; the 12-scalar path does not use it] |
 | +0x20 | `0x18005fc00` | dimension: 0 invalid, 3 position-only, 12 full |
 | +0x28 | `0x18005fc20` | scalar measurements and their variances (§G.4) |
 | +0x30, +0x38 | | 2-D and 3-D blocks: none (return 0) |
 | +0x40 | | returns 1 |
+| +0x48 | `0x180060030` | predicted measurement `h(pose)` (§G.2.1) |
 | +0x50 | | timestamp (`+0x88`, µs) |
 | +0x58 | | byte `+0x30` |
 | +0x60 | | the vector at `+0x38` (§G.4) |
@@ -3058,8 +3170,15 @@ below 1 m/s, else 20 cm).
 
 ### G.5 Still open
 
-- The exact sigma-point process model (`0x1800638d0`) and `h(x)`
-  (`0x18005fad0`), checked only for their role, not their algebra.
+- ~~Sigma-point process model and `h(x)`~~: done, §G.2.1
+  (`0x18006f020`, `0x180060030`).
+- Differences of `steamvr/driver_psvr2/src/controller_ukf.cpp` from
+  §G.2.1 (read 2026-11-25): it propagates the covariance with a linear
+  `Φ P Φᵀ + Q` step and applies attitude errors on the right
+  (`q ⊗ exp(δθ)`); Sony pushes every sigma point through the IMU step
+  (`0x18006f020`) and applies the error on the left with GRP
+  (`δq ⊗ q̂`, a = 1, f = 4), with the IMU noise as augmented sigma
+  dimensions (accel noise before gyro noise).
 - The UKF solver internals are now in `function-catalogue.md` §B.1:
   packed Cholesky without jitter, inverse of S by `DPPTRF` + `DPPTRI`.
   Open: when `DPPTRF` finds S not positive definite (positive info) the

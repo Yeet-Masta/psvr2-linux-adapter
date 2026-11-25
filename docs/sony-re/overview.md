@@ -988,6 +988,7 @@ merged file.
 | part A §A.9.1 | `ImuPoseIndex` table always used | Pure translation by pad `+0x48`; table only for a NULL vector |
 | part A §A.9.4 | Stale optical pose unspecified | 0.3 s stale: position held, rotation from UKF, status 3 |
 | function-catalogue.md part F | `0x1801bf850` returns the libpad version word | It writes the host µs clock (`0x1801c8210`) through its pointer argument |
+| controller-tracking.md §G.2, §G.3 | Process callback `0x1800638d0`; `h(x)` = slot +0x18 `0x18005fad0` | `0x1800638d0` is the work-area allocator; process + measurement are one per-sigma-point function `0x18006f020`, `h` is slot +0x48 `0x180060030` (§G.2.1) |
 
 ### A.13 Where the Linux driver stands
 

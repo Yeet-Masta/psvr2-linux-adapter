@@ -12,6 +12,7 @@ Parts:
 - [Part F: libpad internals](#part-f-libpad-internals)
 - [Part G: Headset USB glue, hand skeleton and jsoncpp](#part-g-headset-usb-glue-hand-skeleton-and-jsoncpp)
 - [Part H: ShareManager and ConfigManager glue](#part-h-sharemanager-and-configmanager-glue)
+- [Part I: INS glue, IMU ring and IR-tracker helpers](#part-i-ins-glue-imu-ring-and-ir-tracker-helpers)
 
 ---
 
@@ -1216,7 +1217,7 @@ only zeroes fields, a record copy or an obfuscated-string decoder. The
 role column is in our own words and is `[sure]` for the shape; what the
 caller does with the value is in the caller's own entry.
 
-787 functions.
+776 functions.
 
 ### app:dialog (3)
 
@@ -1443,7 +1444,7 @@ caller does with the value is in the caller's own entry.
 | `0x1800800f0` | core | xordec | decodes an obfuscated log string (XOR with fixed 64-bit keys) | none (vtable/callback) |
 | `0x180097100` | core | thunk | forwards to `0x180096d90` with extra constant arguments | `0x180097990` |
 
-### debug:trace (69)
+### debug:trace (67)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -1513,8 +1514,6 @@ caller does with the value is in the caller's own entry.
 | `0x1801182b0` | fluff | dtor | destructor of `std::exception` (frees itself when the flag argument is set) | none (vtable/callback) |
 | `0x180118580` | core | thunk | forwards to `0x180119400` | none (vtable/callback) |
 | `0x1801188f0` | core | const_ret | reads a field of the entry selected by argument 2 in a pointer table | `0x18018aaf0` |
-| `0x180118910` | core | const_ret | reads a field of the entry selected by argument 2 in a pointer table | `0x180189b70`, `0x18018aaf0` |
-| `0x1801193b0` | core | const_ret | reads a field of the entry selected by argument 2 in a pointer table | `0x180185ef0`, `0x18018aad0` +5 |
 | `0x1801193c0` | core | const_ret | reads a field of the entry selected by argument 2 in a pointer table | `0x18018aaf0` |
 
 ### import/thunk (106)
@@ -1644,27 +1643,18 @@ caller does with the value is in the caller's own entry.
 | `0x180007fb0` | fluff | thunk | wrapper around `atexit` | none (vtable/callback) |
 | `0x180007fe0` | fluff | thunk | wrapper around `atexit` | none (vtable/callback) |
 
-### ins+irtracker (34)
+### ins+irtracker (25)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
 | `0x180173810` | core | thunk | forwards to `0x18016b850` | `0x180242f50` |
-| `0x180173eb0` | core | const_ret | returns the address of global `0x180354fe0` | `0x180175760`, `0x1801806a0` |
 | `0x180173f00` | core | setter | stores argument 1 into global `0x180354fe0` | `0x180123fa0` |
-| `0x180173f10` | core | const_ret | predicate: tests its argument or one field against a constant range or bit mask (no side effects) | `0x180179980` |
-| `0x180173f40` | core | const_ret | returns the address of global `0x18034e12c` | `0x18017b030`, `0x18017b100` +2 |
-| `0x180173fa0` | core | thunk | forwards to `0x180173830` | `0x1801780e0`, `0x18017cdb0` |
-| `0x180173fd0` | ref | const_ret | returns the constant 1 | `0x180177930`, `0x18017a2f0` |
 | `0x1801743b0` | core | thunk | predicate: tests its argument or one field against a constant range or bit mask (no side effects) | `0x18017b1a0` |
-| `0x1801743d0` | core | thunk | forwards to `0x1801748a0` | `0x18017cdb0`, `0x18017eae0` |
 | `0x180174400` | core | thunk | forwards to `0x18016b850` | `0x18017b1a0` |
 | `0x180175740` | core | const_ret | returns the constant 0 | none (vtable/callback) |
-| `0x180175750` | core | thunk | forwards to `0x180173ec0` | none (vtable/callback) |
 | `0x180175760` | core | thunk | forwards to `0x180173eb0` | none (vtable/callback) |
 | `0x180177760` | core | eh_ctor | destroys an array at +0x8 of 64 × 0x44-byte elements (no-op element function) | `0x180243060` |
 | `0x1801778d0` | core | dtor | destructor of `InsManager` (frees itself when the flag argument is set) | none (vtable/callback) |
-| `0x1801780a0` | core | thunk | forwards to `0x180177d70` | none (vtable/callback) |
-| `0x180179c10` | core | thunk | forwards to `0x180179980` | `0x180128030`, `0x18018aaf0` |
 | `0x180179c40` | core | const_ret | calls virtual slot 1 of the member object at +0x18 | `0x18018aaf0` |
 | `0x18017a500` | core | const_ret | returns a constant | `0x18012b860`, `0x1801ac4e0` |
 | `0x18017a590` | ref | const_ret | returns a constant | `0x1801ac4e0`, `0x1801adc80` |
@@ -3082,3 +3072,180 @@ nobody. The VD types are the headset `"VD"` calibration entries
 | `0x18015fc70` | 80 | write the 0x110-byte record at `+0xa984` and bump its counter; callers `0x18011bae0`, `0x180120290`, `0x180122ac0`, `0x1801a2040` |
 | `0x18015fd40` | 17 | write the 0x1b50-byte IR-thread block and bump its counter; caller `0x1801910f0` |
 | `0x18015fdc0` | 87 | write the 0x120-byte IR-thread record and bump its counter; caller `0x1801910f0` |
+
+---
+
+## Part I: INS glue, IMU ring and IR-tracker helpers
+
+The classifier put these in `ins+irtracker`. They are the glue around the
+headset INS (controller-tracking.md §A.3 and §A.5) and a few IR-tracker
+helpers. The INS objects:
+
+- `InsManager` singleton `0x180355370` (0x28 bytes, guarded by the mutex
+  `0x180355380`; `0x180179440` creates it). Field `+0x10` is the
+  `InsContext`, `+0x18` a clock object (vtable methods: `+0x00` sample
+  check, `+0x08` timestamp of an index, `+0x10` convert a host time).
+- `InsContext` (0x7a90 bytes, constructor `0x180176ce0`): three 128-bin
+  histograms at `+0x78`, three at `+0x780`, four at `+0xe88` (0x258 bytes
+  each: bin width, 128 counters, mutex at `+0x208`), 64 records of 0x44
+  bytes at `+0x1e98`, a mutex at `+0x2f98`, the INS core at `+0x7508` and
+  the named mutex `"VrTraceInsMtx"` at `+0x7a80`.
+- The INS core (`+0x7508`, also stored in the global `0x180354ff0` by
+  `0x180175600`): a reader/writer lock (mutex `+0x00`, condition `+0x50`,
+  pointers to the reader count `+0x160` and the writer flag `+0x168`), the
+  output and VIO filter views at `+0x98` and `+0xe0`, pointers to its
+  fields, the 0x38d0-byte state behind `+0x530` and the output pose
+  (position + quaternion) at `+0x540`.
+- The headset IMU ring `0x18034e0e0`: 300 records of 36 bytes, head index
+  `0x18034e108`, a `Framework::Mutex` at `0x18034e0f8`.
+
+"INS accessor" below means: if the INS core exists, read or write the
+value behind one of its field pointers; else do nothing.
+
+### I.1 INS accessors, IMU ring and pose cache [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801735e0` | 24 | dot product of a 3-element matrix row (strided view) with a vector |
+| `0x180173680` | 66 | IMU ring search: from a start index, step towards a target timestamp (half the distance each time, inside the 300-entry window) and return the ring index found or −1; caller `0x1801748a0` |
+| `0x180173830` | 166 | IMU ring statistics: needs ≥ 5 samples (the full 300 when the ring has wrapped); sums the two vec3 channels and returns their means and variances; callers `0x180173fa0`, `0x180174300` |
+| `0x180173ec0` | 17 | convert a headset timestamp with the headset clock (`0x180124c90`, `0x180124a80`); 0 on failure; caller `0x180175750` |
+| `0x180173f20` | 10 | IMU period: the µs value at `0x180350b44` × 1e−6, as seconds; caller `0x18017cdb0` |
+| `0x180174300` | 28 | "headset still" test: ring variances averaged over the three axes are below 0.07 (channel 1) and 0.012 (channel 2) [likely: accel and gyro] |
+| `0x1801748a0` | 98 | under the IMU-ring mutex, find the ring entries for two timestamps (`0x180173680`) and copy the samples between them out; returns 0 if none; caller `0x1801743d0` |
+| `0x180174ac0` | 11 | IMU ring fill count: 300 once it has wrapped, else the count `+0x28`; caller `0x180174410` |
+| `0x180174b00` | 52 | pose cache lookup: find the entry with key = argument 2 (16 entries); if none, use the INS output pose (`0x18017c520`); return inverse(entry) ∘ argument 3 (`0x1801613a0`, `0x18011e190`); caller `0x180179980` |
+| `0x180174be0` | 58 | pose cache lookup: return the cached pose for the key, or argument 3 unchanged when the key is missing; caller `0x180179980` |
+| `0x180174cf0` | 28 | compose the INS output pose (identity if there is no INS) with argument 2; caller `0x18017ae00` |
+| `0x180174de0` | 31 | pose cache: timestamp of the entry with the given key (0 if missing); caller `0x1801780d0` |
+| `0x180174e60` | 11 | INS accessor: read the dword behind `+0x180`; callers `0x1801780e0`, `0x1801792d0` |
+| `0x180174e80` | 39 | INS position and its 3×3 covariance from the output filter (`0x180171c80` on core `+0x5c`); copies them out unless a component is NaN |
+| `0x180174f50` | 30 | INS accessor: output-blender pose (`0x18017bcc0`); caller `0x1801780e0` |
+| `0x180174fa0` | 35 | lazy static init of the pose cache `0x180355010`: mutex, 16 entries of 48 bytes (pose = identity, key −1); registers the atexit cleanup |
+| `0x180175070` | 16 | INS accessor: copy the vec3 behind `+0x130`; caller `0x1801792d0` |
+| `0x1801750a0` | 11 | INS accessor: dword `+0x55c` of the core; callers `0x1801780e0`, `0x180179520` |
+| `0x1801750c0` | 105 | INS accessor: output pose relative to the VIO filter (`0x18017bd60`); callers `0x180179980`, `0x18017ae00` |
+| `0x1801750e0` | 11 | INS accessor: dword behind `+0x138`; callers `0x180179530`, `0x18017b240` |
+| `0x180175120` | 39 | INS accessor: predicted state under the read lock (`0x18017c290`); callers `0x1801780e0`, `0x18017ae00` |
+| `0x180175140` | 11 | INS accessor: dword behind `+0x170`; caller `0x1801792d0` |
+| `0x180175190` | 12 | INS accessor: output state snapshot (`0x18017c370`); caller `0x180179980` |
+| `0x1801751b0` | 11 | INS accessor: dword behind `+0x3b0` (the blender mode, controller-tracking.md §A.3); caller `0x1801792d0` |
+| `0x1801751d0` | 16 | copy the INS output pose (identity if there is no INS) |
+| `0x180175220` | 11 | INS accessor: dword `+0x560` of the core; caller `0x1801780e0` |
+| `0x180175240` | 23 | copy the INS VIO pose (`0x18017c550`; identity if there is no INS) |
+| `0x180175330` | 12 | refresh the pose cache (`0x180175400` on `0x180355010`); caller `0x18017a5c0` |
+| `0x180175360` | 12 | INS step (`0x18017cdb0`) if the INS exists; callers `0x18017a5d0`, `0x18017ae00` |
+| `0x180175400` | 100 | pose cache refresh for a key: if its entry is under 1 s old (1 000 000 µs) return its time; else clear it and, under the cache mutex, store the current INS output pose (`0x18017c520`) with the new time; caller `0x180175330` |
+| `0x1801755e0` | 11 | INS accessor: write the dword behind `+0x180`; caller `0x18017af40` |
+| `0x180175600` | 13 | set the INS core pointer `0x180354ff0`; logs "Ins instance is null" for a null argument. Callers `0x180177720` (clear), `0x180177930` (set) |
+| `0x180175620` | 16 | INS accessor: write the vec3 behind `+0x130`; callers `0x18017af40`, `0x18017af90` |
+| `0x180175670` | 11 | INS accessor: write the dword behind `+0x170`; caller `0x18017af40` |
+| `0x180175720` | 11 | INS accessor: clear the dword behind `+0x1a0`; caller `0x18017a5d0` |
+| `0x1801806a0` | 12 | current time (`0x18016b110`) relative to the INS time base `0x180354fe0` (`0x180173eb0`) |
+| `0x180180610` | 37 | write a full filter state (pose, velocity, biases and the other vec3 fields) into a filter view; callers `0x18017cdb0`, `0x18017dee0`, `0x18017df30` |
+| `0x18017dee0` | 10 | write the output and VIO filter states (`0x180180610` twice) |
+| `0x18017c990` | 8 | INS core: read the byte behind `+0x178`; no caller in the driver |
+| `0x1801815b0` | 17 | copy the blender's pose (field `+0xb8`); caller `0x18017bcc0` |
+| `0x1801829a0` | 9 | store a float into the blender field behind `+0x68`; caller `0x18017c680` |
+| `0x1801829c0` | 9 | set the blender mode to argument mod 3; callers `0x180175690`, `0x18017c680` |
+
+### I.2 InsManager / InsContext [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180176700` | 69 | build a filter view: a table of pointers to the pose, velocity, bias and covariance fields of a filter's storage, zeroing the pose; caller `0x180176850` |
+| `0x180176850` | 172 | INS core constructor: mutex and condition, the output and VIO filter views (`0x180176700` on context `+0x5d8` and `+0x680`), pointers to the shared fields, the two blenders (`0x180181400`, rates 0.00051 and 0.01), blender mode 1 (`0x18017c680`); caller `0x180176ce0` |
+| `0x180176ce0` | 120 | `InsContext` constructor: zeroes the header (`+0x74` = 4000), builds the ten histograms (`0x1801777b0`), the 0x44-byte records, the field views (`0x180177100`, `0x180177560`), the INS core (`0x180176850`) and the mutex `"VrTraceInsMtx"` (`0x18016b290`); callers `0x180177520`, `0x180179440`, `0x18017a2f0` |
+| `0x180177100` | 106 | bind the context's field pointer table to its storage (about 50 fields); caller `0x180176ce0` |
+| `0x180177520` | 18 | `InsManager` constructor: vtable, new `InsContext` (0x7a90 bytes) at `+0x10` |
+| `0x180177580` | 23 | bind a 15-field pointer table to a record (offsets 0, 12, 24, 40, …, 138); caller `0x18017a5d0` |
+| `0x180177640` | 10 | destroy the INS core's condition and mutex (unwind funclet `0x180243080`) |
+| `0x180177660` | 20 | `InsContext` cleanup: close `"VrTraceInsMtx"`, destroy the core's condition and mutexes and the histogram arrays |
+| `0x180177720` | 17 | `InsManager` destructor: delete the context and clear the INS core pointer (`0x180175600(nullptr)`) |
+| `0x1801777b0` | 11 | histogram constructor: bin width 1.0, 128 zero counters, mutex at `+0x208`; caller `0x180176ce0` |
+| `0x1801777f0` | 23 | `InsContext` deleting destructor (same steps as `0x180177660`, then free) |
+| `0x180177930` | 73 | `InsManager` start: store the clock objects, publish the INS core (`0x180175600`), reset the INS (`0x180175290`) with the IMU rotation (−45° about one axis, `cos`/`sin` of −π/4) and the calibration (`0x180173fd0`, `0x1801756e0`) |
+| `0x180177aa0` | 65 | build a pose from a quaternion and vec3 arguments and transform it by the rotation at argument 2 `+0x10` [likely: IMU-to-head transform] |
+| `0x180177d70` | 163 | INS pose query: get the predicted pose (`0x180179980`), then apply one of several output frames chosen by argument 5 (frame records at context `+0x19c4 + 0x200·slot`, `0x18011e190`); caller `0x1801780a0` |
+| `0x1801792d0` | 44 | INS status record: blender mode, two state dwords, a vec3, and the output position rotated by the output quaternion; no caller in the driver |
+| `0x180179440` | 36 | `InsManager` singleton getter: create it under the mutex `0x180355380` on first use. Callers `0x1801123f0`, `0x1801270c0`, `0x180128030`, `0x18012b860`, `0x180134800`, `0x180160230` and more |
+| `0x1801794f0` | 21 | copy the pose at context `+0x3078`; caller `0x180128030` |
+| `0x180179590` | 13 | copy the two floats at context `+0x2ffc` / `+0x3004`; caller `0x18012b860` |
+| `0x1801795d0` | 27 | age of the last SLAM sample: clock timestamp of index `+0x70` minus `+0x58`, clamped to 0..0x7fffffff; −1 if there is none; caller `0x18012b860` |
+| `0x180179630` | 176 | histogram percentile: under its mutex, walk the 128 bins to the given fraction of the total and return the interpolated value (× bin width); −1.0 if empty; callers `0x1801780e0`, `0x180179c50` |
+| `0x180179850` | 37 | output position rotated by the output quaternion (same maths as `0x1801792d0`) |
+| `0x180179980` | 120 | predicted pose at a timestamp: if the INS is running (`0x180173f10`) and the blender has a sample (`0x1801808f0`), combine it with the pose cache (`0x180174b00`, `0x180174be0`) and the output state (`0x180175190`, `0x1801750c0`); callers `0x180177d70`, `0x180179bb0`, `0x180179c10` |
+| `0x180179c50` | 245 | INS quality report [guess]: checks the parameter block (`0x180172f90`, `0x1801732b0`, `0x180173270`), a least-squares fit (`0x180176340`) and the 95th percentiles of three histograms (`0x180179630`); fills 14 output arguments; no caller in the driver |
+| `0x18017a2b0` | 22 | largest of three floats at context `+0x18ec`, `+0x18fc`, `+0x190c`; caller `0x18012b860` |
+| `0x18017a510` | 19 | true when the current frame slot's flag `+0x1a6c` is 0 or its state `+0x188c` is 3; caller `0x18012b860` |
+| `0x18017ae00` | 46 | IMU tick: under `"VrTraceInsMtx"` run the INS step (`0x180175360`); if the time since the last tick is outside 0..`+0x74`, push the predicted, relative and INS-composed poses into the blender (`0x1801810a0`); callers `0x18017b030`, `0x18017b100`, `0x18017b1a0` |
+| `0x18017af20` | 9 | store a byte flag at context `+0x61`; caller `0x18012b860` |
+| `0x18017b030` | 12 | IMU tick at the newest IMU timestamp (`0x180173f40`); callers `0x180160230`, `0x1801617c0` |
+| `0x18017b060` | 31 | poll the SLAM source (vtable): if a record is ready, tick the INS (`0x18017b1a0`), store its id under the manager mutex and ingest it (`0x18017a5d0`) |
+| `0x18017b160` | 17 | store a dword at manager `+0x08` under the manager mutex |
+| `0x18017b1a0` | 30 | IMU tick under the IMU-ring mutex, at the given host time (or now); remember the time at context `+0x68`; callers `0x18017b060`, `0x18017b240`, `0x18018aaf0` |
+| `0x18017b240` | 18 | tick the INS (`0x18017b1a0`) when ≥ 1000 µs have passed since the last tick and the clock is not behind |
+| `0x18017b330` | 67 | copy a full filter state between two filter views; caller `0x18017cdb0` |
+| `0x18017b4d0` | 11 | predict the output filter (`0x18017f500`) and copy two status dwords; caller `0x18017cdb0` |
+| `0x180185af0` | 29 | `OcclusionQueriesVrTracker` method: head pose at a time from the INS manager (`0x180179bb0`) |
+| `0x180185b80` | 23 | `OcclusionQueriesVrTracker` method: copy 36 bytes at `ConfigManager` `+0x4dc` |
+| `0x180185a50` | 12 | `OcclusionQueries` deleting destructor |
+| `0x180185a90` | 12 | `OcclusionQueriesVrTracker` deleting destructor |
+| `0x180185bc0` | 10 | `IRTrackerThread` stop: set the stop flag and join the thread (`0x18016b540`) |
+
+### I.3 INS filter state and the reader/writer lock [sure unless tagged]
+
+The INS core's lock lets many readers or one writer in. Readers wait
+while the writer flag is set; the writer waits until both counts are 0.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x18017bb80` | 20 | reset the INS state: take the write lock, zero the 0x38d0-byte state, release |
+| `0x18017bc00` | 27 | output pose in the frame of the stored anchor: inverse(anchor) ∘ (argument ∘ pose) [likely] |
+| `0x18017bcc0` | 27 | copy the output blender's pose (`0x1801815b0` on core `+0x3b0`); caller `0x180174f50` |
+| `0x18017bd60` | 99 | output pose relative to the VIO pose (quaternion product with the conjugate, rotated difference of positions); caller `0x1801750c0` |
+| `0x18017c170` | 62 | under the read lock, copy the output filter's pose, velocity and status |
+| `0x18017c290` | 34 | under the read lock, predict the output state (`0x18017f500`) and copy it; caller `0x180175120` |
+| `0x18017c520` | 15 | copy the output pose (position + quaternion, core `+0x540`) |
+| `0x18017c550` | 22 | copy the VIO pose (identity first, then the pose behind core `+0xe0`) |
+| `0x18017c590` | 61 | reset a filter view: identity poses with the −45° IMU rotation (`cos`/`sin` of −π/4), zero velocity and biases; caller `0x18017c680` |
+| `0x18017d6d0` | 22 | take the read lock |
+| `0x18017d730` | 18 | release the read lock and wake waiters |
+| `0x18017d770` | 28 | release the read lock, then reset the state under the write lock |
+| `0x18017d800` | 98 | reset both filters to a SLAM pose: take the write lock, convert the pose (`0x1801613a0`, `0x18011e190`), set the output and VIO filters (`0x180180200`), latch the offset (`0x18017de70`) |
+| `0x18017da00` | 67 | set the anchor and filter poses to a given pose (inverse and compose), no lock |
+| `0x18017df40` | 20 | take the write lock: wait until there are no readers and no writer, then set the flag; callers `0x18017bb80`, `0x18017cdb0`, `0x18017d770`, `0x18017d800`, `0x18017db70` |
+| `0x18017dfb0` | 18 | release the write lock and wake waiters; callers `0x18017cdb0`, `0x18017db70` |
+| `0x18017eae0` | 275 | rate estimate over the last samples [guess]: a 5-entry static history, IMU samples between two times (`0x1801743d0`, up to 128), a small solve (`0x18017e6c0`); returns 0 when the time span is ≤ 0 |
+| `0x18017f260` | 18 | scale two vec3 fields by `dt` and `dt²` (from a filter's `+0x0c`) |
+| `0x18017f810` | 26 | running sum of vec3 samples with half weight for the last one and a weighted second sum (trapezoid-style integration) |
+
+### I.4 Blender history and small maths [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180170220` | 176 | blend two poses with weight w: positions `(1−w)·a + w·b`, orientations slerp (linear below 0.9999), through 4×4 matrices (`0x18016df80`, `0x18016c810`, `0x18016e910`) |
+| `0x180172790` | 103 | once at least the required number of samples is present, per-axis min and max over the last up to 8 vec3 samples (start values ±1000) [likely]; false otherwise |
+| `0x180180740` | 51 | quaternion slerp with weight t (linear below 0.9999999) |
+| `0x180180870` | 33 | blender history: index of the newest of 64 entries that is not newer than the given time; −1 if none |
+| `0x1801808f0` | 147 | blender history query under its mutex: find the two entries around a time and interpolate them (lerp `0x180180ce0` for positions, slerp for orientations); false when there is no entry; caller `0x180179980` |
+| `0x180180ce0` | 14 | vec3 lerp `(1−t)·a + t·b` |
+| `0x180180d40` | 58 | pose interpolation: lerp the positions and slerp the orientations |
+| `0x180181370` | 8 | blender history: true when its count `+0x04` is above 0 |
+| `0x1801810a0` | 81 | blender history push under its mutex: store the time and four poses in the next of 64 slots; caller `0x18017ae00` |
+| `0x180182a10` | 35 | pose from a position and a quaternion vector part, w = √(1 − ‖v‖²) |
+| `0x180182ad0` | 28 | pose → position + quaternion vector part, sign flipped so that w ≥ 0 |
+| `0x180182b60` | 16 | text buffer: append one float as `%+8.4e`; caller `0x1801780e0` |
+| `0x180182bb0` | 17 | text buffer: append a vec3 as `%+8.4e %+8.4e %+8.4e`; caller `0x1801780e0` |
+| `0x180182db0` | 22 | text buffer: append a string if it fits; caller `0x1801780e0` |
+| `0x180182e00` | 30 | text buffer: append `printf`-formatted text; caller `0x1801780e0` |
+| `0x180183ab0` | 53 | distance from a point to a segment (projection clamped to 0..1) |
+| `0x180183920` | 48 | constructor of the IR position smoother (below): gain tables set to 1.0, counters cleared; static init `0x180007940` |
+| `0x180183c40` | 64 | IR position smoother step for side 0/1 [likely: controllers]: the first sample sets the anchor; later samples run `0x180183db0` with `dt` from the µs timestamps; disabled = pass-through; caller `0x18018aaf0` |
+| `0x180183db0` | 274 | smoother body: displacement from the anchor, speed, gain lookup (`0x180184620`) and a blend toward the new sample; fewer than 8 samples use the raw value |
+| `0x180184620` | 122 | smoother gain lookup: cell (side, 0..255) of a 2×256 table, four 64-wide bins and a speed table (integers × 0.01), linear interpolation, then per-axis clamps |
+| `0x1801858a0` | 25 | free a `std::string` field (`+0x80`) of a 368-byte record; atexit `0x1802460a0` for the two-record array `0x18035b710` |
+| `0x180189b70` | 12 | libpad manager: field `+0x30` of pad slot n (`0x1801189d0`, `0x180118910`); callers `0x180112320`, `0x180160230` |
+| `0x180189b90` | 56 | copy the 0x400-byte tracker-settings block `0x18035b9f0` under its mutex; caller `0x18011b3e0` |
+| `0x180189c40` | 14 | forward to the tracker pose output (`0x180189c70`) if the tracker object `0x180355510` exists; else −1; caller `0x180160230` |
+| `0x18018aad0` | 12 | libpad manager: byte `+0x67` of pad slot n (`0x1801193b0`); caller `0x180160230` |

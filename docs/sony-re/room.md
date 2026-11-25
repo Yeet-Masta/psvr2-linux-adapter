@@ -167,7 +167,7 @@ of normal operation; skip.
    (`FUN_1801debe0`), start `RelocalizerThread` [sure].
 3. Configure: parameters {−1.0, 1000.0, 0, 0x100, 4, 0x18, 1, 1,
    0.9397 (= cos 20°), 0.25} (`FUN_1801df4c0`) and mode 2
-   (`FUN_1801df410`) [sure: values; meaning unknown].
+   (`FUN_1801df410`) [sure: values; meanings in part B, Configuration].
 4. Send Set `0x0a` subcmd 4 `{1}`; queue "send subcmd 3 after the next
    frame" [sure].
 5. If `loadMap` is 0: initialise an empty map. Otherwise: load
@@ -502,9 +502,32 @@ similarity:
    valid) is still in the map, it is put first with score 778.0, ahead of
    any real score.
 
-How search A (`FUN_1801fb280` → `FUN_1801fa220`) and the prior search
-(`FUN_1801fb540`) pick their keyframes was not read; both use the same
-matcher below.
+**Vocabulary** (`FUN_1801f4d30`, built at create) [sure]. Built into the
+DLL, not stored with the map: 9841 nodes = 1 + 3 + … + 3⁸, so a 3-way tree
+with 8 levels below the root. One descriptor byte per node at
+`0x1805e35a0` (bit 7 leaf, bits 3–6 level, bits 0–2 child count), child
+indices (s16) from `0x18026a620`, child centres (64 bytes each) from
+`0x18026f300`. A port has to read these tables from Sony's DLL at run time;
+they are not ours to commit. The keyframe database holds 96 entries.
+
+**idf** (`FUN_1801f5430`, after every keyframe add or drop):
+`idf_i = ln(N / n_i)` with N keyframes in the database and n_i of them
+using node i (0 when unused); with N = 1 all weights are 1. All stored
+keyframe vectors are then re-weighted.
+
+**Search A** (`FUN_1801fb280` → `FUN_1801fa220`): the same retrieval,
+then, for each candidate, a predicted camera pose relative to that
+keyframe (`FUN_1801fbac0`): the last map ↔ session alignment of the
+tracking state (`+0x08` translation, `+0x14` rotation) composed with the
+frame's own headset pose (anchor 1) and the keyframe pose
+(`FUN_1802261e0`). `FUN_180224820` projects the keyframe's points with
+that pose (z > 0, inside the image) and marks them visible. A candidate is
+kept, with its predicted pose, when at least `cfg+0x1c` points are
+visible.
+
+**Prior search** (`FUN_1801fb540`): the same prediction and visibility
+test for the tracking state's last keyframe only (`*state`), then the
+matcher with that pose.
 
 #### Feature matching (`FUN_1802282a0`, from `FUN_1801f9ac0`) [sure]
 
@@ -532,9 +555,28 @@ of its config):
   (`FUN_180237190`).
 
 `FUN_1801f90d0` runs, per candidate (at most the search count): match
-(`FUN_1801f9ac0`), then for each candidate that passed, a geometric check
-(`FUN_1801fd070`), the solve (`FUN_1801f9eb0`), and a pose sanity test
-(`FUN_1801d6230`). A pose that passes is stored in the slot and the
+(`FUN_1801f9ac0`), then for each candidate that passed, a guided patch
+check (`FUN_1801fd070`, below), the solve (`FUN_1801f9eb0`), and a pose
+sanity test (`FUN_1801d6230`).
+
+**Guided patch check** (`FUN_1801fd070` → `FUN_180228ff0`) [sure unless
+tagged]. Each keyframe feature carries two 24 × 24 8-bit patches (the
+0x240 halves of its 0x480 block, one per camera). For every feature with
+a 3-D point:
+
+1. Warp the reference patch into the current view with the predicted
+   pose (`FUN_180236e20`, inverse by `FUN_1801eee10`) and project the
+   point.
+2. Skip if the projection is within 4 px of the 640 × 640 border, or the
+   8 × 8 warped template (`FUN_180236960`, centred at 11 − offset) cannot
+   be built.
+3. Search the current image around the projection with the 8 × 8
+   template, radius 7 px (`FUN_180228cc0`); score [likely: zero-mean
+   NCC]. Accept if the score is > 0.49 (the feature's hit count `+6`
+   goes up), else mark it rejected (`0xde`). A feature that could not be
+   projected is marked `0xdf`.
+
+The candidate passes when the accepted count is ≥ `cfg+0x1c`. A pose that passes is stored in the slot and the
 keyframe gets a match credit (`FUN_180225fa0`).
 
 #### Choosing the result (`FUN_1801fd280`) [sure]
@@ -553,10 +595,75 @@ The slot with the highest confidence wins. `FUN_1801fc140` and
 `FUN_1801f94a0` then refine it (again through `FUN_18022bb70`) before the
 result is written.
 
-Still open: search A and the prior search's keyframe choice, the
-geometric check in `FUN_1801fd070`, the refinement steps, the config
-values behind `searcher+0x04/+0x20/+0x38/+0x3c` and the vocabulary's
-source (built in, or loaded with the map), UpdateMap and OptimizeMap.
+#### Configuration (`FUN_1801df4c0` → `FUN_1801f1e80`, `FUN_1801df410`) [sure where mapped]
+
+The start sequence (§A.3.1) passes a 44-byte block P. Where it goes:
+
+| P | Value at start | Copied to | Use |
+|---|---|---|---|
+| +0x00, +0x04 | −1.0, 1000.0 | query builder `+0x38`, `+0x3c` | keep-window for the keypoint's third float (≤ 0 = no bound). Rejected if both > 0 and min > max |
+| +0x10, +0x11 (u8) | | `loc+0x1404`, `+0x1405` | UpdateMap switches (below) |
+| +0x14, +0x18, +0x1c | | `loc+0x13c0/0x13d0`, `+0x13d8/0x13e8`, `+0x13f0` | not traced |
+| +0x20 (u8) | 1 | `loc+0x1414` | novelty test on |
+| +0x24 | 0.9397 (cos 20°) | `loc+0x1418` | same-view rotation limit |
+| +0x28 | 0.25 | `loc+0x141c` | same-view distance limit [likely m] |
+
+`FUN_1801df410` with mode 2 sets searcher `+0x20` = 2: so on PC the
+search is "search A with 5 keyframes, then search B with 3".
+
+### UpdateMap (`FUN_1801df630` → `FUN_1801f2470`) [sure for the decisions; likely for intent]
+
+After RunLocalizer, per frame:
+
+1. `success` = any of the 12 result slots is valid.
+2. `loop` = the graph distance (`FUN_1802269c0`) between the tracking
+   state's anchor keyframe (`+0x10c`) and a matched keyframe is > 4 hops.
+3. `novel` (when `loc+0x1414` is set) = no valid slot has its keyframe
+   within the same-view limits of the current pose: rotation
+   `(trace(Rᵀ_kf R) − 1)/2 > cos 20°` **and** distance² < 0.25².
+   If any slot is that close, `novel` is false.
+4. These flags go to `loc+0x1360..0x1362`, `+0x1388`. When the mode
+   (`loc+0x1420`) is not 0 and (`!success` or `novel` or `loop` or the
+   third flag), a keyframe candidate is built from the frame
+   (`FUN_1801ef740`), checked (`FUN_1801ecd60`), and inserted
+   (`FUN_1801f0860`: slot alloc `FUN_1801edf80`, database add
+   `FUN_1801f7210` "Add Keyframe", edges `FUN_1801ea5c0`/`FUN_1801ed9f0`).
+5. With a loop or the third flag, extra edges are added
+   (`FUN_1801ed4f0`, `FUN_1801ed6c0`).
+6. Keyframes that stopped being useful are dropped from the database
+   (`FUN_1801ef1d0` visibility test → `FUN_1801ede80` → `FUN_1801f71d0`
+   "Drop Keyframe Description"), and `FUN_1801f0b80` prunes keyframe
+   poses and edges ("Prune KeyframePose and PoseGraph").
+
+Not read in detail: the candidate check, how edge information matrices
+are filled, and the prune rule.
+
+### OptimizeMap (`FUN_1801ded40` → `FUN_1801efb90` → `FUN_18021d4d0`) [sure for the problem; likely for the solver]
+
+Pose-graph problem built from the map:
+
+- Nodes: every keyframe pose (`loc+0x14a0`).
+- Edges: keyframe indices A, B (`loc+0x14e0`), relative translation
+  (`+0x14f0`, 3 floats), rotation (`+0x1500`, 3 × 3), 6 × 6 information
+  (`+0x1510`, 36 floats), and a per-edge sign: −1.0 for edge types 1–3,
+  +1.0 otherwise (`+0x1520`) [meaning open].
+- Solver `FUN_18021d4d0` (5887 lines, with a sparse symbolic analysis
+  `FUN_18020c770`/`FUN_1802177d0` and a sparse factor `FUN_1802158c0`):
+  at most **8 iterations**; stop early when the step norm is below
+  `0.001 · node count`, or when the cost falls by less than 0.01 %
+  (`cost_new > cost·(1 − 1e-4)`). After the solve, outputs in (−0.001, 0)
+  are set to 0.
+- On success the poses are written back (`FUN_180227670`) and the map is
+  marked changed (`FUN_180226f50`, `FUN_180226f40`, `FUN_180226af0`).
+
+For a port, any sparse pose-graph optimiser (e.g. g2o, Ceres) over the
+same nodes, edges and information matrices fills this role; the 8
+iteration and stop rules are what to copy.
+
+Still open: the refinement in `FUN_1801fc140` / `FUN_1801f94a0`, the query
+builder's minimum keypoint count (`+0x04`), `cfg+0x1c`, the UpdateMap
+candidate check and prune rule, edge information, and the solver's exact
+cost (robust kernel or not).
 
 ### RP frame (unpack of the EP 0x8a record) — `FUN_1801ab410`
 

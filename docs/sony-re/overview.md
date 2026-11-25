@@ -987,6 +987,7 @@ merged file.
 | part A §A.5 / §A.8 | Head chain missing | `world_from_X = INS · A⁻¹ · B` |
 | part A §A.9.1 | `ImuPoseIndex` table always used | Pure translation by pad `+0x48`; table only for a NULL vector |
 | part A §A.9.4 | Stale optical pose unspecified | 0.3 s stale: position held, rotation from UKF, status 3 |
+| function-catalogue.md part F | `0x1801bf850` returns the libpad version word | It writes the host µs clock (`0x1801c8210`) through its pointer argument |
 
 ### A.13 Where the Linux driver stands
 

@@ -13,6 +13,7 @@ Parts:
 - [Part G: Headset USB glue, hand skeleton and jsoncpp](#part-g-headset-usb-glue-hand-skeleton-and-jsoncpp)
 - [Part H: ShareManager and ConfigManager glue](#part-h-sharemanager-and-configmanager-glue)
 - [Part I: INS glue, IMU ring and IR-tracker helpers](#part-i-ins-glue-imu-ring-and-ir-tracker-helpers)
+- [Part J: LedSync helpers, SteamVR glue, libpad manager and the rest](#part-j-ledsync-helpers-steamvr-glue-libpad-manager-and-the-rest)
 
 ---
 
@@ -1217,7 +1218,7 @@ only zeroes fields, a record copy or an obfuscated-string decoder. The
 role column is in our own words and is `[sure]` for the shape; what the
 caller does with the value is in the caller's own entry.
 
-776 functions.
+769 functions.
 
 ### app:dialog (3)
 
@@ -1227,7 +1228,7 @@ caller does with the value is in the caller's own entry.
 | `0x18012ddb0` | fluff | dtor | destructor (frees itself when the flag argument is set) | `0x18012dd60` |
 | `0x18012de50` | fluff | dtor | destructor of `CreateProcessThread` (frees itself when the flag argument is set) | none (vtable/callback) |
 
-### config (8)
+### config (7)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -1236,7 +1237,6 @@ caller does with the value is in the caller's own entry.
 | `0x180158198` | fluff | thunk | forwards to `0x1801581b0` | none (vtable/callback) |
 | `0x1801581f0` | ref | dtor | destructor of `ShareManager` (frees itself when the flag argument is set) | none (vtable/callback) |
 | `0x18015c670` | fluff | const_ret | wrapper around `WaitForSingleObject` | none (vtable/callback) |
-| `0x18015e230` | core | const_ret | wrapper around `ReleaseMutex` | `0x1801185a0`, `0x18011b700` +1 |
 | `0x18015e340` | core | const_ret | wrapper around `SetEvent` | none (vtable/callback) |
 | `0x18015e480` | core | const_ret | wrapper around `ReleaseMutex` | none (vtable/callback) |
 
@@ -1643,7 +1643,7 @@ caller does with the value is in the caller's own entry.
 | `0x180007fb0` | fluff | thunk | wrapper around `atexit` | none (vtable/callback) |
 | `0x180007fe0` | fluff | thunk | wrapper around `atexit` | none (vtable/callback) |
 
-### ins+irtracker (25)
+### ins+irtracker (24)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -1657,7 +1657,6 @@ caller does with the value is in the caller's own entry.
 | `0x1801778d0` | core | dtor | destructor of `InsManager` (frees itself when the flag argument is set) | none (vtable/callback) |
 | `0x180179c40` | core | const_ret | calls virtual slot 1 of the member object at +0x18 | `0x18018aaf0` |
 | `0x18017a500` | core | const_ret | returns a constant | `0x18012b860`, `0x1801ac4e0` |
-| `0x18017a590` | ref | const_ret | returns a constant | `0x1801ac4e0`, `0x1801adc80` |
 | `0x18017a5a0` | fluff | const_ret | predicate: tests its argument or one field against a constant range or bit mask (no side effects) | `0x180134800` |
 | `0x18017b460` | core | copy | copies a record field by field (about 18 fields) | `0x18017b5a0` |
 | `0x18017f200` | fluff | dtor | destructor (frees itself when the flag argument is set) | none (vtable/callback) |
@@ -2015,14 +2014,13 @@ caller does with the value is in the caller's own entry.
 | `0x180237710` | ref | zero_init | constructor/reset: sets about 14 fields to zero or defaults | `0x18022c600` |
 | `0x180238ae0` | ref | thunk | forwards to `0x180238b00` | `0x180236950` |
 
-### sense (2)
+### sense (1)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
 | `0x18011b480` | core | thunk | forwards to `0x1801aa6d0` | `0x180119310`, `0x18011b4a0` |
-| `0x18011d3c0` | core | thunk | reads a field of the entry selected by argument 2 in a pointer table | `0x18018aaf0`, `0x180193a90` +1 |
 
-### steamvr (51)
+### steamvr (47)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -2072,10 +2070,6 @@ caller does with the value is in the caller's own entry.
 | `0x1801ab320` | ref | dtor | destructor of `Relocalizer` (frees itself when the flag argument is set) | none (vtable/callback) |
 | `0x1801ab380` | ref | dtor | destructor of `RelocalizerThread` (frees itself when the flag argument is set) | none (vtable/callback) |
 | `0x1801abf40` | core | const_ret | returns the address of global `0x180433908` | `0x180120290`, `0x1801211a0` +9 |
-| `0x1801ac120` | core | thunk | forwards to `0x1801ad880` with extra constant arguments | `0x1801a3e50`, `0x1801a4040` +1 |
-| `0x1801ac1d0` | core | thunk | forwards to `0x1801ad880` with extra constant arguments | `0x1801a4180` |
-| `0x1801ad960` | core | thunk | forwards to `0x1801ad880` with extra constant arguments | `0x1801a3f30` |
-| `0x1801ad980` | core | thunk | forwards to `0x1801ad880` with extra constant arguments | `0x1801a3e50` |
 | `0x1801adb80` | core | thunk | forwards to `0x1801ad880` with extra constant arguments | `0x180120290`, `0x1801211a0` +1 |
 
 ### tracking (7)
@@ -2110,15 +2104,14 @@ driver uses the system's C++ library, jsoncpp and LAPACK.
 The f2c CLAPACK block (`lib:linalg`) has its own hand-written part,
 part C.
 
-367 functions: flirt 154, vtable 108, string 105.
+363 functions: flirt 154, vtable 108, string 101.
 
-### app:dialog (21)
+### app:dialog (20)
 
 | Function | Verdict | Evidence | Identity / role | Library |
 |----------|---------|----------|-----------------|---------|
 | `0x18012da60` | fluff | string | uses 'IVRServerDriverHost_006', '[VrDialogManager] finish psvr2 by update paused' | app |
 | `0x18012dd70` | fluff | flirt | `std::basic_stringbuf<char,std::char_traits<char>,alloc>::`scalar deleting destructor'(uint)` | MSVC C++ standard library |
-| `0x18012e8b0` | fluff | string | uses 'IVRProperties_001', 'appmanifest_2580190.acf' | app |
 | `0x18012f5a0` | fluff | string | uses '[VrTracker2] m_config.ini date:%s', '%d-%d-%d %d:%d:%d' | app |
 | `0x18012f830` | fluff | string | uses 'IVRProperties_001', '\dashboard\' | app |
 | `0x180130020` | fluff | string | uses 'IVRProperties_001', '\dialog\' | app |
@@ -2161,7 +2154,7 @@ part C.
 | `0x180054530` | fluff | vtable | virtual method of `WorkerThread` | platform |
 | `0x180059790` | core | flirt | `??$__std_minmax_disp@$02U_Minmax_traits_d@?A0x8417fefe@@$00@?A0x8417fefe@@YA?A_PQEBX0@Z` | MSVC C runtime |
 
-### debug:trace (86)
+### debug:trace (84)
 
 | Function | Verdict | Evidence | Identity / role | Library |
 |----------|---------|----------|-----------------|---------|
@@ -2233,8 +2226,6 @@ part C.
 | `0x180111f80` | fluff | vtable | virtual method of `VrTraceManagerImpl` | debug |
 | `0x180115960` | fluff | vtable | virtual method of `std::_Func_impl_no_alloc<class <lambda_07085a55780effed2c535d4a4769b40f>,void,>` | MSVC C++ standard library |
 | `0x180115970` | fluff | vtable | virtual method of `std::_Func_impl_no_alloc<class <lambda_07085a55780effed2c535d4a4769b40f>,void,>` | MSVC C++ standard library |
-| `0x180115e00` | fluff | string | uses '[SceVrTracker2][VrTraceCaptureAgent]: Capture stopping.' | debug |
-| `0x180115e20` | fluff | string | uses '[SceVrTracker2][VrTraceCaptureAgent]: Capture starting (type' | debug |
 | `0x180116770` | fluff | string | uses '[SceVrTracker2][VrTraceCaptureAgent]: Stopping capture' | debug |
 | `0x180117ab0` | fluff | flirt | `std::bad_cast::bad_cast(std::bad_cast const &)` | MSVC C++ standard library |
 | `0x180117af0` | fluff | flirt | `std::bad_cast::bad_cast(void)` | MSVC C++ standard library |
@@ -2520,12 +2511,6 @@ part C.
 | `0x18013f7a0` | fluff | string | uses 'Bad escape sequence in string', 'Empty escape sequence in string' | lib |
 | `0x18013ff10` | fluff | string | uses 'Bad escape sequence in string', 'Empty escape sequence in string' | lib |
 
-### math+threads (1)
-
-| Function | Verdict | Evidence | Identity / role | Library |
-|----------|---------|----------|-----------------|---------|
-| `0x18016b080` | fluff | string | uses 'System::abort %s:%d' | OpenCV-derived math / `Framework` threads |
-
 ### reloc (2)
 
 | Function | Verdict | Evidence | Identity / role | Library |
@@ -2654,7 +2639,7 @@ Layout used below:
 | `0x1801bef50` | 45 | API: set or clear flag bit 2 of the pad settings word [sure for the bit] |
 | `0x1801bf3d0` | 34 | API: vibration on a pad (`0x1801c3020`, two motor bytes) [sure] |
 | `0x1801bf4a0` | 31 | API: set the vibration mode 1..5 (`0x1801c5730`) [sure] |
-| `0x1801bf850` | 15 | API: return the libpad version word (`0x1801c8210`); called from many driver paths [sure] |
+| `0x1801bf850` | 15 | API: write the host µs clock (`0x1801c8210`, QPC × 1e6) through the pointer; returns an error code for a null pointer; called from many driver paths [sure] |
 | `0x1801bfee0` | 34 | API: store a value > 1 at `+0x2a4c` of the device record [sure] |
 | `0x1801bffb0` | 63 | API: when pads 5 and 6 are both present, re-initialise both (`0x1801c8ca0`) [sure for the flow] |
 | `0x1801c0160` | 12 | API: set the boolean `0x180351658` (`0x1801c17f0`) for values > 1 [sure] |
@@ -3249,3 +3234,125 @@ while the writer flag is set; the writer waits until both counts are 0.
 | `0x180189b90` | 56 | copy the 0x400-byte tracker-settings block `0x18035b9f0` under its mutex; caller `0x18011b3e0` |
 | `0x180189c40` | 14 | forward to the tracker pose output (`0x180189c70`) if the tracker object `0x180355510` exists; else −1; caller `0x180160230` |
 | `0x18018aad0` | 12 | libpad manager: byte `+0x67` of pad slot n (`0x1801193b0`); caller `0x180160230` |
+
+---
+
+## Part J: LedSync helpers, SteamVR glue, libpad manager and the rest
+
+The last core functions, from the small groups (`ledsync`, `steamvr`,
+`debug:trace`, `math+threads`, `tracking`, `sense`, `room` and one thunk).
+LedSync state lives in per-side globals from `0x180362900` (controllers.md
+part C). `Framework::CompactList<T>` is Sony's fixed-capacity linked list:
+an item array at `+0x08`, head index `+0x10`, tail index `+0x14`, and per
+item a "used" word `+0x04`, its own index `+0x06` and prev/next indexes
+`+0x08`/`+0x0a`. Misuse calls `System::abort` (`0x18016b080`).
+
+### J.1 LedSync helpers [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180191050` | 19 | for both sides, end LedSync with phase code 1 (`0x18019bb80`) and clear tracker-settings byte `+0x03` (`0x18035b9f3`) |
+| `0x1801910a0` | 18 | for both sides, send LedSync phase code 3 (`0x18019bb80`) |
+| `0x180193ab0` | 152 | `LedSyncer` constructor (side, type): clear the side's flags, allocate the `CompactList<LedSyncItem>` (40 items of 260 bytes), and for type 4 the deviation lists; reset (`0x180196850`, `0x180196ed0`); caller `0x1801852e0` (IR tracker constructor) |
+| `0x180193e70` | 43 | `LedSyncer` deleting destructor: free the side/type list (`0x180362900 + 8·(5·side + type)`) and, for type 4, the two deviation lists |
+| `0x180194800` | 80 | `CompactList<DeviationItem>` prune: drop items from the head while they are older than `0x180350d00` µs (time from `0x1801bf850`); caller `0x1801943d0` |
+| `0x1801949b0` | 57 | clear a `CompactList<LedSyncItem>` (release every item); callers `0x1801957d0`, `0x180195a70`, `0x180195af0`, `0x180195c30`, `0x18019c7a0` |
+| `0x1801953d0` | 64 | phase-dependent table scan: phase 2 → 11 entries, 3 → 20, 4 → 1 (phase 1 skips the switch), walking the byte table `0x180260390` [guess: expected blink codes]; no caller in the driver |
+| `0x180195cc0` | 30 | count the items of a deviation list; caller `0x1801943d0` |
+| `0x180195d30` | 11 | first item of a 32-byte-item list, or null; caller `0x180199650` |
+| `0x180195d50` | 11 | same (second copy); caller `0x1801997c0` |
+| `0x180195d70` | 11 | first item of a `LedSyncItem` list (260-byte items), or null; callers `0x1801949b0`, `0x180196850` |
+| `0x180195df0` | 17 | time of the last deviation item plus the list's base time (`+0x08` of the holder); caller `0x1801943d0` |
+| `0x180196030` | 251 | fill the side's LedSync status record: phase and sub-state, whether the firmware string matches (`memcmp`), timers, flags and counters from the per-side globals; caller `0x180190300` |
+| `0x180196730` | 26 | copy the side's per-phase time totals (`0x180362f70` table) into an output array; caller `0x1801910f0` |
+| `0x180196850` | 180 | LedSync restart for a side: start time = now − 1 s, clear the per-side state and strings, release the item list, reset the fit (`0x1801997c0`); callers `0x180193ab0`, `0x1801943d0` |
+| `0x180196ed0` | 32 | reset the side's drift fit (`0x180199650`) and its 32-byte record at `0x180362980`, set a state byte to 2; callers `0x180193ab0`, `0x1801943d0` |
+| `0x180196f80` | 18 | reset globals: word `0x180350d98` = 512, clear `0x180350d9a`, the side's qword `0x180363030` and byte `0x180362f68` |
+| `0x180199450` | 52 | `CompactList<DeviationItem>::unuseIndex`: release one item and relink its neighbours; caller `0x180193f70` |
+| `0x180199550` | 51 | `CompactList<LedSyncItem>::unuseIndex`; caller `0x18019c500` |
+| `0x18019bb80` | 27 | for phase codes 1..3 on a type-4 syncer (side ≤ 1): send controller command 7 through the tracker → libpad bridge (`0x18011b3c0`, 3 bytes) and store the send time; callers `0x180191050`, `0x1801910a0` |
+| `0x18019bdd0` | 31 | send controller command 6 (3 bytes) when the argument is ≤ 1 or more than 1 s has passed since the last command; caller `0x180190300` |
+| `0x18019be80` | 27 | send controller command 4 (5 bytes) and store the send time |
+| `0x18019c100` | 18 | send a caller-built controller command (buffer, length) and store the send time |
+| `0x18019c2b0` | 45 | per-phase time accounting: add the time since the last call to the side's total for the current phase (≤ 6); in phase 5 also to two connected-time counters (pad info `0x180118c70`); caller `0x180190300` |
+| `0x18019c7a0` | 26 | on phase entry: phases 2–3 clear the item list (`0x1801949b0`); phase 1 zeroes ten fields of the syncer; caller `0x180190300` |
+| `0x18019c8d0` | 81 | mean over a deviation list: sums the item times and values (values scaled by `0x180350ce4`) and divides by the count; caller `0x180193f70` |
+| `0x18019d050` | 25 | reset an inline `std::string` (unwind funclet `0x1802432b0`) |
+| `0x18019d0b0` | 31 | free a heap `std::string` (unwind funclet `0x1802432d0`) |
+| `0x18019d130` | 12 | `UpdateThread` destructor: stop flag, join, `Framework::Thread` base |
+
+### J.2 SteamVR glue [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801a1070` | 24 | write one bool property: a one-entry `WritePropertyBatch` (tag 4 = bool, size 1); caller `0x18019ee30` |
+| `0x1801aa560` | 35 | write one string property (tag 5, size = length + 1); returns 11 for a null string; caller `0x1801a5760` |
+| `0x1801a1710` | 14 | lazy `IVRDriverLog_001` interface from the driver context; callers `0x18019ee30`, `0x1801a2cb0` |
+| `0x1801a1750` | 15 | lazy `IVRProperties_001` interface (stored in two globals); callers `0x18019ee30`, `0x1801a5760` |
+| `0x1801aa5d0` | 13 | lazy `IVRDriverInput_003` interface; caller `0x1801a8680` |
+| `0x1801aa6d0` | 35 | driver log: `vsprintf` into 256 bytes and pass it to `IVRDriverLog::Log`. Callers `0x1800e0cb0`, `0x180115ce0`, `0x180115e00`, `0x180115e20`, `0x180115e60`, `0x180116230` and many more |
+| `0x1801a17a0` | 71 | audio endpoint search: walk an `IMMDeviceCollection`, read each device's friendly name from its property store and, on a match with the given name, copy its id (narrowed) out; callers `0x18019ee30`, `0x1801a1cd0`, `0x1801a1e90` |
+| `0x1801a1cd0` | 62 | find the capture endpoint "PS VR2 Audio" and write its id as a property of the headset [likely: the recording-device property] |
+| `0x1801a1e90` | 62 | find the render endpoint "PS VR2" and write its id as a property [likely: the playback-device property] |
+| `0x1801a34c0` | 11 | deleting destructor of a class without members |
+| `0x1801a34f0` | 74 | `std::string` + C string → new `std::string`; caller `0x1801a47c0` |
+| `0x1801a3670` | 9 | copy a byte range (`memmove`), return the end of the destination |
+| `0x1801a36a0` | 105 | `std::vector` of 64-byte elements (32-byte aligned): grow and insert one; caller `0x1801a2cb0` |
+| `0x1801a4760` | 18 | free a 32-byte-aligned buffer of 64-byte elements (unwind `0x1802432e0`) |
+| `0x1801a5690` | 17 | create a `HandSkeleton` (0x20 bytes, `0x180128870`) for the given side |
+| `0x1801a56e0` | 12 | `UpdateControllerThread` destructor: stop flag, join, base |
+| `0x1801aa610` | 15 | true when the 2-D distance between two points is within the radius |
+| `0x180161140` | 60 | `TrackerManager` singleton getter (0x1f8 bytes, `0x180354f88`; identity poses, zeroed tables); callers `0x18019ee30`, `0x1801a2cb0`, `0x1801a7bf0` |
+| `0x180161270` | 61 | create the `TrackerManager` singleton at server init and set the flag `0x180354f90`; caller `0x1801a2040` |
+| `0x180161520` | 108 | tracking-state log for "HMD", "CONT_R", "CONT_L": prints "Boot at" / "Lost at" / … with position, quaternion and states when the status crosses 3; caller `0x180160230` |
+| `0x180161910` | 12 | destroy the `TrackerManager` singleton; caller `0x1801a2a40` |
+| `0x1801600c0` | 50 | `TrackerManager` constructor (same initial values as the getter) |
+| `0x1801186b0` | 29 | map a rate value 0 / 300 / 600 / 1200 / 1800 (±1e−4) to 0..4; other values leave the output alone; caller `0x18011d3d0` |
+| `0x180192ab0` | 9 | get the libpad manager (`0x1801189d0`) and call an empty function |
+| `0x180193a90` | 12 | poll pad n (`0x18011d3c0` → `0x18011bae0`); caller `0x180160230` |
+
+### J.3 libpad manager, recorders and room queue [sure unless tagged]
+
+The libpad manager singleton `0x180354bb8` holds the two pad objects at
+`+0x08`/`+0x10` and a "libpad initialised" flag at `+0x18`.
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x1801185a0` | 30 | release both pad objects; if libpad is initialised, `scePadTerm` (`0x1801bf650`) and release the ShareManager lock `+0x2378` (`0x18015e230`) |
+| `0x18011b700` | 40 | the same under the manager mutex `0x180354bc8`, then delete the manager; caller `0x1801a2a40` |
+| `0x180118690` | 10 | set byte `+0xcd8c` in both pad objects; caller `0x18018aaf0` |
+| `0x1801193e0` | 13 | byte `+0xcd8d` of pad n ≤ 1; caller `0x18018aaf0` |
+| `0x18011b4b0` | 10 | set qword `+0xcd98` in both pad objects; caller `0x18018aaf0` |
+| `0x180118740` | 23 | hex-encode bytes (`%02x`) into a zeroed buffer; caller `0x18011bae0` |
+| `0x180118820` | 16 | for both pads, call libpad `0x1801c0160` with the pad handle `+0x38` and the byte argument |
+| `0x1801188d0` | 21 | pad n state byte `+0x68` (0..2) when the pad is connected (`+0x67`), else 0. Callers `0x180185ef0`, `0x18018aaf0`, `0x180190300`, `0x1801910f0`, `0x1801a8680` |
+| `0x180118d80` | 350 | per pad, under its mutex: finish the averages (`+0x1394` / `+0x1390`) and copy the 0xa8-byte statistics block at `+0x1378` into the output record; caller `0x1801910f0` |
+| `0x18011a520` | 24 | reset the statistics block of both pads and set its start time to now; caller `0x1801910f0` |
+| `0x18011a690` | 12 | host µs clock (`0x1801bf850`). Callers `0x180123fa0`, `0x180124580`, `0x180125570`, `0x180125cc0`, `0x1801268d0` |
+| `0x1801ae500` | 55 | recorder: under its mutex, write a type-4 record header ("IR" magic, size 32·n + 12) and n 32-byte entries from 72-byte items to the open file; caller `0x18011bae0` |
+| `0x1801ae600` | 112 | recorder: write a type-0 record built from a 0x124-byte state block |
+| `0x1801ae820` | 84 | recorder: write a type-6 record (0x72 bytes) from 16 arguments |
+| `0x1801ae9b0` | 33 | recorder: close the current file and open a new one (`"wb"`); true on success |
+| `0x1801aea50` | 26 | true when the point has moved ≥ 0.015 (from its last value at `+0x224 + 12·i`, which is then updated) |
+| `0x1801abc00` | 88 | `std::deque<int>` map growth (doubling); caller `0x1801ad880` |
+| `0x1801ad880` | 37 | room command queue: push a command id under the queue mutex. Callers `0x1801abe50`, `0x1801ac120`, `0x1801ac1d0`, `0x1801ad960`, `0x1801ad980`, `0x1801ad9b0` and more (room.md: queue commands 0–7) |
+| `0x1801abe70` | 14 | delete the room module object `0x180433908` under its mutex; callers `0x180123910`, `0x180128390` |
+| `0x1801abee0` | 11 | copy the 0xd02e8-byte room state `0x180363600` under its mutex |
+| `0x1801adc80` | 48 | time accounting: track elapsed µs (resets on a jump > 100 ms or backwards); while the INS reports a byte flag (`0x18017a590`) and the input flag is set, count 3-second periods |
+| `0x18011dc10` | 79 | `std::vector` of 8-byte elements: grow and insert one; caller `0x1801214a0` |
+| `0x18011e360` | 88 | read a string property into a `std::string` (`ReadPropertyBatch`, up to 1024 bytes; error 5 = buffer too small handled); callers `0x18011f7d0`, `0x18011fd30`, `0x180120b40`, `0x180120c80`, `0x180120f20`, `0x18012e8b0` and more |
+| `0x18011fb30` | 44 | hold timer: on the first set, record the time; returns true when the flag has stayed set longer than the given µs |
+| `0x180123920` | 35 | `CaesarUsbThread` stop: join the thread (`0x18016b540`) |
+| `0x180161940` | 24 | validate an `"SIE"` header: magic, version ≤ 1, the size field equals the length, and length ≥ 24 + n₁·(148 or 228) + 52·n₂ |
+
+### J.4 Controller-tracker glue [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180046f40` | 40 | default settings block: counts 3, 3, 20, 7, 5, 5, 4, 5, 400; 0.95; 240.0 and 220.0; two −1.0; the rest zero; no caller in the driver |
+| `0x180049080` | 67 | per controller, project through the camera model (`0x1800a5310`), predict (`0x1800cbe50`), then hand the state to a sink object's virtual methods (`+0x10` per camera, `+0x18` per controller) [likely: debug or visualisation sink]; no caller in the driver |
+| `0x180049cb0` | 255 | tracker reconfigure from the IR thread's camera block: copy counts and image size, derive the camera models (`0x18009d4d0`), rig (`0x1800af650`, `0x1800b02a0`, `0x1800b1340`) and RANSAC settings (`0x1800d37e0`); −1 when the block is not valid; caller `0x18018aaf0` |
+| `0x18004a240` | 66 | export tracker state: a count and per item two vec3 values (from `+0x1c` and `+0x19c`) plus trailing fields; no caller in the driver |
+| `0x18004ab10` | 11 | set the global byte `0x1805f6c48` from the argument; caller `0x180192ae0` |
+| `0x180193a00` | 15 | if the IR tracker `0x180355510` exists, set the UKF manager's flag pair (`0x18005d2d0`, `0x18005f8f0`); else error `0x8a740009` |
+| `0x180193a40` | 19 | destroy the IR tracker `0x180355510`: set its stop flag, virtual destructor, free; caller `0x1801a2a40` |

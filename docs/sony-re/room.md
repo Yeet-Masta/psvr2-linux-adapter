@@ -522,7 +522,7 @@ tracking state (`+0x08` translation, `+0x14` rotation) composed with the
 frame's own headset pose (anchor 1) and the keyframe pose
 (`FUN_1802261e0`). `FUN_180224820` projects the keyframe's points with
 that pose (z > 0, inside the image) and marks them visible. A candidate is
-kept, with its predicted pose, when at least `cfg+0x1c` points are
+kept, with its predicted pose, when at least `cfg+0x1c` (24) points are
 visible.
 
 **Prior search** (`FUN_1801fb540`): the same prediction and visibility
@@ -576,7 +576,7 @@ a 3-D point:
    goes up), else mark it rejected (`0xde`). A feature that could not be
    projected is marked `0xdf`.
 
-The candidate passes when the accepted count is ≥ `cfg+0x1c`. A pose that passes is stored in the slot and the
+The candidate passes when the accepted count is ≥ `cfg+0x1c` (24). A pose that passes is stored in the slot and the
 keyframe gets a match credit (`FUN_180225fa0`).
 
 #### Choosing the result (`FUN_1801fd280`) [sure]
@@ -591,19 +591,30 @@ f(s, lim) = (s <= lim) ? 0.5 + 0.5 * (lim - s) / lim : 0.5
 conf = min(inliers, 100) * f(sp, 0.005) * f(sr, 0.004)
 ```
 
-The slot with the highest confidence wins. `FUN_1801fc140` and
-`FUN_1801f94a0` then refine it (again through `FUN_18022bb70`) before the
-result is written.
+The slot with the highest confidence wins.
+
+**Joint refinement** [sure for the flow, likely for intent]. Only when at
+least 2 candidates solved: sort them by confidence and take the best
+min(n, 4) keyframes. `FUN_1801fc140` expresses the winning pose in each of
+those keyframes' frames (keyframe poses via `FUN_1802261f0`), runs the
+guided patch check (`FUN_180228ff0`) against each, and requires ≥
+`cfg+0x1c` accepted patches. `FUN_1801f94a0` pools the correspondences of
+all of them into the winner's frame and solves once more
+(`FUN_18022bb70`). The refined pose is written to the result if
+`FUN_1801fad30` accepts it.
 
 #### Configuration (`FUN_1801df4c0` → `FUN_1801f1e80`, `FUN_1801df410`) [sure where mapped]
 
-The start sequence (§A.3.1) passes a 44-byte block P. Where it goes:
+The start sequence (§A.3.1, built in `FUN_1801ad9d0`) passes a 44-byte block P. Where it goes:
 
 | P | Value at start | Copied to | Use |
 |---|---|---|---|
 | +0x00, +0x04 | −1.0, 1000.0 | query builder `+0x38`, `+0x3c` | keep-window for the keypoint's third float (≤ 0 = no bound). Rejected if both > 0 and min > max |
-| +0x10, +0x11 (u8) | | `loc+0x1404`, `+0x1405` | UpdateMap switches (below) |
-| +0x14, +0x18, +0x1c | | `loc+0x13c0/0x13d0`, `+0x13d8/0x13e8`, `+0x13f0` | not traced |
+| +0x08 | 0 (8 bytes) | | not traced |
+| +0x10, +0x11 (u8) | 0, 1 (written as the u32 256) | `loc+0x1404`, `+0x1405` | UpdateMap switches; `+0x1405` enables the keyframe drop test (step 6 below) |
+| +0x14 | 4 | `loc+0x13c0`, `+0x13d0` | not traced |
+| +0x18 | 24 | `loc+0x13d8`, `+0x13e8` | `cfg+0x1c` (cfg = `loc+0x13bc`): minimum visible points (search A, prior search) and minimum accepted patches (guided check) |
+| +0x1c | 1 | `loc+0x13f0` | not traced |
 | +0x20 (u8) | 1 | `loc+0x1414` | novelty test on |
 | +0x24 | 0.9397 (cos 20°) | `loc+0x1418` | same-view rotation limit |
 | +0x28 | 0.25 | `loc+0x141c` | same-view distance limit [likely m] |
@@ -660,8 +671,8 @@ For a port, any sparse pose-graph optimiser (e.g. g2o, Ceres) over the
 same nodes, edges and information matrices fills this role; the 8
 iteration and stop rules are what to copy.
 
-Still open: the refinement in `FUN_1801fc140` / `FUN_1801f94a0`, the query
-builder's minimum keypoint count (`+0x04`), `cfg+0x1c`, the UpdateMap
+Still open: the query
+builder's minimum keypoint count (`+0x04`), the UpdateMap
 candidate check and prune rule, edge information, and the solver's exact
 cost (robust kernel or not).
 

@@ -441,6 +441,45 @@ each call checks the handle (`-5` if NULL, `-4` if not initialised), records
 (load map → `FUN_1801ef410`, save map → `FUN_1801f1750`, localise →
 `FUN_1801f1360`, frame update → `FUN_1801ef4e0`).
 
+### RunLocalizer (`FUN_1801f1360` → `FUN_1801ef4e0` → `FUN_1801fade0`) [sure for the structure]
+
+1. Check the frame (`FUN_1801f6180`) and set the camera model
+   (`FUN_1801f23e0`). Update running statistics: frame count, keypoint
+   sum, the mean of the third per-keypoint float over keypoints whose
+   byte 1 is 0.
+2. If the caller passes a pose, keep it as the prior in the tracking state
+   (`*(loc + 0x1428)`, `+0x48` and `+0x10c`).
+3. Run the search (`FUN_1801fade0`) unless the localiser mode
+   (`loc + 0x1420`) is 1 and the map query `FUN_180226520` returns 0
+   (result code 1 then).
+   Output: 12 candidate result slots of 400 bytes (byte valid at +0,
+   byte at +0xc4, u32 at +0x188, keyframe id at +0x18c, −1 = none). The
+   number of valid slots is returned to the caller.
+
+The search mode is the u32 at searcher `+0x20`. Without a prior (tracking
+state `+0x04` = 0) every mode runs as the default.
+
+| Mode | Prior search (`FUN_1801fb540`) | Search A (`FUN_1801fb280`), count | Search B (`FUN_1801fb880`), count |
+|---|---|---|---|
+| default | no | 0 | 12 |
+| 1 | no | 0 | 12 |
+| 2 | no | 5 | 3 |
+| 3 | no | 1 | 11 |
+| 4 | yes, first; stop if it succeeds | 0 | 11 |
+
+Before searches A and B the query is built (`FUN_1801f5a90`): copy the
+usable keypoints (state 0 or `0xcc`), drop those whose third float is
+outside `[searcher+0x38, searcher+0x3c]` (a bound of 0 is off), keep at
+most 256, and go on only if at least `searcher+0x04` remain. Then
+`FUN_1801fd280` (671 lines) checks the candidates and estimates the pose,
+and, when frame `0x9ae68` is 1, `FUN_1801f8a90` runs.
+
+Still open: how searches A and B rank keyframes (`FUN_1801fa220`,
+`FUN_1801fa720`, `FUN_1801f7fd0`), the descriptor matching
+(`FUN_1801f90d0`, `FUN_1801fbac0`), the pose check in `FUN_1801fd280`
+(`FUN_1801fc140`, `FUN_1801f94a0` → `FUN_18022bb70`), the config values
+behind `searcher+0x04/+0x20/+0x38/+0x3c`, UpdateMap and OptimizeMap.
+
 ### RP frame (unpack of the EP 0x8a record) — `FUN_1801ab410`
 
 The raw record is 0xc8780 bytes (magic `"RP"`, u32 size at +4). The first
@@ -479,6 +518,25 @@ Exact behaviour [sure]:
 * `n` itself is copied unchanged (any value ≥ 2 copies both anchors).
 
 Implemented as `psvr2_reloc_rp_unpack` — **bit-exact**.
+
+How the localiser reads the frame (`FUN_1801f5a90`, `FUN_1801f6180`,
+`FUN_1801f23e0`, `FUN_1801ef4e0`) [sure]. It indexes the arrays above
+**per keypoint**, not per feature:
+
+| Frame offset | Per keypoint k (0…323) |
+|---|---|
+| 0x00004 | u32 keypoint count; the localiser refuses > 324 |
+| 0x00008 + 4k | u16 u, u16 v (pixels, 640 × 640 image) |
+| 0x00518 + 64k | 64-byte descriptor (the "162 × 0x80" block is 324 × 64) |
+| 0x05618 + 2k | byte 0: keypoint state, copied with the keypoint; 0 or `0xcc` = usable. Byte 1: the range test below runs only when it is 0 or `0xcc`. A range-rejected keypoint gets state `0xcd` in the localiser's copy |
+| 0x058a0 + 12k | 3 floats; the third is range-tested (below) [likely depth] |
+
+Frame `0x9ae68` (u32) must be < 4; it indexes four per-kind counters in
+the localiser [meaning open]. Frame `0x9ae70` holds 9 floats that
+`FUN_1801f23e0` stores with the size 640 × 640 as the camera model
+[likely: 3 × 3 intrinsics]. Anchor 1 (`0x9b010`, 3 + 9 floats) is passed
+to the search as translation + rotation [likely: the current headset
+pose].
 
 ### Room map file `sceMapDb.bin` and the in-memory map image
 

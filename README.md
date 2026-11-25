@@ -149,9 +149,9 @@ Regenerate with `python scripts/sony-re/triage/progress.py`.
 | Stage | Progress | Functions |
 |---|---|---|
 | Triaged | `████████████████████` 100% | 5175 / 5175 |
-| Documented (all) | `█████████████░░░░░░░` 63% | 3261 / 5175 |
-| Documented (core) | `██████████████████░░` 88% | 2119 / 2396 |
-| Documented (ref) | `████░░░░░░░░░░░░░░░░` 19% | 190 / 1025 |
+| Documented (all) | `█████████████░░░░░░░` 64% | 3327 / 5175 |
+| Documented (core) | `██████████████████░░` 91% | 2183 / 2396 |
+| Documented (ref) | `████░░░░░░░░░░░░░░░░` 19% | 192 / 1025 |
 | Documented (fluff) | `███████████░░░░░░░░░` 54% | 952 / 1754 |
 
 <details><summary>Core functions by subsystem</summary>
@@ -165,7 +165,7 @@ Regenerate with `python scripts/sony-re/triage/progress.py`.
 | `ins+irtracker` | `█████████░░░░░░░░░░░` 46% | 107 / 232 |
 | `steamvr` | `███████████████░░░░░` 73% | 73 / 100 |
 | `ledsync` | `█████████████░░░░░░░` 63% | 56 / 89 |
-| `config` | `█████░░░░░░░░░░░░░░░` 26% | 22 / 86 |
+| `config` | `████████████████████` 100% | 86 / 86 |
 | `debug:trace` | `███████████████░░░░░` 73% | 32 / 44 |
 | `tracking` | `███████████████░░░░░` 74% | 14 / 19 |
 | `room` | `█████████████████░░░` 87% | 13 / 15 |

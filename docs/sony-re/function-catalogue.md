@@ -11,6 +11,7 @@ Parts:
 - [Part E: Library and runtime code](#part-e-library-and-runtime-code)
 - [Part F: libpad internals](#part-f-libpad-internals)
 - [Part G: Headset USB glue, hand skeleton and jsoncpp](#part-g-headset-usb-glue-hand-skeleton-and-jsoncpp)
+- [Part H: ShareManager and ConfigManager glue](#part-h-sharemanager-and-configmanager-glue)
 
 ---
 
@@ -1215,7 +1216,7 @@ only zeroes fields, a record copy or an obfuscated-string decoder. The
 role column is in our own words and is `[sure]` for the shape; what the
 caller does with the value is in the caller's own entry.
 
-789 functions.
+787 functions.
 
 ### app:dialog (3)
 
@@ -1225,12 +1226,11 @@ caller does with the value is in the caller's own entry.
 | `0x18012ddb0` | fluff | dtor | destructor (frees itself when the flag argument is set) | `0x18012dd60` |
 | `0x18012de50` | fluff | dtor | destructor of `CreateProcessThread` (frees itself when the flag argument is set) | none (vtable/callback) |
 
-### config (9)
+### config (8)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
 | `0x180154fd0` | ref | dtor | destructor of `ConfigManager` (frees itself when the flag argument is set) | none (vtable/callback) |
-| `0x1801562f0` | core | copy | copies a record field by field (about 33 fields) | `0x180127250` |
 | `0x180157ef0` | fluff | dtor | destructor of `ShareManager` (frees itself when the flag argument is set) | none (vtable/callback) |
 | `0x180158198` | fluff | thunk | forwards to `0x1801581b0` | none (vtable/callback) |
 | `0x1801581f0` | ref | dtor | destructor of `ShareManager` (frees itself when the flag argument is set) | none (vtable/callback) |
@@ -1913,7 +1913,7 @@ caller does with the value is in the caller's own entry.
 | `0x18013df60` | core | setter | two-statement leaf (one store or load, then return) | none (vtable/callback) |
 | `0x18013dfa0` | core | setter | two-statement leaf (one store or load, then return) | none (vtable/callback) |
 
-### math+threads (21)
+### math+threads (20)
 
 | Function | Verdict | Shape | Role | Callers |
 |----------|---------|-------|------|---------|
@@ -1936,7 +1936,6 @@ caller does with the value is in the caller's own entry.
 | `0x18016b850` | fluff | const_ret | wrapper around `ReleaseMutex` | `0x180007660`, `0x18010af50` +157 |
 | `0x18016b8c0` | fluff | getter | identity: returns argument 1 | `0x180156500`, `0x1801b91d0` |
 | `0x18016b8d0` | fluff | copy | copies a record field by field (about 17 fields) | `0x180156500`, `0x18018aaf0` +3 |
-| `0x18016b940` | fluff | getter | identity: returns argument 1 | `0x180154be0`, `0x180155000` +4 |
 | `0x18016b990` | fluff | copy | copies a record field by field (about 17 fields) | `0x1801556b0`, `0x180156500` +2 |
 
 ### reloc (82)
@@ -2121,17 +2120,15 @@ driver uses the system's C++ library, jsoncpp and LAPACK.
 The f2c CLAPACK block (`lib:linalg`) has its own hand-written part,
 part C.
 
-369 functions: flirt 154, vtable 108, string 107.
+367 functions: flirt 154, vtable 108, string 105.
 
-### app:dialog (23)
+### app:dialog (21)
 
 | Function | Verdict | Evidence | Identity / role | Library |
 |----------|---------|----------|-----------------|---------|
 | `0x18012da60` | fluff | string | uses 'IVRServerDriverHost_006', '[VrDialogManager] finish psvr2 by update paused' | app |
 | `0x18012dd70` | fluff | flirt | `std::basic_stringbuf<char,std::char_traits<char>,alloc>::`scalar deleting destructor'(uint)` | MSVC C++ standard library |
 | `0x18012e8b0` | fluff | string | uses 'IVRProperties_001', 'appmanifest_2580190.acf' | app |
-| `0x18012f3a0` | fluff | string | uses '[VrTracker2] initial setup complete flow', '[VrTracker2] initial setup complete flow and vr app finish' | app |
-| `0x18012f4f0` | fluff | string | uses '[VrTracker2] safety notice limit on, %d', '[VrTracker2] safety notice limit over' | app |
 | `0x18012f5a0` | fluff | string | uses '[VrTracker2] m_config.ini date:%s', '%d-%d-%d %d:%d:%d' | app |
 | `0x18012f830` | fluff | string | uses 'IVRProperties_001', '\dashboard\' | app |
 | `0x180130020` | fluff | string | uses 'IVRProperties_001', '\dialog\' | app |
@@ -2954,3 +2951,134 @@ helpers. jsoncpp value types: 0 null, 1 int, 2 uint, 3 real, 4 string,
 | `0x18013f0e0` | 70 | integer token parse with overflow check (max/10 rule) |
 | `0x18013f210` | 83 | `OurReader` integer path wrapper |
 | `0x18013f420` | 70 | `OurReader` integer token parse (`LargestInt` limits) |
+
+---
+
+## Part H: ShareManager and ConfigManager glue
+
+The classifier put these in `config`. Nearly all of them are methods of
+the `ShareManager` singleton (`0x180354f78`, created by `0x18015bbd0`,
+0x2430 bytes). It owns the named shared memory (`SHARE_VRT2_*`) that
+the driver shares with Sony's PS VR2 app. Its base pointer is at object
+`+0x23e0`. The block is split into sections. Each section has a mutex
+handle in the object (`+0x22b0..+0x23d0`), a sequence counter in shared
+memory and a payload just after it. A setter copies the payload in,
+increments the counter and returns the new value. A getter copies the
+payload out and returns (or writes through a pointer) the counter, so a
+reader can tell a new value from an old one. The few non-ShareManager
+rows are the `ConfigManager` singleton (`0x180354f68`, 0x1570 bytes).
+
+Object fields used below [sure]: `+0x08 + 8·i` per-setting mutexes
+(i < 11), `+0x70` INI file path (`std::string`), `+0x90 + 0x300·i` the
+settings table (section name, key name and cached value, 0x100 bytes
+each, 11 entries), `+0x2190` 36 auto-reset events, `+0x23f8`/`+0x2404`
+slot sequence counters, `+0x2414`/`+0x2420` "last written slot" indexes.
+
+### H.1 Shared-memory sections (counter / payload offsets in the block) [sure unless tagged]
+
+| Section | Mutex | Counter | Payload | Writer → reader |
+|---|---|---|---|---|
+| general | `+0x22b0` | `+0x08` | qword `+0x10` | (no writer seen) → `0x18015cf20` |
+| headset status info | `+0x22b8` | `+0x28` | 0x24 bytes `+0x2c` | `0x18015fc00` → `0x18015db30` |
+| `0x8f` display/lens block | `+0x22c0` | `+0x54` | 0x100 bytes `+0x70` | `0x18015e990` → `0x18015cc60` |
+| VD type 0x12 | `+0x22c0` | `+0x58` | 0x200 bytes `+0x170` | `0x18015ea40` → `0x18015cd30` |
+| VD type 12 (headset IMU calibration) | `+0x22c0` | `+0x5c` | 0x78 bytes `+0x370` | `0x18015e850` → `0x18015cb00` |
+| VD type 13 (IMU set calibration) | `+0x22c0` | `+0x60` | 0x34 bytes `+0x3e8` | `0x18015e910` → `0x18015cbc0` |
+| parsed camera calibration 0 | `+0x22c0` | `+0x64` [likely] | 0xf0 bytes `+0x41c` | `0x18015f610` → (none seen) |
+| VD type 10 raw (camera calibration 0) | `+0x22c0` | `+0x68` | 0x800 bytes `+0x50c` | `0x18015eb00` → `0x18015ce00` |
+| VD type 0x11 | `+0x22c0` | `+0x6c` | 0x800 bytes `+0xd0c` | `0x18015eb70` → `0x18015ce90` |
+| controller slots, per side | `+0x22c8 + 8·side` | per slot | 64 × 12 bytes from `+0x150c + 0x300·side` | (app) → `0x180159b60`, `0x18015b550` |
+| pose slots, per index | `+0x22e0 + 8·i` | per slot | 64 × 40 bytes from `+0x1e10 + 0xa00·i` | `0x18015b830` → `0x180159dc0`, `0x18015b600` |
+| image slots | `+0x22f8` | per slot | 8 headers of 0x878 bytes from `+0x3c10`; images of 0x200100 bytes | `0x18015b6a0` → `0x180159970` |
+| camera mode request | `+0x2310` | `+0x8038` | 0x10 bytes `+0x803c` | `0x18015f6f0` → `0x18015d550` |
+| LED-detection window | `+0x2318` | `+0x8054` | 0x18 bytes `+0x8058` | `0x18015e720` → `0x18015c9d0` |
+| LED config | `+0x2320` | `+0x8078` | 0x10 bytes `+0x807c` | `0x18015f850` → `0x18015d6b0` |
+| tracker settings | `+0x2328` | — | 0x400 bytes `+0x8098` | `0x18015f110` → `0x18015cfd0` |
+| per-index record A | `+0x2330` | `+0x84a0 + 0x5c·i` | 0x50 bytes after it | `0x18015e670` → (none seen) |
+| 0xc00-byte block | `+0x2338` | `+0x8558` | 0xc00 bytes `+0x855c` | `0x18015f1d0` → `0x18015d090` |
+| per-index record B | `+0x2340` | `+0x9168 + 0x60·i` | 0x50 bytes `+0x9170 + 0x60·i` | `0x18015e7a0` → `0x18015ca50` |
+| 0x44-byte record | `+0x2348` | `+0x9228` | 0x44 bytes `+0x922c` | `0x18015f330` → `0x18015d1e0` |
+| 0x34-byte record | `+0x2360` | `+0x9b38` | 0x34 bytes `+0x9b3c` | `0x18015e5e0` → (none seen) |
+| 0x13c-byte record [likely size] | `+0x2370` | — | from `+0x9c8c` | `0x18015f250` → `0x18015d100` |
+| qword value | `+0x22b0` | `+0x9dc8` | qword `+0x9dd0` | `0x18015e520` → (none seen) |
+| settings strings | `+0x08 + 8·i` | `+0x9dfc + 0x10c·i` | string `+0x9e00 + 0x10c·i` | `0x18015f470` → `0x18015d270` |
+| 0x110-byte record | `+0x23a0` | `+0xa980` | 0x110 bytes `+0xa984` | `0x18015fc70` → `0x18015dba0` |
+| IR-thread block | `+0x23a8` | `+0xaa9c` | 0x1b50 bytes `+0xaaa0` | `0x18015fd40` → `0x18015dc60` |
+| IR-thread record | `+0x23b0` | `+0xc5f8` | 0x120 bytes `+0xc600` | `0x18015fdc0` → `0x18015dcd0` |
+| byte flag | `+0x22b0` | `+0xc728` | byte `+0xc72c` | `0x18015e580` → (none seen) |
+| large record | `+0x23c0` | — | from `+0xc73c` | `0x18015f760` → `0x18015d5d0` |
+| client process table | `+0x22b0` | — | 11 entries from `+0xffc00`, process ids at `+0xffc58` | (clients) → `0x18015dda0` |
+| app-held locks | `+0x2380 + 8·i` (i = 0, 1) | — | — | `0x18015e260` / `0x18015e4f0` / `0x18015c610` |
+
+"(none seen)" means no caller in the driver; the reader is Sony's app or
+nobody. The VD types are the headset `"VD"` calibration entries
+(overview.md part B). The meaning of the unnamed records was not traced.
+
+### H.2 Function rows [sure unless tagged]
+
+| Function | Lines | Role |
+|---|---|---|
+| `0x180154910` | 136 | `ConfigManager` constructor: vtable, inner record (`0x180154be0` at `+0x0c`), zeroes the arrays, writes five small headers (3, 3, 24) from `+0xa30` and four more from `+0xf80` [likely: matrix dimensions]; callers `0x180156470`, `0x1801564b0` |
+| `0x180154be0` | 138 | constructor of the `ConfigManager` inner record: zeroes the fields, builds the identity transforms (`0x18016b940`), float 1.0 at record `+0x48c` (quaternion w [likely]); caller `0x180154910` |
+| `0x1801564b0` | 21 | create the `ConfigManager` singleton (0x1570 bytes, `0x180154910`) if it is missing and set the flag `0x180354f70`; then (re)load the defaults (`0x180155000`); caller `ServerDriver::Init` `0x1801a2040` |
+| `0x1801577d0` | 12 | destroy the `ConfigManager` singleton (virtual destructor with free) and clear the pointer; caller `ServerDriver::Cleanup` `0x1801a2a40` |
+| `0x180159970` | 85 | under the image mutex, pick the newest image slot of 8 (state 1 or 2, highest sequence) and copy out its header and image pointer; no caller in the driver [likely: the app's reader] |
+| `0x180159b60` | 103 | under the side's controller mutex, pick the newest of 64 controller slots (state 1 or 2, highest sequence), take a reference and copy it out; caller `0x18011bae0` (controller poll) |
+| `0x180159dc0` | 116 | same for the 64 pose slots of index `i` (40-byte slots); caller `0x18011f1b0` (room: headset pose from shared memory) |
+| `0x18015b550` | 26 | release a reference to controller slot (side, n ≤ 63): decrement its count and mark it free (state 1) at zero; caller `0x18011bae0` |
+| `0x18015b600` | 23 | same for pose slot (i, n ≤ 63); caller `0x18011f1b0` |
+| `0x18015b6a0` | 37 | publish image slot n ≤ 7: state 1, next sequence (`+0x2404`), copy the image's size and a float (1.0 if the size is below 0x100), remember the slot, signal event `+0x21d8`; caller `0x180128030` (image-stream packet) |
+| `0x18015b830` | 35 | publish a 24-byte pose into slot n ≤ 63 of index `i`: state 1, next sequence (`+0x23f8 + 4·i`), remember the slot, signal event `+0x21c0 + 8·i`; callers `0x18019ee30`, `0x1801a7bf0` (SteamVR poses) |
+| `0x18015b900` | 18 | signal all 36 events (wakes every waiter, used on shutdown [likely]); no caller in the driver |
+| `0x18015b950` | 56 | parse the cached value of setting `i` (object `+0x290 + 0x300·i`) with `stoi` into an int; caller `0x1801256c0` (headset init) |
+| `0x18015bab0` | 68 | directory part of a path: everything before the last `/` or `\` (empty string if none); no caller in the driver |
+| `0x18015bc80` | 20 | `QueryPerformanceCounter` time in microseconds as an unsigned 64-bit value; callers `0x180128030`, `0x1801a02b0` |
+| `0x18015c610` | 23 | test app-held lock `i` ≤ 1: returns 1 if another owner holds it (zero-timeout wait fails), else releases it again and returns 0; callers `0x18011bae0`, `0x18011d0c0` (controller access) |
+| `0x18015c9d0` | 29 | read the LED-detection window section (0x18 bytes) and its counter; caller `0x180126b80` (Set `0x14`) |
+| `0x18015ca50` | 50 | read per-index record B (0x50 bytes) for index `i`, return its counter; callers `0x180133960` (BT notice), `0x18018aaf0` (IR tracker) |
+| `0x18015cb00` | 48 | read the VD type 12 section (0x78 bytes) and its counter; no caller in the driver |
+| `0x18015cbc0` | 36 | read the VD type 13 section (0x34 bytes) and its counter; no caller in the driver |
+| `0x18015cc60` | 59 | read the `0x8f` display/lens section (0x100 bytes) and its counter; no caller in the driver |
+| `0x18015cd30` | 59 | read the VD type 0x12 section (0x200 bytes) and its counter; no caller in the driver |
+| `0x18015ce00` | 19 | read the VD type 10 section (0x800 bytes) and its counter; no caller in the driver |
+| `0x18015ce90` | 19 | read the VD type 0x11 section (0x800 bytes) and its counter; no caller in the driver |
+| `0x18015cf20` | 16 | read the general qword `+0x10` and return counter `+0x08`; no caller in the driver |
+| `0x18015cf80` | 17 | `GetPrivateProfileStringA` for setting `i`: section and key from the settings table, 256-byte output, file = the INI path at `+0x70`; no caller in the driver |
+| `0x18015d090` | 16 | read the 0xc00-byte block and return its counter; no caller in the driver |
+| `0x18015d100` | 73 | read the record at `+0x9c8c`; no caller in the driver |
+| `0x18015d1e0` | 35 | read the 0x44-byte record and return its counter; no caller in the driver |
+| `0x18015d270` | 64 | read settings string `i` from shared memory under its mutex and parse it with `stoi`; returns the counter. Callers `0x18011bae0`, `0x18011d580`, `0x1801268d0`, `0x18012f3a0`, `0x18012f4f0`, `0x180132890` and more |
+| `0x18015d550` | 28 | read the camera mode request (0x10 bytes) and its counter; caller `0x180125cc0` (camera mode resend) |
+| `0x18015d5d0` | 64 | read the large record at `+0xc73c`; no caller in the driver |
+| `0x18015d6b0` | 28 | read the LED config section (0x10 bytes) and its counter; caller `0x180126b80` (Set `0x14`) |
+| `0x18015db30` | 32 | read the headset status-info record (0x24 bytes), return its counter; callers `0x180132890`, `0x180134730`, `0x180160230` |
+| `0x18015dba0` | 66 | read the 0x110-byte record at `+0xa984`, return its counter; callers `0x18011bae0`, `0x180120290`, `0x180122ac0`, `0x1801a2040` |
+| `0x18015dc60` | 16 | read the 0x1b50-byte IR-thread block, return its counter; caller `0x1801910f0` |
+| `0x18015dcd0` | 69 | read the 0x120-byte IR-thread record, return its counter; caller `0x1801910f0` |
+| `0x18015dda0` | 90 | client process table: for each of 11 entries owned by another process, clear it if `GetExitCodeProcess` says the process has ended (not 259 = still active); then copy the table out. Caller `0x1801a02b0` (HMD debug page) |
+| `0x18015e260` | 13 | take app-held lock `i` ≤ 1 (infinite wait); returns −1 for a bad index; caller `0x18011d0c0` |
+| `0x18015e2a0` | 13 | under mutex `+0x2398`, clear the dword at shared-memory `+0x110c408`; caller `0x1801a2040` |
+| `0x18015e2f0` | 17 | post event bits: OR the argument into the flags word of the event record at `+0x23d0`, then signal its event; no caller in the driver [likely: the companion-app event bits of room.md §A.4.3] |
+| `0x18015e360` | 15 | destroy the `ShareManager` singleton: close it (`0x180159770`), virtual destructor with free, clear the pointer; caller `0x1801a2a40` |
+| `0x18015e3a0` | 49 | `std::to_string(int)`: decimal digits with a `-` sign; callers `0x18015ad30`, `0x18015f3d0` |
+| `0x18015e4a0` | 16 | wait for event `i` with a timeout and reset it; returns −1 on timeout; callers `0x18011bae0`, `0x1801a4e60` |
+| `0x18015e4f0` | 12 | release app-held lock `i` ≤ 1; no caller in the driver |
+| `0x18015e520` | 17 | write the qword at `+0x9dd0` and bump counter `+0x9dc8`; no caller in the driver |
+| `0x18015e580` | 17 | write the byte flag at `+0xc72c` and bump counter `+0xc728`; no caller in the driver |
+| `0x18015e5e0` | 38 | write the 0x34-byte record at `+0x9b3c` and bump its counter; no caller in the driver |
+| `0x18015e670` | 65 | write per-index record A (0x50 bytes) for index `i` and bump its counter; caller `0x180160230` |
+| `0x18015e7a0` | 55 | write per-index record B (0x50 bytes) for index `i` and bump its counter; caller `0x18011a870` |
+| `0x18015e850` | 46 | write the VD type 12 section (0x78 bytes) and bump its counter; caller `0x180127250` (VD parser, case 12) |
+| `0x18015eb00` | 17 | write the VD type 10 section (0x800 bytes) and bump its counter; caller `0x180127250` (case 10) |
+| `0x18015f1d0` | 17 | write the 0xc00-byte block and bump its counter; caller `0x1801617c0` |
+| `0x18015f250` | 76 | write the record at `+0x9c8c` and bump its counter; no caller in the driver |
+| `0x18015f330` | 37 | write the 0x44-byte record and bump its counter; caller `0x1801256c0` (headset init) |
+| `0x18015f3d0` | 31 | set setting `i` from an int: `std::to_string` (`0x18015e3a0`), then the string setter `0x18015f470`; callers `0x18011bae0`, `0x18012f4f0`, `0x180134280` |
+| `0x18015f610` | 75 | write the parsed camera calibration 0 record (0xf0 bytes, from `ConfigManager` `0x1801562f0`) and bump its counter; caller `0x180127250` (case 10) |
+| `0x18015f6f0` | 26 | write the camera mode request (0x10 bytes) and bump its counter; callers `0x180125670` (seed, mode `0x10`), `0x180127ec0` (debug) |
+| `0x18015f760` | 84 | write the large record at `+0xc73c`; no caller in the driver |
+| `0x18015f850` | 26 | write the LED config section (0x10 bytes) and bump its counter; callers `0x180125a10` (seed), `0x180127f10` |
+| `0x18015fc00` | 41 | write the headset status-info record (0x24 bytes) and bump its counter; caller `0x180128240` (headset.md §A.2.7) |
+| `0x18015fc70` | 80 | write the 0x110-byte record at `+0xa984` and bump its counter; callers `0x18011bae0`, `0x180120290`, `0x180122ac0`, `0x1801a2040` |
+| `0x18015fd40` | 17 | write the 0x1b50-byte IR-thread block and bump its counter; caller `0x1801910f0` |
+| `0x18015fdc0` | 87 | write the 0x120-byte IR-thread record and bump its counter; caller `0x1801910f0` |

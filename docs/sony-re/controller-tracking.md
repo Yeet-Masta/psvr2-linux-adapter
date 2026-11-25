@@ -270,10 +270,12 @@ At a latch the output gets the same delta (`FUN_180180610`), so the output
 starts with no offset; later SLAM samples move only the VIO delta, and the
 mode-0 blender carries that change into the output while the head turns.
 
-Port status: the kernel's `struct psvr2_pose_sample` does not carry the
-`+0x2c` pose, and no capture of it exists here. Hardware check: log
-`+0x2c..+0x47` next to `+0x10`; if it is the identity at rest and jumps on
-a relocalisation, add it to the sample and run mode 0 on it.
+Port status (2026-11-25): the kernel sample carries `+0x2c` as
+`delta_position` / `delta_orientation`, and `psvr2_ins.c` runs mode 0 on
+it with setting `headset_ins_delta` (default off), plus the stillness
+switch. Hardware check before turning it on: `scripts/hw-handoff.sh`
+dumps `+0x2c..+0x47` next to `+0x10` from debugfs `raw_slam`; it should be
+the identity at rest and change only on a relocalisation.
 
 **Mode-0 details** checked against `FUN_180181dd0` [sure]. The "log" and
 "exp" above are not the SE(3) maps. The error is the 6-vector
@@ -2958,9 +2960,14 @@ What a Linux driver gains, in priority order (all userspace):
    orientation, and it is fed to the UKF as a measurement once the optical
    fix is older than 0.3 s (§F.3).
 
-The Linux driver has neither: `controller_device.cpp` uses its own fixed
-arm offset when there is no optical fix, and nothing handles occlusion by
-the other controller.
+Port status (2026-11-25): both are in the Linux driver, simulation-tested
+only. The latch is `occlusion_latch.cpp` (run from `optical_pose.cpp`
+after both hands are solved); the arm model is `arm_model.cpp`, fed from
+`controller_device.cpp` as pseudo fixes. Note that on PC the arm model does
+not reach the output directly: after 0.3 s without optics the output holds
+the last fix position (§C.5); the model only keeps the UKF state near the
+body. The latched position does reach the output, since it is written into
+the frame result as an optical fix.
 
 ### F.2 Occluded-controller latch (`0x1801b81c0`) [sure unless tagged]
 

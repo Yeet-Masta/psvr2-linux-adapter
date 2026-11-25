@@ -122,7 +122,7 @@ off. At 90 Hz the 90.0 default stays (0.1 % off
 
 | Item | Why |
 |------|-----|
-| Controller **optical pose**: Sony's UKF | Done in simulation, not yet run on hardware (2026-11-20): `controller_ukf.cpp`, see "Controller filter" below. Setting `optical_ukf` false restores the plain optical position. |
+| Controller **optical pose**: Sony's UKF | Done in simulation, not yet run on hardware (2026-11-20): `controller_ukf.cpp`, see "Controller filter" below. Setting `optical_ukf` false restores the plain optical position. Arm model and occlusion latch ported 2026-11-25, also simulation only. |
 | Blob association in LED sync | Sony associates blobs by predicted pose. Without a pose, the tracker syncs **one controller at a time** and `BlinkFinder` picks, per camera, the blob whose on/off pattern repeats every 11 (BROAD) or 20 (BG) frames; steady room lights and random flicker are rejected (simulated: 70 lights, 3 flickering lamps, 0 wrong picks). The first hardware run had 50–80 room blobs per camera, which the old "≤ 4 blobs" rule could never decode (stuck in BROAD). Hardware, 2026-11-18 (dark room): PRESCAN → BROAD → BG reached. A dark sync LED often still shows a dim blob (weight ~4 vs ~13 lit), so lit/dark is judged by weight against the site's own range; in BG the BROAD pick is kept while seen. First STABLE on hardware 2026-11-18 (17.7 s in BG, held 44 s). Two own changes made it lock: the drift fit slope is sent as a dimensionless rate (BG: −slope·step, BROAD: slope·2.5·step; raw it changed the cycle by 0.14 ppm against an 11 ppm drift), and every BG fit needs 10 samples (Sony: 40 after the first; BG gives ~1.3 samples/s). Open: PRESCAN → BROAD took 3.5–44 s with the controller in view. |
 | Drift-fit units | BROAD: same as Sony. Sony's BROAD fit holds µs, so its raw slope is already a rate. BG: own full-size rate `−slope·step`; Sony sends the BG slope raw in steps/µs (`sony-re/controller-tracking.md` §B.3.5). |
 | Controller preset | Done: Sony's preset is libpad's sync-mode byte (`sony-re/controller-tracking.md` §B.2.3), which is what the driver passes. |
@@ -132,6 +132,13 @@ off. At 90 Hz the 90.0 default stays (0.1 % off
 | Relocaliser (Set 0x0a, `/dev/psvr2-rp` consumer) | Large and optional. The kernel side already exposes the data. |
 
 ### Testing
+
+Hardware hand-off for the 2026-11-25 ports (gyro clip per rev, arm model,
+occlusion latch, SLAM delta pose): `scripts/hw-handoff.sh` builds, runs the
+offline tests, installs, then guides a 2-minute session in the headset with
+voice cues and packs `~/psvr2-hwtest-<date>.tar.gz` (logs, SLAM `+0x2c`
+capture and verdict). Needs passwordless sudo; `--offline` runs only the
+build and simulations.
 
 The module, library and driver build clean (kernel 7.0, gcc). To try them:
 
@@ -267,6 +274,21 @@ plain optical position and the heading pull when `optical_ukf` is on
   the filter's time with `poseTimeOffset` set from it.
 - Output: filter pose while the last fix is < `optical_ukf_hold_ms` (300)
   old, then that fix's position held, rotation from the filter (Sony).
+- Gyro clip per hardware rev (Sony's setImuPose): rev 1 ±33.16 rad/s,
+  others ±66.32.
+- Arm model (`arm_model.cpp`, setting `optical_arm_model`, default on):
+  Sony's PC body constants; once the fix is 0.3 s old (or the controller is
+  out of view after motion) a position-only pseudo fix at 60 Hz, σ 5 mm
+  within 10 cm of the filter, else 50 mm. Its FK chain is simplified
+  (`arm_model.h`). It does not change the output (still the held fix, as
+  Sony); it keeps the filter near the body for when the LEDs come back.
+  Simulator `UKF_ARM=1`: filter error at the end of the 1 s dropout 74 mm
+  against 194 mm without it.
+- Occlusion latch (`occlusion_latch.cpp`, setting `optical_latch`, default
+  on): the far controller hidden behind the near one is carried along its
+  line of sight to the near one and fed as a position-only fix; 0.5 s
+  release blend. `tools/latch_sim` checks the states. Driver log
+  `optical latch: <hand> carried by the other controller`.
 - Simulator (1 kHz IMU with bias, 60 Hz fixes with 1 mm / 0.5° noise,
   25 ms latency, 5 % 10 cm outliers, 1 s dropout): 0.95 mm / 0.15° rms
   against 29.5 mm for the newest fix held; biases learned to < 2 %; all
@@ -347,6 +369,10 @@ OpticalTracker yet.
   `headset INS running (quaternion order N, IMU axis map M, fit F)`; if it
   never appears, the pose path is the plain SLAM pose as before. Setting
   `headset_ins`. Not yet tested on hardware.
+  `headset_ins_delta` (default off): Sony's mode-0 blender on the SLAM
+  record's second pose (+0x2c, carried by the kernel since 2026-11-25),
+  with the stillness switch. Turn it on only once a capture shows +0x2c is
+  a frame offset (`scripts/hw-handoff.sh` checks it).
 
 ---
 

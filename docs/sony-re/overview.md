@@ -627,9 +627,11 @@ thr = (max + min)/2;  state[k] = (cnt[k] > 0 && w[k] > thr) ? 2 (lit) : 0
 - Runs of equal values are merged (within DBL_EPSILON).
 - With ≥ 4 runs, fit a least-squares slope over all runs except the first.
   The fit latches until it is reset.
-- t is in µs since the first sample [likely host clock].
-- The slope is sent **raw** (steps/µs or slots/µs, unscaled) in cmd 3, or
-  cmd 5 with an offset. A positive slope lengthens the cycle.
+- t is in µs since the first sample, LD frame time on the host clock
+  [sure] (`controller-tracking.md` §B.3.5).
+- The slope is sent **raw** in cmd 3, or cmd 5 with an offset. BROAD: the
+  fit holds µs, so the slope is dimensionless. BG/STABLE: steps/µs. A
+  positive slope lengthens the cycle.
 - Sent whenever |slope| > DBL_EPSILON. A send resets the retry counter.
 
 #### A.7.13 Forced transitions [sure]

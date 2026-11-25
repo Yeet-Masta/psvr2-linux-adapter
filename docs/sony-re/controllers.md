@@ -1695,10 +1695,13 @@ by BG and STABLE (`0x180362ef8`).
   is also pending; reset the retry counter.
 - libpad applies `cycle := clamp((1 + slope)·cycle)`.
 
-Units [sure]: the slope is sent unscaled, in steps/µs (BG/STABLE) or
-slots/µs (BROAD). The cmd 4 offset is `(10 − x)·step` µs. Because libpad
-applies `(1 + slope)·cycle`, Sony under-corrects by a factor of `step` per
-round; the loop converges because it repeats [likely] (`controller-tracking.md` §B.3.5).
+Units [sure]: the slope is sent unscaled. The BROAD fit holds µs (the
+running offset `(int)(sum·step_ns·5/1000)/2`), so its slope is a
+dimensionless rate. The BG/STABLE fit holds steps (`x + acc`), so its slope
+is steps/µs. The cmd 4 offset is `(10 − x)·step` µs. Because libpad applies
+`(1 + slope)·cycle`, only BG/STABLE under-corrects, by a factor of `step`
+per round (`controller-tracking.md` §B.3.5). t is the LD frame time in host
+µs.
 
 ### C.6 Constants
 

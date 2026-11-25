@@ -1735,17 +1735,35 @@ if (num != 0 && den != 0) x[cam] = num / den;   // 0x180362af0[ctrl·0x7a + cam]
 
 | Fit | Object | Value pushed | Value unit | Time unit |
 |---|---|---|---|---|
-| BROAD | `0x180362ee8` | `*puVar12` in `FUN_180198240`: the accumulated slot offset (`0x180362f10` += slot − 4) [likely] | BROAD slots | µs since first sample (host clock) [likely] |
+| BROAD | `0x180362ee8` | `(int)(sum·step_ns·5/1000)/2`, where `sum` = `0x180362f10` (+= slot − 4 on each accept) [sure] | µs (the same formula as the BROAD offset, on the running sum) | µs since first sample, host clock [sure] |
 | BG / STABLE | `0x180362ef8` | `x + acc` (`0x180362f38`) | BG steps | same |
+
+The time is the LD frame time: IR frame struct `+0x00`, written by
+`FUN_18004cac0` from the time `FUN_18018aaf0` picks. That is the frame's
+headset µs mapped to host µs (`FUN_180124a80`), or host now − 6000 µs when
+the map is not ready. `FUN_180190300` passes the struct on, and
+`FUN_1801971f0` hands `*frame` to the BROAD/BG/STABLE handlers [sure].
 
 - **No scaling** before the command: `FUN_18019bc00` reads the fit's slope
   (fit +0x10) and sends it raw as f32 in cmd 3, or cmd 5 with an s32
   offset.
-- The slope's unit is therefore steps/µs (or slots/µs).
+- The slope's unit is therefore **µs/µs (dimensionless) for BROAD** and
+  **steps/µs for BG/STABLE** [sure].
 - libpad applies `cycle := (1 + slope)·cycle` (`controllers.md` §C.5.5). So
-  Sony **under-corrects by a factor of `step`** (105 or 50) per round,
-  compared with a dimensionless rate. The loop converges only because it
-  repeats [likely]. Copy this behaviour as-is to match Sony.
+  the BROAD rate is used at full size. Only BG/STABLE **under-corrects by a
+  factor of `step`** (105 or 50) per round. The loop still converges because
+  the cmd 4 / cmd 5 offsets do most of the work [likely].
+- Sign. The BROAD value adds up the offsets that were sent (`sum` grows by
+  the sent slot error). The BG value `x + acc` adds up their negative
+  (`acc −= 10 − x` while the offset sent is `+(10 − x)·step`). Sony sends
+  both slopes with the same sign, so its BG/STABLE rate points against the
+  BROAD convention [likely]. At 1/step of the size this has little effect.
+- The dev driver (`led_syncer.cpp`) sends `slope·2.5·step` in BROAD (equal
+  to Sony, which pushes µs) and `−slope·step` in BG (own method: full size,
+  BROAD sign convention). Both locked on hardware (2026-11-18).
+- `FUN_18019bc00` reads the BROAD fit while the phase (`0x180362ea0`) is 2
+  (BROAD), else the BG/STABLE fit. Phases: 1 PRESCAN, 2 BROAD, 3 BG,
+  4 STABLE (`FUN_1801971f0` switch) [sure].
 - BROAD offset for the record (`FUN_180198240`):
   `(int)((slot−4)·step_ns·5/1000)/2` = (slot−4)·5·step/2 µs, matching `controllers.md` §C.5.2.
 
@@ -1765,7 +1783,27 @@ if (num != 0 && den != 0) x[cam] = num / den;   // 0x180362af0[ctrl·0x7a + cam]
 - So the count is **per decode attempt that reached the test**, not per
   frame. A frame whose decode failed earlier (status 3 etc.) does not
   shift.
-- Whether slot = −1 is shifted in was not checked.
+- **Slot −1 is never shifted in** [sure]. The shift block runs only when
+  at least one camera decoded a slot. The pick then takes the camera whose
+  slot is nearest the last accepted slot (`0x180362aec`), with a limit of
+  |Δ| < 32. Slots are 0…12 and the last slot is −1…12, so the pick always
+  succeeds.
+- The 3-entry history also keeps each entry's frame time
+  (`0x180363120`, stride 3 per controller).
+- On agreement, `0x180362aec` = slot and, if slot ≠ 4, `sum += slot − 4`.
+  Then the BROAD fit gets one push per accept, also for slot 4 (an equal
+  value merges into the open run).
+- **Back-fill.** After a disagreement, flag `0x18036311c` is set. On the
+  next agreement, every history entry equal to the slot is pushed with its
+  own time, then the current frame once more (hand < 2). Equal values merge,
+  so the run keeps the earliest of the three times [sure as decompiled].
+- What is sent after the push (`FUN_180194180` returns runs − 1):
+  - fewer than 4 runs, or the fit holds < 10 samples (fit `+0x24`, summed
+    in `FUN_18019caf0`): cmd 4 with the offset, only if slot ≠ 4;
+  - else `FUN_18019bc00` with the offset: cmd 5 (slope + offset), or cmd 3
+    when slot = 4. Then `sum` = 0 and the BROAD fit is reset
+    (`FUN_1801997c0`).
+  - Every send also stamps the host time `0x180362f40[hand]`.
 - GRID SKIP is `slot − 4 > 4` (only the high side can exceed it; slot ≤ 12).
   After 6 of them, BROAD resets: the fit is reset (`FUN_1801997c0`),
   `0x180362f10` = 0.
@@ -1810,13 +1848,22 @@ So:
 - The dev driver's "libpad sync mode 1/2 stands in for preset" should
   expect mode 2, timing 500/50, in steady state.
 
-#### B.3.8 Still unknown (item 3)
+#### B.3.8 BG fit step (`FUN_180196ff0`) [sure]
 
-- The exact time unit of the fit's t: host µs is [likely]. Read the caller
-  of `FUN_180196ff0` for `param_2`.
-- Whether `FUN_180198240` shifts slot = −1 into the 3-history (lines before
-  the shift).
-- What `*puVar12` points to in `FUN_180198240` for the BROAD fit.
+The three open items of the old list are closed in §B.3.5 and §B.3.6 (time
+= LD frame host µs; slot −1 is never shifted; the BROAD value is the
+running sum in µs). The BG/STABLE fit step itself:
+
+1. Push `(t, x + acc)` into the BG fit (`FUN_180193f70`). That push keeps
+   at most 40 runs; the oldest is dropped (`FUN_180199450`).
+2. Count samples in `0x180362f28[hand]` up to a limit from `0x180260490`:
+   `{10, 40}`: 10 for the first fit, 40 after it. Below the limit: return.
+3. Slope (fit `+0x10`) zero: bump the fit counter `0x180362f1b[5·hand]`
+   (max 2), set `0x180363180[hand]` = 1, return.
+4. Else: `d = 10 − last_x`, `acc −= d`, and `FUN_18019bc00` sends cmd 5
+   with the slope and offset `(int)(d·step_ns/1000)` µs (cmd 3 if 0).
+   Return 14; with more than one fit done, the sample counter restarts.
+   `0x180363180[hand]` is cleared.
 
 ---
 ### B.4 Sony's driver-from-head transform
